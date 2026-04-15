@@ -75,8 +75,15 @@ async def _read_stream_into_buf(stream: asyncio.StreamReader | None, buf: list[s
             carry = parts.pop()  # last piece may be incomplete
             for line in parts:
                 buf.append(line)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Surface stream reader crashes instead of silently leaving the buffer
+        # frozen. Symptom of the old bug: background process appears healthy
+        # (running: True) but stdout suddenly stops — hard to diagnose. Now
+        # the error lands in the buffer itself.
+        if carry:
+            buf.append(carry)
+            carry = ""
+        buf.append(f"[stream reader error: {type(exc).__name__}: {exc}]")
     # Flush any residual partial line
     if carry:
         buf.append(carry)
