@@ -17,6 +17,18 @@ import os
 from pathlib import Path
 from typing import Any
 
+# ── Windows event-loop policy ────────────────────────────────────────────────
+# uvicorn on Windows defaults to the Selector event loop, which does NOT
+# support subprocess creation. asyncio.create_subprocess_shell then raises
+# `NotImplementedError` on EVERY shell_exec call from a WebSocket handler.
+# Force the Proactor policy so shell commands actually work in the server.
+# (No-op on non-Windows platforms.)
+if sys.platform == "win32":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception:
+        pass
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
@@ -797,4 +809,8 @@ if __name__ == "__main__":
         port=config.API_PORT,
         reload=True,
         reload_dirs=["chika", "api"],
+        # Force asyncio loop so our Proactor policy (set above) sticks.
+        # Without this, uvicorn may select a different loop that can't
+        # spawn subprocesses on Windows.
+        loop="asyncio",
     )
