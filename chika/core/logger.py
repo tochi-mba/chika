@@ -27,13 +27,18 @@ _MAX_BYTES    = 4 * 1024 * 1024   # 4 MB per file
 _BACKUP_COUNT = 3                  # chika.log, chika.log.1, chika.log.2, chika.log.3
 _TRUNC        = 600                # truncate long string values after this many chars
 
+# Fields we never truncate — diagnostic fields are useless when chopped.
+_NEVER_TRUNCATE = frozenset({"traceback", "stacktrace", "error_trace"})
 
-def _truncate(v: Any) -> Any:
+
+def _truncate(v: Any, key: str | None = None) -> Any:
     """Shorten long strings so the log stays readable."""
+    if key in _NEVER_TRUNCATE:
+        return v
     if isinstance(v, str) and len(v) > _TRUNC:
         return v[:_TRUNC] + f"…(+{len(v) - _TRUNC} chars)"
     if isinstance(v, dict):
-        return {k: _truncate(val) for k, val in v.items()}
+        return {k: _truncate(val, key=k) for k, val in v.items()}
     if isinstance(v, list):
         truncated = [_truncate(i) for i in v[:10]]
         if len(v) > 10:

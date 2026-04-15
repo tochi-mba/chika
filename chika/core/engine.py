@@ -505,12 +505,56 @@ class ChikaEngine:
     async def _stream_anthropic(self, messages: list[dict]) -> AsyncGenerator[Event, None]:
         # Convert history format: system message is separate in Anthropic API
         system_content = ""
+        # Convert OpenAI-format history → Anthropic content-block format.
+        # Chika stores history in OpenAI shape ({role: "tool", tool_call_id, ...}
+        # and assistant messages with "tool_calls"). Anthropic rejects role=tool
+        # outright; it wants tool_use / tool_result as content blocks on
+        # assistant / user messages respectively.
         filtered = []
         for m in messages:
-            if m["role"] == "system":
+            role = m.get("role")
+            if role == "system":
                 system_content = m["content"]
+            elif role == "tool":
+                # OpenAI tool-result → Anthropic user message with tool_result block
+                filtered.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": m.get("tool_call_id") or "",
+                        "content": m.get("content") or "",
+                    }],
+                })
+            elif role == "assistant" and m.get("tool_calls"):
+                # OpenAI assistant-with-tool-calls → Anthropic assistant message
+                # with text + tool_use content blocks.
+                blocks: list[dict] = []
+                text = m.get("content")
+                if text:
+                    blocks.append({"type": "text", "text": text})
+                for tc in m["tool_calls"]:
+                    fn = tc.get("function", {})
+                    try:
+                        tool_input = json.loads(fn.get("arguments") or "{}")
+                    except json.JSONDecodeError:
+                        tool_input = {}
+                    blocks.append({
+                        "type": "tool_use",
+                        "id": tc.get("id") or "",
+                        "name": fn.get("name") or "",
+                        "input": tool_input,
+                    })
+                if blocks:
+                    filtered.append({"role": "assistant", "content": blocks})
             else:
+                # Plain user/assistant text messages pass through as-is
                 filtered.append(m)
+
+        # Anthropic strictly requires the first message to be role=user. If the
+        # conversion dropped something and left us with an assistant-leading
+        # sequence (edge case during restoration), prepend a synthetic user.
+        if filtered and filtered[0].get("role") != "user":
+            filtered.insert(0, {"role": "user", "content": "(continue)"})
 
         tool_schema = {
             "name": "workflow_orchestrator",
@@ -676,5 +720,10 @@ class ChikaEngine:
                 max_tokens=4096,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return resp.content[0].text if resp.content else ""
+            # Response may contain thinking / tool_use blocks before text.
+            # Find the first text block and return it, skipping the rest.
+            for block in (resp.content or []):
+                if getattr(block, "type", None) == "text":
+                    return getattr(block, "text", "") or ""
+            return ""
         return ""
