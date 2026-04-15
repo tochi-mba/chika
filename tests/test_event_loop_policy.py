@@ -68,3 +68,58 @@ def test_selector_policy_reproduces_the_bug_without_the_fix():
         )
     finally:
         asyncio.set_event_loop_policy(original)
+
+
+def test_shell_exec_works_on_selector_loop():
+    """
+    The REAL fix: shell_exec must work on a Selector loop too, because
+    the policy set in api/server.py can be silently overridden by uvicorn,
+    its reload worker, or other middleware. This test simulates the exact
+    runtime the user hit when the server crashed with NotImplementedError.
+    """
+    if sys.platform != "win32":
+        return
+
+    original = asyncio.get_event_loop_policy()
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+        from chika.tools.shell_tool import shell_exec
+
+        async def _drive():
+            return await shell_exec("echo selector-loop-works")
+
+        result = asyncio.run(_drive())
+        assert result.get("error") is None, f"shell_exec errored: {result.get('error')}"
+        assert result.get("exit_code") == 0
+        assert "selector-loop-works" in (result.get("stdout") or "")
+    finally:
+        asyncio.set_event_loop_policy(original)
+
+
+def test_shell_exec_background_works_on_selector_loop():
+    """Background processes (wait_for_completion=False) must also work on Selector."""
+    if sys.platform != "win32":
+        return
+
+    original = asyncio.get_event_loop_policy()
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+        from chika.tools.shell_tool import shell_exec, shell_get_output
+
+        async def _drive():
+            r = await shell_exec("echo line1 && echo line2", wait_for_completion=False)
+            assert r.get("error") is None, f"bg start errored: {r.get('error')}"
+            assert r.get("status") == "running"
+            pid = r.get("pid")
+            assert pid and pid > 0
+            await asyncio.sleep(0.5)
+            out = await shell_get_output(pid)
+            return out
+
+        out = asyncio.run(_drive())
+        assert "line1" in (out.get("stdout") or "")
+        assert "line2" in (out.get("stdout") or "")
+    finally:
+        asyncio.set_event_loop_policy(original)
