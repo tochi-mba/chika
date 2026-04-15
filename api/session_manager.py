@@ -42,6 +42,7 @@ from chika.skills.git_skill import GIT_SKILL
 from chika.skills.web_skill import WEB_SKILL
 from chika.skills.spotify_skill import SPOTIFY_SKILL
 from chika.skills.verify_skill import build_verify_skill
+from chika.skills.plan_skill import build_plan_skill
 import config
 
 
@@ -145,6 +146,8 @@ class SessionManager:
         # verify_skill is session-scoped because fact_check needs a live reference
         # to this session's variable store (the $facts ledger lives there)
         skill_registry.register(build_verify_skill(variable_store))
+        # plan_skill is session-scoped too — stores the live plan in $plan
+        skill_registry.register(build_plan_skill(variable_store))
 
         engine = ChikaEngine(
             tool_registry=tool_registry,

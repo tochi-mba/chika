@@ -15,13 +15,37 @@ export const useChatStore = defineStore('chat', () => {
   function startAssistantMessage() {
     streamingText.value = ''
     isStreaming.value = true
-    messages.value.push({ id: Date.now() + 1, role: 'assistant', text: '', streaming: true })
+    messages.value.push({
+      id: Date.now() + 1,
+      role: 'assistant',
+      text: '',
+      thinking: '',          // extended-thinking reasoning (collapsible)
+      warnings: [],          // validation_warning events attached to this reply
+      streaming: true,
+    })
   }
 
   function appendToken(text) {
     streamingText.value += text
     const last = messages.value[messages.value.length - 1]
     if (last && last.role === 'assistant') last.text += text
+  }
+
+  // Append a chunk of extended-thinking content to the current assistant bubble.
+  // Shown in a collapsible reasoning panel.
+  function appendThinking(text) {
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant') {
+      last.thinking = (last.thinking || '') + text
+    }
+  }
+
+  // Attach a validation_warning event (e.g. ungrounded URLs) to the current reply.
+  function attachWarning(warning) {
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant') {
+      last.warnings = [...(last.warnings || []), warning]
+    }
   }
 
   function finaliseAssistantMessage() {
@@ -79,7 +103,7 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     messages, title, sessionId, isStreaming, streamingText,
-    addUserMessage, startAssistantMessage, appendToken,
+    addUserMessage, startAssistantMessage, appendToken, appendThinking, attachWarning,
     finaliseAssistantMessage, addCompactionMessage, restoreSession, setTitle, clear,
   }
 })

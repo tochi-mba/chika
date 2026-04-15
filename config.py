@@ -43,6 +43,13 @@ GROUNDING_VALIDATE_RESPONSE = os.getenv("CHIKA_VALIDATE_RESPONSE", "true").lower
 # Minimum response length (chars) to bother running the validator
 GROUNDING_MIN_LENGTH        = int(os.getenv("CHIKA_GROUNDING_MIN_LENGTH", "160"))
 
+# Extended thinking (Anthropic only).
+# When enabled, Claude runs a hidden reasoning pass before its response and
+# the tokens are streamed to the frontend as {type: "thinking", text: ...}
+# events so the user can see the agent's reasoning.
+THINKING_ENABLED        = os.getenv("CHIKA_THINKING", "true").lower() == "true"
+THINKING_BUDGET_TOKENS  = int(os.getenv("CHIKA_THINKING_BUDGET", "4000"))
+
 # API server
 API_HOST    = os.getenv("CHIKA_HOST", "0.0.0.0")
 API_PORT    = int(os.getenv("CHIKA_PORT", "8000"))

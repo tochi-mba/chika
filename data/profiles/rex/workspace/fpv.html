@@ -1,0 +1,17 @@
+<!DOCTYPE html><html><body bgcolor=#000><canvas id=c width=400 height=300></canvas><script>
+var c=document.getElementById('c'),x=c.getContext('2d'),px=0,py=0,sc=0,en=[];
+for(var i=0;i<8;i++)en.push({x:Math.random()*380,y:Math.random()*280,a:1});
+document.onmousemove=function(e){px=e.offsetX;py=e.offsetY};
+document.onclick=function(){en.forEach(function(e){if(e.a&&Math.abs(e.x-px)<20&&Math.abs(e.y-py)<20){e.a=0;sc++}});};
+setInterval(function(){
+x.fillStyle='#001';x.fillRect(0,0,400,300);
+x.strokeStyle='#0f0';x.strokeRect(190,140,20,20);
+en.forEach(function(e,i){if(!e.a)return;
+e.x+=Math.sin(i+Date.now()/800)*2;
+e.y+=Math.cos(i+Date.now()/600)*1.5;
+x.fillStyle='#f44';x.fillRect(e.x,e.y,18,18);
+x.fillStyle='#fff';x.fillText('👾',e.x,e.y+14);
+});
+x.fillStyle='#0f0';x.fillText('SCORE:'+sc,10,20);
+},33);
+</script></body></html>

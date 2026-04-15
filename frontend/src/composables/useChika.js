@@ -88,6 +88,24 @@ export function useChika(apiKey = '') {
         chat.appendToken(event.text)
         break
 
+      case 'thinking':
+        // Extended-thinking delta: stream into the collapsible reasoning
+        // panel on the current assistant bubble.
+        chat.appendThinking(event.text || '')
+        break
+
+      case 'thinking_end':
+        // The content_block boundary — no-op on the UI side, thinking panel
+        // is already rendered from accumulated text. Swallow silently so it
+        // doesn't fall through to the default handler.
+        break
+
+      case 'validation_warning':
+        // Post-response grounding check flagged something (ungrounded URLs,
+        // citations without retrieval). Attach to the current bubble.
+        chat.attachWarning(event)
+        break
+
       case 'done':
         chat.finaliseAssistantMessage()
         break

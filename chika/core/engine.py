@@ -107,9 +107,37 @@ WORKFLOW_ORCHESTRATOR_SCHEMA = {
     "function": {
         "name": "workflow_orchestrator",
         "description": (
-            "Execute a structured workflow. Define the full plan as a workflow JSON with "
-            "sequential/parallel/conditional/loop/map/fan_out/retry/pipeline/sub_workflow steps. "
-            "Each step calls a registered tool. Results are stored as $variables for subsequent steps."
+            "Execute a structured workflow against the registered toolset. You use "
+            "this for ALL actions — single tool calls, multi-step sequences, branching, "
+            "retries, parallel fan-outs.\n\n"
+            "Shape: {type, steps/branches/step, id?, name?, ...}. Top-level `type` "
+            "selects the structural behaviour; each step has `tool`, `args`, and "
+            "optionally `store_result_as: \"$name\"` to save its result for later steps.\n\n"
+            "Single tool call — use a sequential with one step:\n"
+            "  {\"type\": \"sequential\", \"steps\": [{\"tool\": \"file_read\", "
+            "\"args\": {\"path\": \"foo.py\", \"start_line\": 1, \"end_line\": 80}, "
+            "\"store_result_as\": \"$foo\"}]}\n\n"
+            "Structural types:\n"
+            "  - sequential: steps run in order, each result stored as $var for later steps\n"
+            "  - parallel:   all steps at once; optional `then` merges\n"
+            "  - conditional: branch on a field — `condition` + `if_true` / `if_false`\n"
+            "  - loop:       repeat `steps` while `condition` holds (or max_iterations)\n"
+            "  - map:        apply `step` to every item in a list (concurrency-configurable)\n"
+            "  - fan_out:    named parallel branches, merged by `fan_in`\n"
+            "  - retry:      retry `step` with `backoff_seconds`; `on_all_failed: store_error`\n"
+            "  - pipeline:   step N's output auto-feeds step N+1 via $pipeline_input\n"
+            "  - sub_workflow: call a registered workflow by `workflow_id`\n\n"
+            "Rules you must follow:\n"
+            "  - $var refs in args are resolved from previous steps: use \"$foo.url\" to "
+            "read a field, \"$list[0]\" for list index.\n"
+            "  - Meta-tools llm_transform / llm_summarise REFUSE empty/unresolved context "
+            "(the engine returns {error: 'refused_empty_context'}); gather real data first.\n"
+            "  - ALWAYS pass a `schema` to llm_transform so the inner LLM returns a predictable shape.\n"
+            "  - file_read requires start_line/end_line (no full-file reads); "
+            "file_replace/file_edit_lines require a prior file_read of the exact range.\n"
+            "  - Every retrieval tool (web_search, file_read, shell_exec, web_fetch, verify_url) "
+            "auto-appends to the $facts ledger. Claims you make in your reply should be "
+            "backed by $facts entries."
         ),
         "parameters": {
             "type": "object",
@@ -573,30 +601,59 @@ class ChikaEngine:
             "cache_control": {"type": "ephemeral"},
         }] if system_content else []
 
-        async with self._client.messages.stream(
+        # Extended thinking: enable hidden reasoning before the response. When
+        # the SDK doesn't support the parameter (older version), fall through
+        # silently so we never block the main path.
+        stream_kwargs = dict(
             model=self._model,
-            max_tokens=8192,
+            max_tokens=16384 if getattr(config, "THINKING_ENABLED", False) else 8192,
             system=system_block,
             messages=filtered,
             tools=[tool_schema],
-        ) as stream:
+        )
+        if getattr(config, "THINKING_ENABLED", False):
+            stream_kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": getattr(config, "THINKING_BUDGET_TOKENS", 4000),
+            }
+            # Extended thinking requires temperature=1 per Anthropic docs
+            stream_kwargs["temperature"] = 1.0
+
+        try:
+            stream_cm = self._client.messages.stream(**stream_kwargs)
+        except TypeError:
+            # Older SDK without `thinking` kwarg — retry without it
+            stream_kwargs.pop("thinking", None)
+            stream_kwargs.pop("temperature", None)
+            stream_cm = self._client.messages.stream(**stream_kwargs)
+
+        async with stream_cm as stream:
             tool_use_block: dict | None = None
             tool_input_str = ""
+            in_thinking_block = False
 
             async for event in stream:
                 etype = event.type
 
                 if etype == "content_block_start":
-                    if hasattr(event, "content_block") and event.content_block.type == "tool_use":
-                        tool_use_block = {
-                            "id": event.content_block.id,
-                            "name": event.content_block.name,
-                        }
-                        tool_input_str = ""
+                    if hasattr(event, "content_block"):
+                        cb_type = event.content_block.type
+                        if cb_type == "tool_use":
+                            tool_use_block = {
+                                "id": event.content_block.id,
+                                "name": event.content_block.name,
+                            }
+                            tool_input_str = ""
+                        elif cb_type == "thinking":
+                            in_thinking_block = True
 
                 elif etype == "content_block_delta":
                     delta = event.delta
-                    if hasattr(delta, "text"):
+                    # Thinking deltas: stream as a separate event type so the
+                    # frontend can show them in a collapsible reasoning panel.
+                    if hasattr(delta, "thinking"):
+                        yield {"type": "thinking", "text": delta.thinking}
+                    elif hasattr(delta, "text"):
                         yield {"type": "token", "text": delta.text}
                     elif hasattr(delta, "partial_json"):
                         tool_input_str += delta.partial_json
@@ -614,6 +671,9 @@ class ChikaEngine:
                         }}
                         tool_use_block = None
                         tool_input_str = ""
+                    elif in_thinking_block:
+                        yield {"type": "thinking_end"}
+                        in_thinking_block = False
 
     async def _validate_grounding(self, response_text: str) -> Event | None:
         """

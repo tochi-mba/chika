@@ -1,19 +1,55 @@
 """
-verify_skill — grounding and verification tools.
+verify_skill — grounding, verification, and retrieval tools.
 
-Exposes two tools:
-  - verify_url(url)  — HTTP HEAD check so the agent can confirm a URL exists
-                      before writing it into a file or opening it.
-  - fact_check(claim) — look up the claim in the session's $facts ledger.
-                        Returns whether the claim is supported, and by which
-                        recorded source. This is the runtime check that the
-                        system prompt's "never fabricate" rule can actually
-                        rely on.
+Exposes:
+  - verify_url(url)    — HTTP HEAD check so the agent can confirm a URL exists
+                          before writing it into a file or opening it.
+  - web_fetch(url)     — GET a URL and return its body as text (handles
+                          redirects, caps size, tags source for grounding).
+  - fact_check(claim)  — look up the claim in the session's $facts ledger.
 """
 from __future__ import annotations
 
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
+
+
+async def web_fetch(url: str, max_chars: int = 20000, timeout: float = 15.0) -> dict:
+    """
+    Fetch a URL and return its body as text. Much better than curl + file_read
+    for most cases: follows redirects, handles encoding, caps size.
+    Tags result with `_source: web_fetch` so the $facts ledger picks it up.
+    """
+    try:
+        import httpx
+        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+            resp = await client.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; chika/2.0)",
+                "Accept": "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.1",
+            })
+            ct = resp.headers.get("content-type", "")
+            final_url = str(resp.url)
+            truncated = False
+            # Only decode text-like content; binaries return a hint instead.
+            if ct.startswith(("text/", "application/json", "application/xml", "application/xhtml")):
+                body = resp.text or ""
+                if len(body) > max_chars:
+                    body = body[:max_chars]
+                    truncated = True
+            else:
+                body = f"(binary content: {ct}, {len(resp.content)} bytes — use curl via shell_exec if you need raw bytes)"
+            return {
+                "_source": "web_fetch",
+                "url": url,
+                "final_url": final_url,
+                "status": resp.status_code,
+                "content_type": ct,
+                "content": body,
+                "truncated": truncated,
+                "bytes": len(resp.content),
+            }
+    except Exception as exc:
+        return {"_source": "web_fetch", "url": url, "error": str(exc)}
 
 
 async def verify_url(url: str, timeout: float = 8.0) -> dict:
@@ -119,8 +155,28 @@ def build_verify_skill(variable_store) -> Skill:
     fact_check = _make_fact_check(variable_store)
     return Skill(
         name="verify",
-        description="URL reachability checks and claim grounding against the $facts ledger",
+        description="URL reachability, page fetching, and claim grounding against the $facts ledger",
         tools=[
+            ToolDefinition(
+                name="web_fetch",
+                description=(
+                    "Fetch a URL and return its body as text. Handles redirects, "
+                    "caps size at max_chars (default 20000). Prefer this over "
+                    "`shell_exec` curl + `file_read` for reading web pages — "
+                    "it's one call, handles encoding, and tags the source so "
+                    "claims citing it can be grounded."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "url":       {"type": "string", "description": "URL to fetch"},
+                        "max_chars": {"type": "integer", "description": "Truncate body at this many chars (default 20000)"},
+                        "timeout":   {"type": "number",  "description": "Seconds (default 15)"},
+                    },
+                    "required": ["url"],
+                },
+                handler=web_fetch,
+            ),
             ToolDefinition(
                 name="verify_url",
                 description=(

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FPV Shooter v2</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="hud">
+    <div id="crosshair"></div>
+    <div id="health">Health: 100</div>
+    <div id="score">Score: 0</div>
+    <div id="ammo">Ammo: ∞</div>
+  </div>
+  <audio id="shootSound" src="https://cdn.jsdelivr.net/gh/chikascripts/assets/shoot.mp3" preload="auto"></audio>
+  <audio id="hitSound" src="https://cdn.jsdelivr.net/gh/chikascripts/assets/hit.mp3" preload="auto"></audio>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.min.js"></script>
+  <script type="module" src="game.js"></script>
+</body>
+</html>

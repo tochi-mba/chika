@@ -1,0 +1,21 @@
+{
+  "id": "think_test",
+  "profile": "default",
+  "title": "",
+  "created_at": 1776273232.0754466,
+  "updated_at": 1776273232.075447,
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is 17 * 23? Reason briefly, then give the answer."
+    },
+    {
+      "role": "user",
+      "content": "answer"
+    },
+    {
+      "role": "assistant",
+      "content": "**Reasoning:**\n17 × 23 = 17 × 20 + 17 × 3 = 340 + 51 = **391**"
+    }
+  ]
+}

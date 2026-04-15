@@ -29,7 +29,7 @@ _STRUCTURAL_TYPES = frozenset({
 # Their results are auto-appended to the $facts ledger so every later turn
 # has a single place to check whether a claim is grounded.
 _FACT_PRODUCING_TOOLS = frozenset({
-    "web_search", "file_read", "shell_exec", "verify_url",
+    "web_search", "web_fetch", "file_read", "shell_exec", "verify_url",
     "curl", "memory_recall",
 })
 
@@ -572,6 +572,15 @@ class WorkflowEngine:
                 "status": result.get("status"),
                 "content_type": result.get("content_type"),
                 "reachable": result.get("reachable"),
+            })
+        elif tool_name == "web_fetch" and isinstance(result, dict):
+            entries.append({
+                "source": f"web_fetch:{step_id}",
+                "url": result.get("final_url") or result.get("url"),
+                "status": result.get("status"),
+                "content_type": result.get("content_type"),
+                "snippet": (str(result.get("content", ""))[:400]),
+                "truncated": result.get("truncated"),
             })
         else:
             # Generic fallback — stringified preview

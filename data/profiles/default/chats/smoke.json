@@ -1,0 +1,40 @@
+{
+  "id": "smoke",
+  "profile": "default",
+  "title": "",
+  "created_at": 1776273766.5466897,
+  "updated_at": 1776273766.5466912,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Use plan_set to make a 3-task plan for 'build a login form', then briefly reply done. Keep tasks short."
+    },
+    {
+      "role": "user",
+      "content": "go"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "toolu_0123peuer8ZFTZBSpGdjC7bz",
+          "type": "function",
+          "function": {
+            "name": "workflow_orchestrator",
+            "arguments": "{\"type\": \"sequential\", \"steps\": [{\"tool\": \"plan_set\", \"args\": {\"tasks\": [\"Scaffold HTML structure for login form\", \"Add CSS styling and layout\", \"Wire up JS validation and submit handling\"]}}]}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_0123peuer8ZFTZBSpGdjC7bz",
+      "content": "## Workflow variables\n### $profile.name  (source: engine/seed)\n\"default\"\n\n### $profile.workspace  (source: engine/seed)\n\"C:\\\\Users\\\\TochukwuMba\\\\Documents\\\\Code\\\\chika_v2\\\\data\\\\profiles\\\\default\\\\workspace\"\n\n### $chika.repo  (source: engine/seed)\n\"C:\\\\Users\\\\TochukwuMba\\\\Documents\\\\Code\\\\chika_v2\"\n\n### $plan  (source: plan:set)\n{\n  \"tasks\": [\n    {\n      \"id\": \"t1\",\n      \"text\": \"Scaffold HTML structure for login form\",\n      \"status\": \"in_progress\"\n    },\n    {\n      \"id\": \"t2\",\n      \"text\": \"Add CSS styling and layout\",\n      \"status\": \"pending\"\n    },\n    {\n      \"id\": \"t3\",\n      \"text\": \"Wire up JS validation and submit handling\",\n      \"status\": \"pending\"\n    }\n  ],\n  \"created_at\": 1776273764.713273,\n  \"updated_at\": 1776273764.7132735\n}\n"
+    },
+    {
+      "role": "assistant",
+      "content": "Done. Plan set:\n\n1. **t1** — Scaffold HTML structure for login form *(in progress)*\n2. **t2** — Add CSS styling and layout\n3. **t3** — Wire up JS validation and submit handling"
+    }
+  ]
+}
