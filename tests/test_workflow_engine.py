@@ -721,7 +721,12 @@ def test_meta_tool_llm_transform_parses_json():
         ],
     }
     run(collect(engine.execute(wf)))
-    assert engine._vars.get_value("out") == {"transformed": True}
+    # llm_transform normalizes single-key dicts by promoting the value to `.result`
+    # so downstream steps can always access `$var.result` uniformly.
+    # (See workflow_engine._exec_meta_tool.)
+    out = engine._vars.get_value("out")
+    assert out["transformed"] is True
+    assert out["result"] is True
 
 
 # ── Nested workflows ──────────────────────────────────────────────────────────

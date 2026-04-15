@@ -25,8 +25,9 @@ from chika.core.variable_store import VariableStore
 _SESSIONS_DIR = Path(__file__).parent.parent / "data" / "sessions"
 _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Profiles directory
-_PROFILES_DIR = Path(__file__).parent.parent / "profiles"
+# Profiles directory — lives under data/ alongside sessions/ and devices/ so
+# all persistent state is under one folder (easier to gitignore, back up, etc.)
+_PROFILES_DIR = Path(__file__).parent.parent / "data" / "profiles"
 _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 from chika.tools.apps_tool import APP_OPEN_TOOL
 from chika.tools.shell_tool import ALL_SHELL_TOOLS
@@ -39,6 +40,7 @@ from chika.core.profile_manager import ProfileManager
 from chika.skills.git_skill import GIT_SKILL
 from chika.skills.web_skill import WEB_SKILL
 from chika.skills.spotify_skill import SPOTIFY_SKILL
+from chika.skills.verify_skill import build_verify_skill
 import config
 
 
@@ -137,6 +139,9 @@ class SessionManager:
         skill_registry.register(GIT_SKILL)
         skill_registry.register(WEB_SKILL)
         skill_registry.register(SPOTIFY_SKILL)
+        # verify_skill is session-scoped because fact_check needs a live reference
+        # to this session's variable store (the $facts ledger lives there)
+        skill_registry.register(build_verify_skill(variable_store))
 
         engine = ChikaEngine(
             tool_registry=tool_registry,

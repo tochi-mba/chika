@@ -25,6 +25,47 @@ _STRUCTURAL_TYPES = frozenset({
     "map", "fan_out", "retry", "pipeline", "sub_workflow",
 })
 
+# Tools that produce factual material the LLM may cite.
+# Their results are auto-appended to the $facts ledger so every later turn
+# has a single place to check whether a claim is grounded.
+_FACT_PRODUCING_TOOLS = frozenset({
+    "web_search", "file_read", "shell_exec", "verify_url",
+    "curl", "memory_recall",
+})
+
+
+def _looks_empty(value: Any) -> bool:
+    """
+    Heuristic: does this value look empty/missing/unresolved?
+    Used to refuse llm_transform / llm_summarise on garbage input — feeding an
+    LLM empty context is the #1 hallucination vector.
+    """
+    if value is None:
+        return True
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return True
+        # Unresolved $variable references pass through as literal "$foo"
+        if s.startswith("$") and " " not in s:
+            return True
+        return False
+    if isinstance(value, (list, tuple, set)):
+        return len(value) == 0
+    if isinstance(value, dict):
+        if not value:
+            return True
+        # web_search shape: {"query": "...", "results": [], "count": 0}
+        if value.get("count") == 0 and not value.get("results"):
+            return True
+        if "results" in value and isinstance(value["results"], list) and not value["results"]:
+            return True
+        # error dict
+        if "error" in value and len(value) <= 2:
+            return True
+        return False
+    return False
+
 
 class WorkflowEngine:
     def __init__(
@@ -477,13 +518,96 @@ class WorkflowEngine:
         if store_as:
             from chika.core.variable_store import VarType
             var_type = VarType.JSON if isinstance(result, (dict, list)) else VarType.TEXT
-            v = self._vars.set(store_as, result, var_type)
+            source_tag = f"{tool_name}:{sid}"
+            v = self._vars.set(store_as, result, var_type, source=source_tag)
             yield {"type": "variable_set", "name": f"${store_as}",
-                   "var_type": v.type.value, "size_bytes": v.size_bytes, "value_preview": str(result)[:120]}
+                   "var_type": v.type.value, "size_bytes": v.size_bytes,
+                   "value_preview": str(result)[:120], "source": source_tag}
+
+        # Append to the $facts ledger for any tool that produces citable material.
+        # Skip if the tool returned an error, or if the value looks empty.
+        if tool_name in _FACT_PRODUCING_TOOLS and not error and not _looks_empty(result):
+            self._append_fact(tool_name, sid, resolved_args, result)
+
+    def _append_fact(self, tool_name: str, step_id: str, args: dict, result: Any) -> None:
+        """
+        Append a concise record of a fact-producing tool call to the $facts
+        ledger. Keeps only `snippet`/`url`/`source` — not full result payloads —
+        so the ledger stays cheap to pass back to the LLM.
+        """
+        entries: list[dict] = []
+        if tool_name == "web_search" and isinstance(result, dict):
+            for r in (result.get("results") or [])[:8]:
+                if isinstance(r, dict):
+                    entries.append({
+                        "source": f"web_search:{step_id}",
+                        "query": result.get("query"),
+                        "url": r.get("url"),
+                        "title": r.get("title"),
+                        "snippet": (r.get("snippet") or "")[:400],
+                    })
+        elif tool_name == "file_read" and isinstance(result, dict):
+            entries.append({
+                "source": f"file_read:{step_id}",
+                "path": args.get("path") or result.get("path"),
+                "start_line": result.get("start_line") or args.get("start_line"),
+                "end_line": result.get("end_line") or args.get("end_line"),
+                "snippet": (str(result.get("content", ""))[:400]),
+            })
+        elif tool_name == "shell_exec" and isinstance(result, dict):
+            entries.append({
+                "source": f"shell_exec:{step_id}",
+                "command": args.get("command"),
+                "exit_code": result.get("exit_code"),
+                "snippet": (str(result.get("stdout", ""))[:400]),
+            })
+        elif tool_name == "verify_url" and isinstance(result, dict):
+            entries.append({
+                "source": f"verify_url:{step_id}",
+                "url": result.get("url"),
+                "status": result.get("status"),
+                "content_type": result.get("content_type"),
+                "reachable": result.get("reachable"),
+            })
+        else:
+            # Generic fallback — stringified preview
+            entries.append({
+                "source": f"{tool_name}:{step_id}",
+                "snippet": str(result)[:400],
+            })
+
+        from chika.core.variable_store import VarType
+        existing = self._vars.get("facts")
+        ledger: list[dict] = existing.value if (existing and isinstance(existing.value, list)) else []
+        # Cap ledger size to avoid runaway growth (keep last 60 facts)
+        ledger = (ledger + entries)[-60:]
+        self._vars.set("facts", ledger, VarType.JSON,
+                       description="Rolling ledger of tool-retrieved facts, each with source",
+                       source="engine:ledger")
 
     async def _exec_meta_tool(self, name: str, args: dict) -> Any:
         if self._llm is None:
             return {"error": "LLM caller not configured"}
+        # Hard guard: refuse to fire the inner LLM on empty/unresolved context.
+        # This is the single biggest hallucination prevention — without it,
+        # llm_transform on {"count": 0, "results": []} will confidently
+        # fabricate a URL from training data.
+        ctx_arg = args.get("context")
+        input_arg = args.get("input")
+        resolved_ctx = ctx_arg if ctx_arg is not None else input_arg
+        # Only refuse when the caller explicitly passed context/input.
+        # Some llm_summarise calls legitimately use prompt-only (e.g. title gen).
+        if (ctx_arg is not None or input_arg is not None) and _looks_empty(resolved_ctx):
+            return {
+                "error": "refused_empty_context",
+                "reason": (
+                    f"{name} refused to run: the provided context/input is empty, "
+                    "missing, or an unresolved $variable. Running the inner LLM "
+                    "on empty context fabricates output. Fix: gather real data "
+                    "(e.g. a web_search that actually returned results) first."
+                ),
+                "received": str(resolved_ctx)[:200] if resolved_ctx is not None else None,
+            }
         if name == "llm_summarise":
             prompt = args.get("prompt", "Summarise the following.")
             context = args.get("context", {})

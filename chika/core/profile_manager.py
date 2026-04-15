@@ -19,7 +19,7 @@ class ProfileManager:
     Manages per-user profiles on disk.
 
     Structure:
-        profiles/
+        data/profiles/
             default/
                 memory.md
                 workspace/
