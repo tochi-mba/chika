@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -rn 'profile.workspace\\\\|$profile' C:/Users/TochukwuMba/documents/code/chika_v2/chika/ '--include=*.py')",
+      "Bash(grep -n \"var.*expand\\\\|expand.*var\\\\|\\\\$.*replace\\\\|interpolat\\\\|resolve.*var\\\\|var.*substit\" C:/Users/TochukwuMba/documents/code/chika_v2/chika/core/engine.py)",
+      "Bash(grep -n \"\\\\$\" C:/Users/TochukwuMba/documents/code/chika_v2/chika/core/engine.py)",
+      "Bash(grep -n 'expand\\\\|interpolat\\\\|resolve\\\\|substitute\\\\|$profile' C:/Users/TochukwuMba/documents/code/chika_v2/chika/core/workflow_engine.py)",
+      "Bash(python -c \"from chika.core.engine import ChikaEngine; print\\('ok'\\)\")",
+      "Bash(python -c \"from chika.core.prompt_builder import PromptBuilder; pb = PromptBuilder\\(\\); p = pb.build\\([],[],''\\)\")"
+    ]
+  }
+}

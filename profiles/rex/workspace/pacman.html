@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pac-Man Clone</title>
+<style>
+  body { background: black; margin: 0; overflow: hidden; }
+  canvas { display: block; margin: auto; background: #000; }
+</style>
+</head>
+<body>
+<canvas id="game" width="448" height="496"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const TILE = 16;
+const ROWS = canvas.height / TILE;
+const COLS = canvas.width / TILE;
+let map = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+];
+let pacman = {x: 1, y: 1, dir: {x: 1, y: 0}};
+let ghosts = [{x: 12, y: 2, color: 'red'}];
+function drawMap() {
+  for(let r=0;r<map.length;r++){
+    for(let c=0;c<map[r].length;c++){
+      if(map[r][c]===1){
+        ctx.fillStyle='blue';ctx.fillRect(c*TILE,r*TILE,TILE,TILE);
+      } else {
+        ctx.fillStyle='black';ctx.fillRect(c*TILE,r*TILE,TILE,TILE);
+        ctx.fillStyle='yellow';ctx.beginPath();ctx.arc(c*TILE+TILE/2,r*TILE+TILE/2,2,0,Math.PI*2);ctx.fill();
+      }
+    }
+  }
+}
+function drawPacman(){
+  ctx.fillStyle='yellow';
+  ctx.beginPath();
+  ctx.arc(pacman.x*TILE+TILE/2,pacman.y*TILE+TILE/2,TILE/2,0,Math.PI*2);
+  ctx.fill();
+}
+function drawGhosts(){
+  ghosts.forEach(g=>{ctx.fillStyle=g.color;ctx.beginPath();ctx.arc(g.x*TILE+TILE/2,g.y*TILE+TILE/2,TILE/2,0,Math.PI*2);ctx.fill();});
+}
+function movePacman(){
+  let nx=pacman.x+pacman.dir.x;let ny=pacman.y+pacman.dir.y;
+  if(map[ny] && map[ny][nx]!==1){pacman.x=nx;pacman.y=ny;}
+}
+window.addEventListener('keydown', e=>{
+  if(e.key==='ArrowUp') pacman.dir={x:0,y:-1};
+  if(e.key==='ArrowDown') pacman.dir={x:0,y:1};
+  if(e.key==='ArrowLeft') pacman.dir={x:-1,y:0};
+  if(e.key==='ArrowRight') pacman.dir={x:1,y:0};
+});
+function gameLoop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawMap();movePacman();drawPacman();drawGhosts();
+  requestAnimationFrame(gameLoop);
+}
+gameLoop();
+</script>
+</body>
+</html>
