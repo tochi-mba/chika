@@ -187,16 +187,25 @@ class SessionManager:
         # Platform + shell hints so the agent picks the right commands.
         # On Windows: prefer `dir /s /b`, `type`, PowerShell; avoid `ls`, `find`,
         # `grep` (not available in plain cmd.exe). On POSIX: prefer ls/find/grep.
-        import platform as _platform
+        import platform as _platform, tempfile as _tempfile
         os_name = "windows" if _platform.system().lower().startswith("win") else _platform.system().lower()
         variable_store.set(
             "os",
             os_name,
             description=(
-                "Host operating system. On 'windows' prefer `dir /s /b`, `type`, "
-                "`findstr`, PowerShell; avoid ls/find/grep which aren't in plain "
-                "cmd.exe. On 'linux'/'darwin' prefer ls/find/grep/cat."
+                "Host operating system. On 'windows' DO NOT use `/tmp/` — it is "
+                "a file literal, not a directory. Use $tmp for temp files. "
+                "git-bash is usually available so ls/find/grep/curl work, but "
+                "cmd.exe-only commands (dir /s /b, type, findstr) are fine too. "
+                "On 'linux'/'darwin' prefer ls/find/grep/cat, use $tmp for temp files."
             ),
+        )
+        # Platform-appropriate temp dir. On Windows this is something like
+        # C:\Users\<user>\AppData\Local\Temp — not /tmp/.
+        variable_store.set(
+            "tmp",
+            str(_tempfile.gettempdir()).replace("\\", "/"),
+            description="Platform-appropriate temp directory for scratch files. Always use this instead of hardcoding /tmp/.",
         )
 
         for t in make_profile_tools(engine, self._profile_manager):

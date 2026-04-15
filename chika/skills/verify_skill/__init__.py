@@ -14,11 +14,14 @@ from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
 
 
-async def web_fetch(url: str, max_chars: int = 20000, timeout: float = 15.0) -> dict:
+async def web_fetch(url: str, max_chars: int = 20000, timeout: float = 15.0, **_ignored) -> dict:
     """
     Fetch a URL and return its body as text. Much better than curl + file_read
     for most cases: follows redirects, handles encoding, caps size.
     Tags result with `_source: web_fetch` so the $facts ledger picks it up.
+
+    **_ignored absorbs common arg mistakes (save_path=, output_file=, etc.)
+    so the LLM reaching for them doesn't error — it just gets the body back.
     """
     try:
         import httpx

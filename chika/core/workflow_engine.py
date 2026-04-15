@@ -108,6 +108,29 @@ class WorkflowEngine:
     # ── Node dispatch ────────────────────────────────────────────────────────
 
     async def _exec_node(self, node: dict) -> AsyncGenerator[Event, None]:
+        # Guard: the LLM sometimes emits a string (a raw command, a shell
+        # line, or just narrative text) where a dict step is expected. In
+        # the old code this crashed with AttributeError from node.get(...).
+        # Now: shell-looking strings are wrapped as a shell_exec step;
+        # other strings are skipped with an error event.
+        if not isinstance(node, dict):
+            _log.warn("malformed_workflow_node", got_type=type(node).__name__,
+                      got_value=str(node)[:200], profile=self._profile())
+            if isinstance(node, str) and node.strip():
+                # Wrap as a shell_exec fallback — this is the most likely intent
+                node = {"tool": "shell_exec", "args": {"command": node}, "id": "recovered_str_step"}
+            else:
+                yield {
+                    "type": "error",
+                    "step_id": "malformed",
+                    "message": (
+                        f"Workflow contained a non-dict node ({type(node).__name__}). "
+                        "Steps must be dict objects with a 'tool' or 'type' field. "
+                        f"Got: {str(node)[:200]!r}"
+                    ),
+                }
+                return
+
         # Recover malformed node where AI wrote "tool": "conditional" instead of "type": "conditional"
         if "tool" in node and "type" not in node and node["tool"] in _STRUCTURAL_TYPES:
             node = {**node, "type": node["tool"]}
