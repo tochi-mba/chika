@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent / ".env")
+# override=True so the project's .env always wins over any stale/empty
+# ANTHROPIC_API_KEY or CHIKA_* vars that may be set in the OS environment.
+load_dotenv(Path(__file__).parent / ".env", override=True)
 
 PROVIDER = os.getenv("CHIKA_PROVIDER", "anthropic").lower()
 
