@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drone Shooter</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="ui-overlay">
+    <div id="hud">
+      <span id="score-display">SCORE: <b id="score">0</b></span>
+      <span id="health-display">HP: <span id="health-bar"></span></span>
+      <span id="ammo-display">AMMO: <b id="ammo">∞</b></span>
+      <span id="wave-display">WAVE: <b id="wave">1</b></span>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+    <div id="crosshair"></div>
+    <div id="start-screen" class="screen">
+      <h1>🚁 DRONE SHOOTER</h1>
+      <p>Fly your drone · Shoot aerial targets · Survive the waves</p>
+      <div class="controls-hint">
+        <div><kbd>W A S D</kbd> — Move drone</div>
+        <div><kbd>Mouse</kbd> — Aim</div>
+        <div><kbd>Click</kbd> — Fire</div>
+        <div><kbd>Shift</kbd> — Boost</div>
+        <div><kbd>Space</kbd> — Brake</div>
+      </div>
+      <button id="start-btn">LAUNCH</button>
+    </div>
+    <div id="game-over-screen" class="screen hidden">
+      <h1>💥 DRONE DOWN</h1>
+      <p id="final-score"></p>
+      <button id="restart-btn">FLY AGAIN</button>
+    </div>
+    <div id="wave-banner" class="hidden"></div>
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>

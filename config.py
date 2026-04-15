@@ -23,13 +23,19 @@ AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2024-10-21")
 # Anthropic
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+# Messages API max output tokens (raise CHIKA_ANTHROPIC_* if the model truncates long replies).
+ANTHROPIC_MAX_TOKENS = int(os.getenv("CHIKA_ANTHROPIC_MAX_TOKENS", "16384"))
+# With extended thinking, output + thinking must fit under max_tokens — default higher ceiling.
+ANTHROPIC_MAX_TOKENS_THINKING = int(os.getenv("CHIKA_ANTHROPIC_MAX_TOKENS_THINKING", "32768"))
+# Non-streaming paths (e.g. compaction, meta completions).
+ANTHROPIC_COMPLETE_MAX_TOKENS = int(os.getenv("CHIKA_ANTHROPIC_COMPLETE_MAX_TOKENS", "8192"))
 
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-4o")
 
 # Engine settings
-MAX_HISTORY_TOKENS   = int(os.getenv("CHIKA_MAX_HISTORY_TOKENS", "80000"))
+MAX_HISTORY_TOKENS   = int(os.getenv("CHIKA_MAX_HISTORY_TOKENS", "10000"))
 COMPACT_KEEP_FIRST   = int(os.getenv("CHIKA_COMPACT_KEEP_FIRST", "2"))
 COMPACT_KEEP_LAST    = int(os.getenv("CHIKA_COMPACT_KEEP_LAST", "4"))
 MAX_TOOL_TURNS       = int(os.getenv("CHIKA_MAX_TOOL_TURNS", "20"))

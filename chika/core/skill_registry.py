@@ -32,7 +32,10 @@ class SkillRegistry:
         for tool in skill.tools:
             self._tools.register(tool)
         if skill.workflow_examples:
-            self._prompt.add_workflow_examples(skill.name, skill.workflow_examples)
+            skill_tool_names = {t.name for t in skill.tools}
+            self._prompt.add_workflow_examples(
+                skill.name, skill.workflow_examples, tool_names=skill_tool_names,
+            )
         for key, value in skill.memory_seeds.items():
             self._memory.seed(key, value)
 

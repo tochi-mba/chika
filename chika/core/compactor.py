@@ -19,6 +19,11 @@ def estimate_tokens(messages: list[dict]) -> int:
                 block.get("text", "") for block in content if isinstance(block, dict)
             )
         total += len(str(content)) // CHARS_PER_TOKEN
+
+        for tc in m.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            total += len(fn.get("arguments") or "") // CHARS_PER_TOKEN
+            total += len(fn.get("name") or "") // CHARS_PER_TOKEN
     return total
 
 

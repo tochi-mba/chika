@@ -202,6 +202,7 @@ class ChikaEngine:
         self._title: str = ""
         self._chat_store = None  # ChatStore | None, injected by session_manager
         self._needs_restore_event: bool = False
+        self._last_result_content: str = "{}"  # written by _run_workflow
         # Hooks called after every switch_profile(). Each receives the new Profile.
         # Use this to dynamically register/unregister tools based on the active profile.
         self._profile_switch_hooks: list = []
@@ -239,7 +240,7 @@ class ChikaEngine:
             if compact_event:
                 yield compact_event
 
-        # ── Agentic loop — LLM keeps calling workflows until it decides it's done ─
+        # ─── Agentic loop — LLM keeps calling workflows until it decides it's done ─
         final_text = ""
 
         for _turn in range(config.MAX_TOOL_TURNS):
@@ -259,22 +260,14 @@ class ChikaEngine:
                     yield event
 
             # Recover workflow JSON leaked into text response
-            if not tool_call:
-                extracted = _extract_workflow_json(turn_text)
-                if extracted:
-                    workflow_json, clean_text = extracted
-                    tool_call = {
-                        "id": f"recovered_{abs(hash(json.dumps(workflow_json, sort_keys=True)))}",
-                        "name": "workflow_orchestrator",
-                        "args": workflow_json,
-                    }
-                    turn_text = clean_text
-                    buffered_tokens = [clean_text] if clean_text else []
+            tool_call = self._recover_leaked_workflow(turn_text, tool_call)
+            if tool_call and "_cleaned_text" in tool_call:
+                turn_text = tool_call.pop("_cleaned_text")
+                buffered_tokens = [turn_text] if turn_text else []
 
-            # Forward tokens to frontend — but ONLY when there is no tool call.
-            # If the LLM wrote text alongside a tool call, that text is premature:
-            # it's narrating results it hasn't received yet. Suppress it entirely.
-            # The real response will come after the workflow finishes.
+            # Forward tokens — only when there is no pending tool call.
+            # If the LLM wrote text alongside a tool call, that text is
+            # premature narration; suppress it entirely.
             if not tool_call:
                 for tok in buffered_tokens:
                     yield {"type": "token", "text": tok}
@@ -294,87 +287,140 @@ class ChikaEngine:
                 "tool_calls": [{
                     "id": tool_call["id"],
                     "type": "function",
-                    "function": {"name": "workflow_orchestrator",
-                                 "arguments": json.dumps(tool_call["args"])},
+                    "function": {
+                        "name": "workflow_orchestrator",
+                        "arguments": json.dumps(tool_call["args"]),
+                    },
                 }],
             })
 
-            workflow_result_parts: list[str] = []
-            workflow_errors: list[str] = []
-            async for event in self._workflow_engine.execute(tool_call["args"]):
+            self._last_result_content = "{}"
+            async for event in self._run_workflow(tool_call):
                 yield event
-                if event["type"] == "workflow_done":
-                    workflow_result_parts.append(self._format_workflow_result(event))
-                elif event["type"] == "error":
-                    workflow_errors.append(event.get("message", ""))
-                elif event["type"] == "tool_result" and event.get("error"):
-                    workflow_errors.append(f"{event.get('tool', 'tool')} failed: {event['error']}")
 
-            variables_content = "\n".join(workflow_result_parts) or "{}"
-            if workflow_errors:
-                result_content = "WORKFLOW ERRORS:\n" + "\n".join(workflow_errors) + "\n\nVARIABLES:\n" + variables_content
-            else:
-                result_content = variables_content
             self._history.append({
                 "role": "tool",
                 "tool_call_id": tool_call["id"],
-                "content": result_content,
+                "content": self._last_result_content,
             })
-            # Loop → next LLM turn with full context of what just happened
+            # Loop → next LLM turn with full context
 
         else:
             _log.warn("max_turns_reached", max=config.MAX_TOOL_TURNS, profile=profile)
 
         # If the LLM never produced a text response, force one
         if not final_text.strip():
-            followup_messages = self._build_messages() + [{
-                "role": "user",
-                "content": (
-                    "[System: you just completed your work but did not reply to the user. "
-                    "Respond now — summarise what was done or answer the original question.]"
-                ),
-            }]
-            followup_text = ""
-            async for event in self._stream_llm(followup_messages):
-                if event["type"] == "token":
-                    yield event
-                    followup_text += event["text"]
-            if followup_text:
-                self._history.append({"role": "assistant", "content": followup_text})
+            async for event in self._force_followup():
+                yield event
 
-        # ── Post-response grounding validation ──────────────────────────
-        # If the final text contains specific factual markers (URLs, numbers,
-        # proper nouns) that don't trace back to $facts, emit a warning
-        # event. Best-effort: never blocks the response, never raises.
-        if getattr(config, "GROUNDING_VALIDATE_RESPONSE", True) and final_text.strip():
-            try:
-                warning = await self._validate_grounding(final_text)
-                if warning:
-                    yield warning
-            except Exception:
-                _log.exc("grounding_validation_failed", profile=profile)
+        # Emit the chat title (runs concurrently with the first LLM turn)
+        async for event in self._maybe_emit_title(title_task, user_input):
+            yield event
 
-        # Resolve title (ran in parallel with the main LLM response)
-        if title_task is not None:
-            try:
-                title = await asyncio.wait_for(asyncio.shield(title_task), timeout=15.0)
-                self._title = title
-            except Exception:
-                if title_task and not title_task.done():
-                    title_task.cancel()
-                self._title = user_input[:50]
-            yield {"type": "chat_title", "title": self._title, "session_id": self.session_id}
 
-        # Persist chat to disk after each turn
-        if self._chat_store is not None and self.session_id and self._active_profile:
-            self._chat_store.save(
-                self._active_profile.name,
-                self.session_id,
-                self._history,
-                self._title,
+    # --- helpers extracted from chat() -----------------------------------
+
+    def _recover_leaked_workflow(
+        self,
+        turn_text: str,
+        tool_call: "dict | None",
+    ) -> "dict | None":
+        """Check whether the LLM leaked workflow JSON into its text output.
+
+        If *tool_call* is already set (proper API call), returns it unchanged.
+        Otherwise searches *turn_text* for embedded JSON, constructs a
+        synthetic tool-call dict, and tags it with ``_cleaned_text`` (the
+        remaining text after removing the JSON block).
+        Returns ``None`` when no workflow JSON is found.
+        """
+        if tool_call:
+            return tool_call
+        extracted = _extract_workflow_json(turn_text)
+        if not extracted:
+            return None
+        workflow_json, clean_text = extracted
+        return {
+            "id": f"recovered_{abs(hash(json.dumps(workflow_json, sort_keys=True)))}",
+            "name": "workflow_orchestrator",
+            "args": workflow_json,
+            "_cleaned_text": clean_text,
+        }
+
+    async def _run_workflow(
+        self,
+        tool_call: dict,
+    ) -> "AsyncGenerator[Event, None]":
+        """Stream all events from a workflow_orchestrator call.
+
+        Stores the formatted result string in ``self._last_result_content``
+        so the caller can append it to history after the generator finishes.
+        """
+        workflow_result_parts: list[str] = []
+        workflow_errors: list[str] = []
+        async for event in self._workflow_engine.execute(tool_call["args"]):
+            yield event
+            if event["type"] == "workflow_done":
+                workflow_result_parts.append(self._format_workflow_result(event))
+            elif event["type"] == "error":
+                workflow_errors.append(event.get("message", ""))
+            elif event["type"] == "tool_result" and event.get("error"):
+                workflow_errors.append(
+                    f"{event.get('tool', 'tool')} failed: {event['error']}"
+                )
+        variables_content = "\n".join(workflow_result_parts) or "{}"
+        if workflow_errors:
+            self._last_result_content = (
+                "WORKFLOW ERRORS:\n"
+                + "\n".join(workflow_errors)
+                + "\n\nVARIABLES:\n"
+                + variables_content
             )
+        else:
+            self._last_result_content = variables_content
 
-        yield {"type": "done"}
+    async def _force_followup(self) -> "AsyncGenerator[Event, None]":
+        """Yield a forced LLM reply when the model completed tool calls
+        without producing any visible text response to the user.
+
+        Uses a minimal context window (last few history messages) instead
+        of the full system prompt + entire history to save tokens.
+        """
+        tail = self._history[-6:] if len(self._history) > 6 else self._history
+        followup_messages = [
+            {"role": "system", "content": (
+                "You are Chika. The user's task has been completed via tool calls. "
+                "Summarise what was done or answer the original question. Be concise."
+            )},
+            *tail,
+            {"role": "user", "content": (
+                "[System: you just completed your work but did not reply to the user. "
+                "Respond now — summarise what was done or answer the original question.]"
+            )},
+        ]
+        followup_text = ""
+        async for event in self._stream_llm(followup_messages):
+            if event["type"] == "token":
+                yield event
+                followup_text += event["text"]
+        if followup_text:
+            self._history.append({"role": "assistant", "content": followup_text})
+
+    async def _maybe_emit_title(
+        self,
+        title_task: "asyncio.Task | None",
+        user_input: str,
+    ) -> "AsyncGenerator[Event, None]":
+        """Await the title generation background task and emit chat_title."""
+        if title_task is None:
+            return
+        try:
+            title = await title_task
+            self._title = title
+        except Exception:
+            if not title_task.done():
+                title_task.cancel()
+            self._title = user_input[:50]
+        yield {"type": "chat_title", "title": self._title, "session_id": self.session_id}
 
     async def _generate_title(self, first_message: str) -> str:
         """Generate a short chat title from the user's first message."""
@@ -440,44 +486,85 @@ class ChikaEngine:
         lines: list[str] = []
         all_vars = self._vars.all() if self._vars else {}
 
-        # Surface the ledger first — it's the authoritative grounded record.
         facts_var = all_vars.get("facts")
         if facts_var and isinstance(facts_var.value, list) and facts_var.value:
-            lines.append("## $facts — grounded evidence retrieved so far")
-            lines.append(
-                "Every entry below is a real result from a tool call this "
-                "session. When you answer the user, CITE these entries. If "
-                "a claim you want to make is not represented here, either "
-                "run another tool to gather evidence or tell the user you "
-                "don't have it. Do NOT synthesize."
-            )
-            lines.append(json.dumps(facts_var.value, indent=2))
+            lines.append("## $facts")
+            lines.append(json.dumps(facts_var.value, default=str))
             lines.append("")
 
         lines.append("## Workflow variables")
         for name, value in variables.items():
             if name == "facts":
-                continue  # already rendered above
+                continue
             var = all_vars.get(name)
             source = var.source if var else None
             header = f"### ${name}" + (f"  (source: {source})" if source else "  (source: engine/seed)")
             lines.append(header)
             try:
-                rendered = json.dumps(value, indent=2, default=str)
+                rendered = json.dumps(value, default=str)
             except Exception:
                 rendered = str(value)
-            # Truncate huge values so the LLM context doesn't explode
             if len(rendered) > 6000:
                 rendered = rendered[:6000] + f"\n...[truncated, full length {len(rendered)} chars]"
             lines.append(rendered)
             lines.append("")
         return "\n".join(lines) or "{}"
 
+    def _recent_tool_names(self) -> set[str]:
+        """Extract tool names used in recent history for conditional prompting."""
+        names: set[str] = set()
+        for m in self._history:
+            content = m.get("content") or ""
+            if isinstance(content, str):
+                for tc in m.get("tool_calls") or []:
+                    args_str = (tc.get("function") or {}).get("arguments") or ""
+                    try:
+                        args = __import__("json").loads(args_str)
+                        for step in args.get("steps") or []:
+                            if "tool" in step:
+                                names.add(step["tool"])
+                    except Exception:
+                        pass
+        return names
+
+    @staticmethod
+    def _compute_thinking_budget(messages: list[dict], max_budget: int) -> int:
+        """Scale thinking budget by message complexity.
+
+        Short simple messages (greetings, quick questions) get a low budget.
+        Longer messages or conversations with tool history get the full budget.
+        """
+        last_user = ""
+        has_tool_results = False
+        for m in reversed(messages):
+            role = m.get("role", "")
+            if role == "user" and not last_user:
+                content = m.get("content", "")
+                if isinstance(content, list):
+                    last_user = " ".join(
+                        b.get("text", "") for b in content if isinstance(b, dict)
+                    )
+                else:
+                    last_user = str(content)
+            if role == "user" and isinstance(m.get("content"), list):
+                for block in m["content"]:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        has_tool_results = True
+                        break
+
+        msg_len = len(last_user)
+        if has_tool_results or msg_len > 500:
+            return max_budget
+        if msg_len > 200:
+            return max(max_budget // 2, 1024)
+        return max(max_budget // 4, 1024)
+
     def _build_messages(self) -> list[dict]:
         system_prompt = self._prompt.build(
             tool_list=self._tools.list_for_prompt(),
             variables=self._vars.list_summary(),
             memory=self._memory.render_for_prompt(),
+            recent_tools=self._recent_tool_names(),
         )
         return [{"role": "system", "content": system_prompt}] + self._history
 
@@ -616,11 +703,12 @@ class ChikaEngine:
             tools=[tool_schema],
         )
         if getattr(config, "THINKING_ENABLED", False):
+            max_budget = getattr(config, "THINKING_BUDGET_TOKENS", 4000)
+            budget = self._compute_thinking_budget(filtered, max_budget)
             stream_kwargs["thinking"] = {
                 "type": "enabled",
-                "budget_tokens": getattr(config, "THINKING_BUDGET_TOKENS", 4000),
+                "budget_tokens": budget,
             }
-            # Extended thinking requires temperature=1 per Anthropic docs
             stream_kwargs["temperature"] = 1.0
 
         # Transient-error retry: Anthropic (and any streaming API) can return

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drone Strike</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="ui">
+    <div id="hud-left">
+      <span id="score-label">SCORE</span>
+      <span id="score">0</span>
+    </div>
+    <div id="hud-center">
+      <span id="title-text">DRONE STRIKE</span>
+    </div>
+    <div id="hud-right">
+      <span id="ammo-label">AMMO</span>
+      <span id="ammo">30</span>
+    </div>
+  </div>
+
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="overlay" class="visible">
+    <div id="menu-box">
+      <h1>DRONE STRIKE</h1>
+      <p id="menu-sub">Pilot your drone. Shoot down every aerial target before they escape.</p>
+      <div id="controls-info">
+        <div><kbd>W A S D</kbd> or <kbd>Arrow Keys</kbd> — Move</div>
+        <div><kbd>Mouse</kbd> — Aim</div>
+        <div><kbd>Left Click</kbd> or <kbd>Space</kbd> — Shoot</div>
+        <div><kbd>R</kbd> — Reload</div>
+      </div>
+      <button id="start-btn">START GAME</button>
+    </div>
+  </div>
+
+  <div id="gameover-overlay" class="hidden">
+    <div id="gameover-box">
+      <h1 id="gameover-title">MISSION COMPLETE</h1>
+      <p id="gameover-msg">All targets eliminated!</p>
+      <p id="final-score">Score: 0</p>
+      <button id="restart-btn">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
