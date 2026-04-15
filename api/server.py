@@ -265,6 +265,46 @@ async def websocket_endpoint(
 
     engine._workflow_engine.approval_handler = approval_handler
 
+    # ── ask_user question handler ─────────────────────────────────────────────
+    # Futures: request_id → Future[{"choice": str, "choice_index": int, ...}]
+    _question_futures: dict[str, asyncio.Future] = {}
+
+    async def question_handler(
+        *, request_id: str, question: str, options: list, header: str = "",
+        multi_select: bool = False,
+    ) -> dict:
+        """Emit a user_question event and await the user's selection.
+
+        Shape of response: {
+          "choice": "<label>",           # single select
+          "choice_index": N,
+          "choices": ["a", "b"],          # multi select (if enabled)
+          "choice_indices": [0, 1],
+          "notes": "free-text notes"
+        }
+        """
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+        _question_futures[request_id] = fut
+        try:
+            await send({
+                "type":         "user_question",
+                "request_id":   request_id,
+                "question":     question,
+                "options":      options,
+                "header":       header,
+                "multi_select": multi_select,
+            })
+            return await fut
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            return {"error": str(exc)}
+        finally:
+            _question_futures.pop(request_id, None)
+
+    engine._workflow_engine.question_handler = question_handler
+
     # ── WS reader task ────────────────────────────────────────────────────────
     # Single reader — no other code touches websocket.receive_text() after this.
     async def _ws_recv_loop() -> None:
@@ -296,6 +336,21 @@ async def websocket_endpoint(
                         fut.set_result({
                             "approved": bool(msg.get("approved", False)),
                             "password": str(msg.get("password", "")),
+                        })
+
+                elif mtype == "user_question_response":
+                    # Route ask_user answer to the waiting future.
+                    rid = msg.get("request_id")
+                    fut = _question_futures.get(rid)
+                    if fut and not fut.done():
+                        choices = msg.get("choices") or []
+                        choice_indices = msg.get("choice_indices") or []
+                        fut.set_result({
+                            "choice":         str(msg.get("choice", "")),
+                            "choice_index":   int(msg.get("choice_index", -1)),
+                            "choices":        [str(c) for c in choices],
+                            "choice_indices": [int(i) for i in choice_indices],
+                            "notes":          str(msg.get("notes", "")),
                         })
 
                 else:

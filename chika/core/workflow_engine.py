@@ -31,6 +31,7 @@ _STRUCTURAL_TYPES = frozenset({
 _FACT_PRODUCING_TOOLS = frozenset({
     "web_search", "web_fetch", "file_read", "shell_exec", "verify_url",
     "curl", "memory_recall",
+    "git_log", "git_status", "git_diff", "git_branch",
 })
 
 

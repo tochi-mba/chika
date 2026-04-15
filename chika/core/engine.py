@@ -712,42 +712,90 @@ class ChikaEngine:
                 if f.get("final_url"):
                     grounded_urls.add(str(f["final_url"]))
 
-        # Whitelist well-known root domains — these don't need grounding
-        root_domains = {
-            "https://google.com", "https://youtube.com", "https://github.com",
-            "https://wikipedia.org", "https://www.google.com",
-            "https://www.youtube.com", "https://www.github.com",
-            "https://www.wikipedia.org",
+        # Well-known domains that don't need per-URL grounding. These are
+        # root references the model routinely suggests ("check coingecko for
+        # live prices") — flagging them as fabrications is noise.
+        _TRUSTED_HOSTS = {
+            "google.com", "www.google.com",
+            "youtube.com", "www.youtube.com", "youtu.be",
+            "github.com", "www.github.com",
+            "wikipedia.org", "en.wikipedia.org", "www.wikipedia.org",
+            "stackoverflow.com", "www.stackoverflow.com",
+            "npmjs.com", "www.npmjs.com",
+            "pypi.org", "www.pypi.org",
+            "developer.mozilla.org", "mdn.io",
+            "docs.python.org", "nodejs.org", "reactjs.org", "vuejs.org",
+            "coinmarketcap.com", "www.coinmarketcap.com",
+            "coingecko.com", "www.coingecko.com",
+            "coindesk.com", "www.coindesk.com",
+            "anthropic.com", "docs.claude.com", "console.anthropic.com",
+            "openai.com", "platform.openai.com",
         }
 
-        ungrounded_urls = [
-            u for u in response_urls
-            if u.rstrip("/") not in {g.rstrip("/") for g in grounded_urls}
-            and u.rstrip("/") not in {g.rstrip("/") for g in root_domains}
-        ]
+        def _host(u: str) -> str:
+            m = re.match(r"https?://([^/:]+)", u)
+            return (m.group(1) if m else "").lower()
 
-        # Heuristic: response mentions "source", "according to", "cited" etc.
-        # but $facts is empty → cited something we never retrieved.
-        citation_markers = re.search(
-            r"\b(source|sources|according to|cited|reference[sd]?)\b",
-            response_text,
+        def _is_grounded(url: str) -> bool:
+            base = url.rstrip("/").rstrip()
+            grounded_norm = {g.rstrip("/") for g in grounded_urls}
+            if base in grounded_norm:
+                return True
+            if _host(url) in _TRUSTED_HOSTS:
+                return True
+            return False
+
+        # A URL is only a problem when it APPEARS TO BE CITED AS A SOURCE.
+        # Detect citation intent by checking the ~80 chars before each URL
+        # for citation markers. A URL mentioned as a suggestion ("you can try
+        # X") or embedded in a code block is not a citation.
+        _CITATION_MARKERS = re.compile(
+            r"\b(source|sources|according to|cited|reference[sd]?|per\s+\w+|from\s+\[)\b",
             re.IGNORECASE,
         )
 
-        if ungrounded_urls:
-            _log.warn("grounding_warning", reason="ungrounded_urls",
-                      urls=ungrounded_urls, profile=self._active_profile.name if self._active_profile else "unknown")
+        ungrounded_cited_urls: list[str] = []
+        for m in url_re.finditer(response_text):
+            url = m.group(0)
+            if _is_grounded(url):
+                continue
+            # Look backwards ~80 chars for citation intent
+            pre = response_text[max(0, m.start() - 80):m.start()]
+            if _CITATION_MARKERS.search(pre):
+                ungrounded_cited_urls.append(url)
+
+        # Deduplicate preserving order
+        seen = set()
+        ungrounded_cited_urls = [u for u in ungrounded_cited_urls
+                                 if not (u in seen or seen.add(u))]
+
+        if ungrounded_cited_urls:
+            _log.warn("grounding_warning", reason="ungrounded_citation",
+                      urls=ungrounded_cited_urls,
+                      profile=self._active_profile.name if self._active_profile else "unknown")
             return {
                 "type": "validation_warning",
                 "severity": "high",
-                "reason": "ungrounded_urls",
+                "reason": "ungrounded_citation",
                 "message": (
-                    f"The response cites {len(ungrounded_urls)} URL(s) that were "
-                    "not retrieved by any tool this session. These may be "
-                    "fabricated."
+                    f"The response cites {len(ungrounded_cited_urls)} URL(s) as "
+                    "sources but these URLs were not retrieved by any tool "
+                    "this session. These citations may be fabricated."
                 ),
-                "urls": ungrounded_urls,
+                "urls": ungrounded_cited_urls,
             }
+
+        # For the older metric, keep an audit-log entry when ungrounded URLs
+        # are present — but DON'T warn the user. They may just be suggestions.
+        all_ungrounded = [u for u in response_urls if not _is_grounded(u)]
+        if all_ungrounded:
+            _log.info("ungrounded_urls_mentioned", count=len(all_ungrounded),
+                      profile=self._active_profile.name if self._active_profile else "unknown")
+
+        # Keep the other citation-markers-without-retrieval heuristic below,
+        # guarded by the same smarter rule (only flag if there's actual
+        # citation language AND no $facts at all).
+        citation_markers = _CITATION_MARKERS.search(response_text)
 
         if citation_markers and not facts_list:
             _log.warn("grounding_warning", reason="citations_without_retrieval",

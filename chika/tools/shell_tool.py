@@ -119,7 +119,7 @@ class ShellResult:
 
 async def shell_exec(
     command: str,
-    timeout_seconds: float = 30.0,
+    timeout_seconds: float = 90.0,
     wait_for_completion: bool = True,
     working_directory: str | None = None,
 ) -> dict:

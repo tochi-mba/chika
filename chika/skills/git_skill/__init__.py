@@ -14,7 +14,13 @@ async def git_diff(path: str = ".", working_directory: str = ".") -> dict:
     return {"diff": r["stdout"], "error": r["stderr"]}
 
 
-async def git_log(n: int = 10, working_directory: str = ".") -> dict:
+async def git_log(n: int = 10, working_directory: str = ".", **kwargs) -> dict:
+    """
+    Get recent one-line commit log. Accepts `n` (primary name) or
+    `max_count` (git's CLI flag name) as aliases — the LLM often reaches
+    for `max_count` since that's what `git log` uses.
+    """
+    n = kwargs.get("max_count", kwargs.get("limit", n))
     r = await shell_exec(f"git log --oneline -{n}", working_directory=working_directory)
     return {"log": r["stdout"], "lines": r["stdout_lines"]}
 

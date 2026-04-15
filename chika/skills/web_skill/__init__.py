@@ -24,7 +24,12 @@ async def web_search(query: str, max_results: int = 8) -> dict:
     empty state and either retries with a simpler query or informs the user.
     """
     try:
-        from duckduckgo_search import DDGS
+        # `duckduckgo_search` was renamed to `ddgs` in late 2025. Prefer the
+        # new name; fall back to the old package for older environments.
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
 

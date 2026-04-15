@@ -86,16 +86,27 @@ class VariableStore:
         return dict(self._vars)
 
     def list_summary(self) -> list[dict]:
-        return [
-            {
+        """
+        Summary rendered into the system prompt. Short scalar values
+        (text under ~200 chars) are inlined so the model doesn't burn a
+        tool call just to learn that `$profile.workspace` resolves to
+        `C:/.../workspace`. Large values still show only metadata.
+        """
+        out: list[dict] = []
+        for k, v in self._vars.items():
+            entry = {
                 "name": k,
                 "type": v.type.value,
                 "size_bytes": v.size_bytes,
                 "description": v.description,
                 "source": v.source,
             }
-            for k, v in self._vars.items()
-        ]
+            if v.type.value in ("text", "file_path") and isinstance(v.value, str) and len(v.value) <= 200:
+                entry["value"] = v.value
+            elif v.type.value == "json" and v.size_bytes <= 200:
+                entry["value"] = v.value
+            out.append(entry)
+        return out
 
     # ── $ref resolution ──────────────────────────────────────────────────────
 

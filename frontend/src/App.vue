@@ -23,6 +23,11 @@
       @deny="id => approve(id, false, '')"
     />
 
+    <QuestionModal
+      :questions="system.pendingQuestions"
+      @answer="(id, payload) => answerQuestion(id, payload)"
+    />
+
     <div class="body">
       <ChatSidebar
         :chat-list="chats.chatList"
@@ -54,6 +59,7 @@ import MessageList        from './components/MessageList.vue'
 import ChatInput          from './components/ChatInput.vue'
 import SystemPanel        from './components/SystemPanel.vue'
 import ApprovalModal      from './components/ApprovalModal.vue'
+import QuestionModal      from './components/QuestionModal.vue'
 import ProfileSwitcher    from './components/ProfileSwitcher.vue'
 import ChatSidebar        from './components/ChatSidebar.vue'
 
@@ -62,7 +68,7 @@ const chats  = useChatsStore()
 const system = useSystemStore()
 
 const storedKey = localStorage.getItem('chika_api_key') || ''
-const { send, reset, approve, switchProfile, loadChat, newChat, deleteChat } = useChika(storedKey)
+const { send, reset, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat } = useChika(storedKey)
 </script>
 
 <style scoped>

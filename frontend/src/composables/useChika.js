@@ -161,6 +161,12 @@ export function useChika(apiKey = '') {
     _wsSend({ type: 'approval_response', request_id, approved, password })
   }
 
+  function answerQuestion(request_id, answer) {
+    // answer: { choice, choice_index, choices?, choice_indices?, notes? }
+    system.resolveQuestion(request_id)
+    _wsSend({ type: 'user_question_response', request_id, ...answer })
+  }
+
   function reset() {
     _wsSend({ type: 'reset' })
     chat.clear()
@@ -178,5 +184,5 @@ export function useChika(apiKey = '') {
 
   connect()
 
-  return { send, reset, ping, approve, switchProfile, loadChat, newChat, deleteChat }
+  return { send, reset, ping, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat }
 }

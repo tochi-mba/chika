@@ -40,8 +40,9 @@ def test_short_response_is_not_validated():
 
 # ── Ungrounded URL detection ─────────────────────────────────────────────────
 
-def test_ungrounded_url_is_flagged():
-    eng = _make_engine_with_vars(facts_list=[])  # empty ledger
+def test_ungrounded_citation_is_flagged():
+    """URL cited AS A SOURCE without retrieval → high-severity warning."""
+    eng = _make_engine_with_vars(facts_list=[])
     response = (
         "I found the info you wanted. The source I used is "
         "https://totally-fabricated-site.com/page and it confirms the claim. "
@@ -50,36 +51,52 @@ def test_ungrounded_url_is_flagged():
     result = _run(eng._validate_grounding(response))
     assert result is not None
     assert result["type"] == "validation_warning"
-    assert result["reason"] == "ungrounded_urls"
+    assert result["reason"] == "ungrounded_citation"
     assert "https://totally-fabricated-site.com/page" in result["urls"]
 
 
-def test_grounded_url_is_not_flagged():
+def test_suggested_url_is_NOT_flagged():
+    """
+    URL mentioned as a SUGGESTION (not as a source) should not be flagged.
+    The old validator was too aggressive — it flagged any non-grounded URL,
+    including legitimate 'you could try coingecko.com for live prices'
+    helpfulness. Now only citation-intent URLs trip the warning.
+    """
+    eng = _make_engine_with_vars(facts_list=[])
+    response = (
+        "I can't get live prices in this environment. Your best bet is to "
+        "check https://coinmarketcap.com or https://coingecko.com directly "
+        "in your browser. This response is plenty long enough for validation."
+    )
+    result = _run(eng._validate_grounding(response))
+    # These are suggestions, not citations — no warning
+    assert result is None
+
+
+def test_grounded_citation_is_not_flagged():
     facts = [{"source": "web_search:s1", "url": "https://example.com/real-page",
               "snippet": "..."}]
     eng = _make_engine_with_vars(facts_list=facts)
     response = (
-        "According to what I retrieved, see https://example.com/real-page "
+        "According to the source I retrieved, see https://example.com/real-page "
         "for the full details. The response is long enough to trigger validation."
     )
     result = _run(eng._validate_grounding(response))
-    # URL is in the ledger → not flagged as ungrounded
-    # (may still be flagged for citation markers if no facts... but there ARE facts)
-    if result is not None:
-        assert result.get("reason") != "ungrounded_urls"
+    # URL is in the ledger → not flagged
+    assert result is None or result.get("reason") != "ungrounded_citation"
 
 
-def test_root_domain_urls_are_whitelisted():
+def test_trusted_hosts_are_whitelisted():
+    """Well-known reference sites don't need per-URL grounding."""
     eng = _make_engine_with_vars(facts_list=[])
     response = (
-        "You can find more info at https://google.com and https://github.com "
-        "which are well-known root domains so they don't need grounding. "
-        "This message is long enough to cross the validation threshold."
+        "According to https://stackoverflow.com and https://developer.mozilla.org "
+        "you can use Array.prototype.flat. This message is long enough to cross "
+        "the validation threshold for grounding checks."
     )
     result = _run(eng._validate_grounding(response))
-    # Only root domains cited, no other specific URLs, no citation markers
-    # → should not be flagged
-    assert result is None or result.get("reason") != "ungrounded_urls"
+    # Both domains are on the trusted-hosts list
+    assert result is None or result.get("reason") != "ungrounded_citation"
 
 
 # ── Citation-markers without retrieval ───────────────────────────────────────

@@ -17,6 +17,9 @@ export const useSystemStore = defineStore('system', () => {
   // Pending approval requests: [{ request_id, tool, args, step_id }]
   const pendingApprovals = ref([])
 
+  // Pending ask_user questions: [{ request_id, question, options, header, multi_select }]
+  const pendingQuestions = ref([])
+
   // Shell processes: pid → { pid, command, running, exit_code, stdout, stderr }
   const shellProcesses = ref({})
 
@@ -90,6 +93,16 @@ export const useSystemStore = defineStore('system', () => {
         })
         break
 
+      case 'user_question':
+        pendingQuestions.value.push({
+          request_id:   event.request_id,
+          question:     event.question || '',
+          options:      event.options || [],
+          header:       event.header || '',
+          multi_select: !!event.multi_select,
+        })
+        break
+
       case 'tool_result':
         // Remove any approval for this step once a result arrives (approved or denied)
         pendingApprovals.value = pendingApprovals.value.filter(
@@ -153,6 +166,10 @@ export const useSystemStore = defineStore('system', () => {
     pendingApprovals.value = pendingApprovals.value.filter(a => a.request_id !== request_id)
   }
 
+  function resolveQuestion(request_id) {
+    pendingQuestions.value = pendingQuestions.value.filter(q => q.request_id !== request_id)
+  }
+
   // Sync memory from REST snapshot
   function setMemorySnapshot(entries) {
     memory.value = {}
@@ -188,9 +205,9 @@ export const useSystemStore = defineStore('system', () => {
   return {
     events, activeWorkflow, variables, memory, shellProcesses,
     connected, sessionId, profile,
-    pendingApprovals,
+    pendingApprovals, pendingQuestions,
     setConnected, pushEvent, setMemorySnapshot, setVariablesSnapshot, clearSession,
-    resolveApproval,
+    resolveApproval, resolveQuestion,
     eventCount, variableCount, memoryCount, shellCount, runningShellCount,
   }
 })

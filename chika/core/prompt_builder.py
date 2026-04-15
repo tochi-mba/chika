@@ -185,6 +185,12 @@ a text response that cites anything, the citation should be backed by a
 # 6. SESSION STATE
 
 ## Variables
+The variables below include their current `value` inline when they're short
+scalars. **Trust these values — they are authoritative.** Don't call a tool
+just to re-fetch a variable whose value is already shown here; answer the
+user from what's in front of you. (Call a tool only when you need a value
+NOT already listed, or when the user's question requires live info.)
+
 {variables}
 
 {memory}
@@ -412,15 +418,21 @@ class PromptBuilder:
             f"- `{t['name']}`: {t['description']}" for t in tool_list
         ) or "None registered"
 
-        # Variables block surfaces the source tag so the model can see at a
-        # glance which vars are retrieved facts vs. engine-seeded config.
-        var_block = (
-            "\n".join(
-                f"- `${v['name']}` ({v['type']}, {v['size_bytes']}B, source: {v.get('source') or 'seed'}): {v['description']}"
-                for v in variables
-            )
-            or "None"
-        )
+        # Variables block surfaces the source tag AND the actual value for
+        # short scalars, so the model doesn't burn a tool call just to read
+        # $profile.workspace.
+        def _var_line(v: dict) -> str:
+            head = f"- `${v['name']}` ({v['type']}, source: {v.get('source') or 'seed'})"
+            if v.get("description"):
+                head += f" — {v['description']}"
+            if "value" in v:
+                val = v["value"]
+                val_str = val if isinstance(val, str) else str(val)
+                # Keep a readable one-line preview
+                head += f"\n    value: `{val_str[:200]}`"
+            return head
+
+        var_block = "\n".join(_var_line(v) for v in variables) or "None"
 
         mem_block = memory or ""
 

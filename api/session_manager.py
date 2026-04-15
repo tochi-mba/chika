@@ -43,6 +43,7 @@ from chika.skills.web_skill import WEB_SKILL
 from chika.skills.spotify_skill import SPOTIFY_SKILL
 from chika.skills.verify_skill import build_verify_skill
 from chika.skills.plan_skill import build_plan_skill
+from chika.skills.question_skill import build_question_skill
 import config
 
 
@@ -148,6 +149,10 @@ class SessionManager:
         skill_registry.register(build_verify_skill(variable_store))
         # plan_skill is session-scoped too — stores the live plan in $plan
         skill_registry.register(build_plan_skill(variable_store))
+        # question_skill's ask_user tool looks up engine.question_handler at
+        # call time — server.py sets that per-WebSocket. In CLI/test mode it
+        # stays None and the tool returns a structured error instead of hanging.
+        # Register after engine is built so we can pass the workflow_engine.
 
         engine = ChikaEngine(
             tool_registry=tool_registry,
@@ -159,6 +164,10 @@ class SessionManager:
         engine.session_id = session_id
         engine._chat_store = self._chat_store
 
+        # Register question_skill now that the engine exists — ask_user reads
+        # engine._workflow_engine.question_handler at call time.
+        skill_registry.register(build_question_skill(engine._workflow_engine))
+
         # Wire up active profile (profile tools need engine reference, so registered after)
         engine._active_profile = default_profile
         variable_store.set("profile.name", default_profile.name, description="Active profile name")
@@ -167,6 +176,21 @@ class SessionManager:
         # Chika's own repo root — used for self-modification workflows
         repo_root = str(Path(__file__).parent.parent.resolve())
         variable_store.set("chika.repo", repo_root, description="Chika's source repo root directory")
+
+        # Platform + shell hints so the agent picks the right commands.
+        # On Windows: prefer `dir /s /b`, `type`, PowerShell; avoid `ls`, `find`,
+        # `grep` (not available in plain cmd.exe). On POSIX: prefer ls/find/grep.
+        import platform as _platform
+        os_name = "windows" if _platform.system().lower().startswith("win") else _platform.system().lower()
+        variable_store.set(
+            "os",
+            os_name,
+            description=(
+                "Host operating system. On 'windows' prefer `dir /s /b`, `type`, "
+                "`findstr`, PowerShell; avoid ls/find/grep which aren't in plain "
+                "cmd.exe. On 'linux'/'darwin' prefer ls/find/grep/cat."
+            ),
+        )
 
         for t in make_profile_tools(engine, self._profile_manager):
             tool_registry.register(t)
