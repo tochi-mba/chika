@@ -33,6 +33,14 @@ COMPACT_KEEP_LAST    = int(os.getenv("CHIKA_COMPACT_KEEP_LAST", "4"))
 MAX_TOOL_TURNS       = int(os.getenv("CHIKA_MAX_TOOL_TURNS", "20"))
 MAX_MEMORY_TOKENS    = int(os.getenv("CHIKA_MAX_MEMORY_TOKENS", "2000"))
 
+# Grounding / hallucination controls
+# When true, the engine runs a lightweight post-response validator that
+# flags factual claims in the final reply that aren't supported by the
+# $facts ledger. Emits a "validation_warning" event the frontend can show.
+GROUNDING_VALIDATE_RESPONSE = os.getenv("CHIKA_VALIDATE_RESPONSE", "true").lower() == "true"
+# Minimum response length (chars) to bother running the validator
+GROUNDING_MIN_LENGTH        = int(os.getenv("CHIKA_GROUNDING_MIN_LENGTH", "160"))
+
 # API server
 API_HOST    = os.getenv("CHIKA_HOST", "0.0.0.0")
 API_PORT    = int(os.getenv("CHIKA_PORT", "8000"))

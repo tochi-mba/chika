@@ -7,7 +7,29 @@
       "Bash(grep -n 'expand\\\\|interpolat\\\\|resolve\\\\|substitute\\\\|$profile' C:/Users/TochukwuMba/documents/code/chika_v2/chika/core/workflow_engine.py)",
       "Bash(python -c \"from chika.core.engine import ChikaEngine; print\\('ok'\\)\")",
       "Bash(python -c \"from chika.core.prompt_builder import PromptBuilder; pb = PromptBuilder\\(\\); p = pb.build\\([],[],''\\)\")",
-      "Bash(powershell *)"
+      "Bash(powershell *)",
+      "Bash(xargs wc:*)",
+      "Bash(python -m unittest discover -s tests)",
+      "Bash(npm install:*)",
+      "Bash(python -m unittest discover -s tests -p 'test_*.py' -v)",
+      "Bash(python -c \"import tests.test_workflow_engine\")",
+      "Bash(python -m pytest tests/ -x --tb=short)",
+      "Bash(python -m pytest tests/ --tb=no -q)",
+      "Bash(npm run:*)",
+      "Bash(python -m pytest tests/test_workflow_engine.py::test_meta_tool_llm_transform_parses_json --tb=long)",
+      "Bash(python -m pytest tests/ --tb=short -q --ignore=tests/test_api_server.py)",
+      "Bash(python -m pytest tests/test_prompt_builder.py::test_build_returns_string --tb=long)",
+      "Bash(python -c \"from chika.core.prompt_builder import PromptBuilder; p=PromptBuilder\\(\\); print\\(len\\(p.build\\([], [], ''\\)\\)\\)\")",
+      "Bash(python)",
+      "Bash(python -c \"from chika.core.prompt_builder import PromptBuilder; p=PromptBuilder\\(\\); s=p.build\\([], [], ''\\); print\\('len', len\\(s\\), '-- first 80:', s[:80]\\)\")",
+      "Bash(python -m pytest tests/test_prompt_builder.py tests/test_workflow_engine.py tests/test_variable_store.py tests/test_skill_registry.py --tb=short -q)",
+      "Bash(python -m pytest tests/test_session_manager.py --tb=short -q)",
+      "Bash(python -m pytest tests/test_factuality.py -v --tb=short)",
+      "Bash(python -m pytest tests/test_grounding_validator.py -v --tb=short)",
+      "Bash(python -m pytest tests/ --tb=no -q --ignore=tests/test_api_server.py)",
+      "Bash(python -m pytest tests/test_api_server.py --tb=no -q)",
+      "Bash(git mv:*)",
+      "Bash(git add:*)"
     ]
   }
 }

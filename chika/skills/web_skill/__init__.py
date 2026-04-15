@@ -15,6 +15,14 @@ def _simplify_query(query: str) -> str | None:
 
 
 async def web_search(query: str, max_results: int = 8) -> dict:
+    """
+    Search the web. Every returned payload carries `_source: "web_search"` so
+    the agent (and any downstream meta-tool) can verify the context came from
+    an actual retrieval and not from training-data recall.
+
+    On 0 results, returns `count: 0` explicitly so the caller sees the
+    empty state and either retries with a simpler query or informs the user.
+    """
     try:
         from duckduckgo_search import DDGS
         with DDGS() as ddgs:
@@ -28,6 +36,7 @@ async def web_search(query: str, max_results: int = 8) -> dict:
                     results = list(ddgs.text(fallback, max_results=max_results))
                 if results:
                     return {
+                        "_source": "web_search",
                         "query": fallback,
                         "original_query": query,
                         "retry_reason": "Original query returned 0 results — retried without filters",
@@ -39,15 +48,32 @@ async def web_search(query: str, max_results: int = 8) -> dict:
                     }
 
         return {
+            "_source": "web_search",
             "query": query,
             "results": [
                 {"title": r.get("title"), "url": r.get("href"), "snippet": r.get("body")}
                 for r in results
             ],
             "count": len(results),
+            # Explicit instruction the LLM can (and should) read before citing.
+            "_grounding": (
+                "These results are the ONLY grounded facts for this query. "
+                "If count==0, do not synthesize — say 'no results found' and retry "
+                "with a simpler query, or ask the user."
+            ) if results else (
+                "0 results. Do NOT call llm_transform on this payload — it will "
+                "fabricate. Retry with a simpler query or tell the user nothing "
+                "was found."
+            ),
         }
     except Exception as exc:
-        return {"error": str(exc), "query": query, "results": [], "count": 0}
+        return {
+            "_source": "web_search",
+            "error": str(exc),
+            "query": query,
+            "results": [],
+            "count": 0,
+        }
 
 
 WEB_SKILL = Skill(

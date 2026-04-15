@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 class ChatStore:
-    """Persists chat sessions as JSON under profiles/<name>/chats/<session_id>.json"""
+    """Persists chat sessions as JSON under data/profiles/<name>/chats/<session_id>.json"""
 
     def __init__(self, profiles_dir: Path) -> None:
         self._profiles_dir = profiles_dir

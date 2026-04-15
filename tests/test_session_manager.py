@@ -138,8 +138,18 @@ def test_sessions_have_isolated_memory():
     sm = SessionManager()
     e1 = sm.get_or_create("mem_a")
     e2 = sm.get_or_create("mem_b")
-    e1._memory.persist("k", "v")
-    assert e2._memory.read("k") is None
+    # Use a unique key + guaranteed cleanup so this test doesn't leak persisted
+    # state into the shared default-profile memory file and break subsequent runs.
+    import uuid
+    k = f"isolation_probe_{uuid.uuid4().hex[:8]}"
+    try:
+        e1._memory.persist(k, "v")
+        assert e2._memory.read(k) is None
+    finally:
+        try:
+            e1._memory.forget(k)
+        except Exception:
+            pass
 
 
 # ── Tool registration ─────────────────────────────────────────────────────────

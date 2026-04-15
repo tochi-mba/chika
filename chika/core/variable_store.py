@@ -25,6 +25,9 @@ class Variable:
     value: Any
     description: str = ""
     size_bytes: int = 0
+    # Provenance: which tool produced this value, in which workflow step.
+    # None means the value was seeded by the engine / user, not a tool call.
+    source: str | None = None
 
 
 class VariableStore:
@@ -37,12 +40,20 @@ class VariableStore:
         value: Any,
         var_type: VarType = VarType.TEXT,
         description: str = "",
+        source: str | None = None,
     ) -> Variable:
         if isinstance(value, (str, bytes)):
             size = len(value)
         else:
             size = len(str(value))
-        var = Variable(name=name, type=var_type, value=value, description=description, size_bytes=size)
+        var = Variable(
+            name=name,
+            type=var_type,
+            value=value,
+            description=description,
+            size_bytes=size,
+            source=source,
+        )
         self._vars[name] = var
         return var
 
@@ -81,6 +92,7 @@ class VariableStore:
                 "type": v.type.value,
                 "size_bytes": v.size_bytes,
                 "description": v.description,
+                "source": v.source,
             }
             for k, v in self._vars.items()
         ]

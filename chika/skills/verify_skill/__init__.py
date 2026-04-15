@@ -1,0 +1,202 @@
+"""
+verify_skill — grounding and verification tools.
+
+Exposes two tools:
+  - verify_url(url)  — HTTP HEAD check so the agent can confirm a URL exists
+                      before writing it into a file or opening it.
+  - fact_check(claim) — look up the claim in the session's $facts ledger.
+                        Returns whether the claim is supported, and by which
+                        recorded source. This is the runtime check that the
+                        system prompt's "never fabricate" rule can actually
+                        rely on.
+"""
+from __future__ import annotations
+
+from chika.core.skill_registry import Skill
+from chika.core.tool_registry import ToolDefinition
+
+
+async def verify_url(url: str, timeout: float = 8.0) -> dict:
+    """
+    HEAD the URL. Returns status, content_type, reachable, and whether it
+    redirected. Never raises — always returns a dict (errors become
+    `reachable: False` + error text).
+    """
+    try:
+        import httpx
+        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+            # Prefer HEAD; some servers disallow it — fall back to GET with stream.
+            try:
+                resp = await client.head(url)
+                if resp.status_code == 405:  # Method Not Allowed
+                    raise ValueError("HEAD not allowed")
+            except Exception:
+                resp = await client.get(url)
+            final_url = str(resp.url)
+            ct = resp.headers.get("content-type", "")
+            return {
+                "_source": "verify_url",
+                "url": url,
+                "final_url": final_url,
+                "redirected": final_url != url,
+                "status": resp.status_code,
+                "content_type": ct,
+                "reachable": 200 <= resp.status_code < 400,
+                "is_image": ct.startswith("image/"),
+                "is_html": ct.startswith("text/html"),
+            }
+    except Exception as exc:
+        return {
+            "_source": "verify_url",
+            "url": url,
+            "reachable": False,
+            "error": str(exc),
+        }
+
+
+def _make_fact_check(variable_store):
+    """
+    Build a fact_check tool bound to the session's variable store, so it can
+    read the live $facts ledger that workflow_engine populates after every
+    fact-producing tool call.
+    """
+    import re as _re
+
+    def _tokens(s: str) -> set[str]:
+        return {w.lower() for w in _re.findall(r"[a-zA-Z0-9]{3,}", s or "")}
+
+    async def fact_check(claim: str, min_overlap: int = 2) -> dict:
+        """
+        Search the $facts ledger for evidence supporting `claim`.
+        Returns `supported: True` with the matching fact entries, or
+        `supported: False` with a directive to go retrieve evidence.
+        """
+        var = variable_store.get("facts")
+        ledger = var.value if (var and isinstance(var.value, list)) else []
+        if not ledger:
+            return {
+                "_source": "fact_check",
+                "claim": claim,
+                "supported": False,
+                "reason": "ledger_empty",
+                "directive": (
+                    "No tools have produced any facts this session. You MUST "
+                    "run a tool (web_search, file_read, shell_exec) to gather "
+                    "evidence before asserting this claim, or explicitly tell "
+                    "the user you don't have grounded information."
+                ),
+            }
+        claim_tokens = _tokens(claim)
+        matches: list[dict] = []
+        for fact in ledger:
+            blob = " ".join(
+                str(v) for k, v in fact.items()
+                if k in ("snippet", "title", "url", "query", "command", "path")
+            )
+            overlap = len(claim_tokens & _tokens(blob))
+            if overlap >= min_overlap:
+                matches.append({**fact, "overlap": overlap})
+        matches.sort(key=lambda f: -f["overlap"])
+        supported = bool(matches)
+        return {
+            "_source": "fact_check",
+            "claim": claim,
+            "supported": supported,
+            "matches": matches[:5],
+            "reason": None if supported else "no_matching_fact_in_ledger",
+            "directive": None if supported else (
+                "No fact in the ledger supports this claim. Either retrieve "
+                "evidence via a tool, or rephrase the answer to say you don't "
+                "have grounded information on this."
+            ),
+        }
+
+    return fact_check
+
+
+def build_verify_skill(variable_store) -> Skill:
+    """Factory — wires fact_check to the session's variable store."""
+    fact_check = _make_fact_check(variable_store)
+    return Skill(
+        name="verify",
+        description="URL reachability checks and claim grounding against the $facts ledger",
+        tools=[
+            ToolDefinition(
+                name="verify_url",
+                description=(
+                    "HEAD an URL and report status, content_type, and whether it is "
+                    "reachable. ALWAYS use this before writing a URL into a file, "
+                    "citing it to the user, or opening it."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "The URL to check"},
+                        "timeout": {"type": "number", "description": "Seconds (default 8)"},
+                    },
+                    "required": ["url"],
+                },
+                handler=verify_url,
+            ),
+            ToolDefinition(
+                name="fact_check",
+                description=(
+                    "Look up whether a claim is supported by the $facts ledger "
+                    "(facts automatically accumulated from web_search, file_read, "
+                    "shell_exec, etc). Returns supported=True with matching fact "
+                    "sources, or supported=False with a directive to go retrieve "
+                    "evidence. Use this before asserting any factual claim to the "
+                    "user when you're not 100% sure you just saw the evidence in "
+                    "this turn."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "claim": {
+                            "type": "string",
+                            "description": "The factual claim to verify against retrieved evidence",
+                        },
+                        "min_overlap": {
+                            "type": "integer",
+                            "description": "Minimum token overlap to consider a fact a match (default 2)",
+                        },
+                    },
+                    "required": ["claim"],
+                },
+                handler=fact_check,
+            ),
+        ],
+        workflow_examples="""
+### Grounding & Verification
+
+**Verify a URL before opening or citing it:**
+```json
+{"type": "sequential", "steps": [
+  {"tool": "verify_url", "args": {"url": "$candidate.url"}, "store_result_as": "$check"},
+  {"type": "conditional",
+   "condition": {"field": "$check.reachable", "operator": "equals", "value": true},
+   "if_true": {"tool": "app_open", "args": {"target": "$candidate.url"}},
+   "if_false": {"tool": "web_search", "args": {"query": "$retry_query"}}
+  }
+]}
+```
+
+**Fact-check a claim before stating it:**
+```json
+{"type": "sequential", "steps": [
+  {"tool": "fact_check",
+   "args": {"claim": "The most popular dessert at Legends is Loaded Waffles"},
+   "store_result_as": "$check"},
+  {"type": "conditional",
+   "condition": {"field": "$check.supported", "operator": "equals", "value": true},
+   "if_true": {"tool": "llm_summarise",
+               "args": {"prompt": "Draft a reply citing these supporting facts.",
+                        "context": "$check.matches"}},
+   "if_false": {"tool": "web_search",
+                "args": {"query": "Legends Dessert and Burger Bar popular dessert"},
+                "store_result_as": "$results"}
+  }
+]}
+```
+""",
+    )

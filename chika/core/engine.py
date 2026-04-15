@@ -276,7 +276,7 @@ class ChikaEngine:
             async for event in self._workflow_engine.execute(tool_call["args"]):
                 yield event
                 if event["type"] == "workflow_done":
-                    workflow_result_parts.append(json.dumps(event.get("variables", {}), indent=2))
+                    workflow_result_parts.append(self._format_workflow_result(event))
                 elif event["type"] == "error":
                     workflow_errors.append(event.get("message", ""))
                 elif event["type"] == "tool_result" and event.get("error"):
@@ -313,6 +313,18 @@ class ChikaEngine:
                     followup_text += event["text"]
             if followup_text:
                 self._history.append({"role": "assistant", "content": followup_text})
+
+        # ── Post-response grounding validation ──────────────────────────
+        # If the final text contains specific factual markers (URLs, numbers,
+        # proper nouns) that don't trace back to $facts, emit a warning
+        # event. Best-effort: never blocks the response, never raises.
+        if getattr(config, "GROUNDING_VALIDATE_RESPONSE", True) and final_text.strip():
+            try:
+                warning = await self._validate_grounding(final_text)
+                if warning:
+                    yield warning
+            except Exception:
+                _log.exc("grounding_validation_failed", profile=profile)
 
         # Resolve title (ran in parallel with the main LLM response)
         if title_task is not None:
@@ -379,6 +391,59 @@ class ChikaEngine:
             self._vars.set("profile.workspace", self._active_profile.workspace)
 
     # ── Internal ─────────────────────────────────────────────────────────────
+
+    def _format_workflow_result(self, workflow_done_event: dict) -> str:
+        """
+        Build the tool-result payload that goes back to the LLM.
+
+        Instead of dumping raw JSON of every variable, we produce a labelled
+        block per variable with its provenance ("source") tag, so the LLM can
+        tell at a glance which facts came from a real tool call vs. which are
+        engine-seeded ($profile.name etc.). This is the core grounding layer:
+        the LLM sees *where each fact came from*.
+
+        $facts — the rolling fact ledger — is always rendered first so any
+        claim-check can find it immediately.
+        """
+        variables = workflow_done_event.get("variables", {})
+        # Try to pull source metadata from the live variable store.
+        # Fall back to raw JSON if the store doesn't know about the name
+        # (e.g. tests that instantiate WorkflowEngine without the engine).
+        lines: list[str] = []
+        all_vars = self._vars.all() if self._vars else {}
+
+        # Surface the ledger first — it's the authoritative grounded record.
+        facts_var = all_vars.get("facts")
+        if facts_var and isinstance(facts_var.value, list) and facts_var.value:
+            lines.append("## $facts — grounded evidence retrieved so far")
+            lines.append(
+                "Every entry below is a real result from a tool call this "
+                "session. When you answer the user, CITE these entries. If "
+                "a claim you want to make is not represented here, either "
+                "run another tool to gather evidence or tell the user you "
+                "don't have it. Do NOT synthesize."
+            )
+            lines.append(json.dumps(facts_var.value, indent=2))
+            lines.append("")
+
+        lines.append("## Workflow variables")
+        for name, value in variables.items():
+            if name == "facts":
+                continue  # already rendered above
+            var = all_vars.get(name)
+            source = var.source if var else None
+            header = f"### ${name}" + (f"  (source: {source})" if source else "  (source: engine/seed)")
+            lines.append(header)
+            try:
+                rendered = json.dumps(value, indent=2, default=str)
+            except Exception:
+                rendered = str(value)
+            # Truncate huge values so the LLM context doesn't explode
+            if len(rendered) > 6000:
+                rendered = rendered[:6000] + f"\n...[truncated, full length {len(rendered)} chars]"
+            lines.append(rendered)
+            lines.append("")
+        return "\n".join(lines) or "{}"
 
     def _build_messages(self) -> list[dict]:
         system_prompt = self._prompt.build(
@@ -453,10 +518,21 @@ class ChikaEngine:
             "input_schema": WORKFLOW_ORCHESTRATOR_SCHEMA["function"]["parameters"],
         }
 
+        # Prompt caching: the 300+ line system prompt is static for the session
+        # (tool_list/variables/memory sections change, but the bulk of the base
+        # prompt is identical turn-to-turn). Flagging it as an ephemeral cache
+        # checkpoint lets Anthropic reuse the prefix across turns — cheaper
+        # and faster, with no behavioural change.
+        system_block = [{
+            "type": "text",
+            "text": system_content,
+            "cache_control": {"type": "ephemeral"},
+        }] if system_content else []
+
         async with self._client.messages.stream(
             model=self._model,
             max_tokens=8192,
-            system=system_content,
+            system=system_block,
             messages=filtered,
             tools=[tool_schema],
         ) as stream:
@@ -494,6 +570,96 @@ class ChikaEngine:
                         }}
                         tool_use_block = None
                         tool_input_str = ""
+
+    async def _validate_grounding(self, response_text: str) -> Event | None:
+        """
+        Lightweight post-response check. Returns a `validation_warning` event
+        if the response appears to make specific factual claims that aren't
+        traceable to the $facts ledger.
+
+        Strategy:
+        1. If the response is short or has no specific factual markers
+           (URLs, proper-noun-like capitalised phrases, explicit numbers) →
+           skip. No point paying for a validator on "sure!" or "done.".
+        2. Extract URLs from the response. For each, check it appears in
+           $facts. If a URL is cited that was never retrieved, that's a
+           strong hallucination signal — warn.
+        3. If $facts is empty but the response has factual markers, emit
+           a weaker "ungrounded" warning.
+        """
+        import re
+
+        min_len = getattr(config, "GROUNDING_MIN_LENGTH", 160)
+        if len(response_text) < min_len:
+            return None
+
+        # Extract URLs from the response
+        url_re = re.compile(r"https?://[^\s\)\]\>\"'`]+")
+        response_urls = set(url_re.findall(response_text))
+
+        # Collect grounded URLs from $facts
+        grounded_urls: set[str] = set()
+        facts_var = self._vars.get("facts")
+        facts_list = facts_var.value if (facts_var and isinstance(facts_var.value, list)) else []
+        for f in facts_list:
+            if isinstance(f, dict):
+                if f.get("url"):
+                    grounded_urls.add(str(f["url"]))
+                if f.get("final_url"):
+                    grounded_urls.add(str(f["final_url"]))
+
+        # Whitelist well-known root domains — these don't need grounding
+        root_domains = {
+            "https://google.com", "https://youtube.com", "https://github.com",
+            "https://wikipedia.org", "https://www.google.com",
+            "https://www.youtube.com", "https://www.github.com",
+            "https://www.wikipedia.org",
+        }
+
+        ungrounded_urls = [
+            u for u in response_urls
+            if u.rstrip("/") not in {g.rstrip("/") for g in grounded_urls}
+            and u.rstrip("/") not in {g.rstrip("/") for g in root_domains}
+        ]
+
+        # Heuristic: response mentions "source", "according to", "cited" etc.
+        # but $facts is empty → cited something we never retrieved.
+        citation_markers = re.search(
+            r"\b(source|sources|according to|cited|reference[sd]?)\b",
+            response_text,
+            re.IGNORECASE,
+        )
+
+        if ungrounded_urls:
+            _log.warn("grounding_warning", reason="ungrounded_urls",
+                      urls=ungrounded_urls, profile=self._active_profile.name if self._active_profile else "unknown")
+            return {
+                "type": "validation_warning",
+                "severity": "high",
+                "reason": "ungrounded_urls",
+                "message": (
+                    f"The response cites {len(ungrounded_urls)} URL(s) that were "
+                    "not retrieved by any tool this session. These may be "
+                    "fabricated."
+                ),
+                "urls": ungrounded_urls,
+            }
+
+        if citation_markers and not facts_list:
+            _log.warn("grounding_warning", reason="citations_without_retrieval",
+                      profile=self._active_profile.name if self._active_profile else "unknown")
+            return {
+                "type": "validation_warning",
+                "severity": "medium",
+                "reason": "citations_without_retrieval",
+                "message": (
+                    "The response references sources, but no tool has been "
+                    "called this session to retrieve any. Citations may be "
+                    "fabricated."
+                ),
+            }
+
+        return None
 
     async def _llm_complete(self, prompt: str) -> str:
         """Non-streaming single completion for meta-tools and compaction."""
