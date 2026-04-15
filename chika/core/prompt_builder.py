@@ -421,15 +421,24 @@ class PromptBuilder:
         # Variables block surfaces the source tag AND the actual value for
         # short scalars, so the model doesn't burn a tool call just to read
         # $profile.workspace.
+        #
+        # Per chika's own round-43 self-review: inline values ONLY for simple
+        # scalars. A truncated JSON blob (e.g. half of a file_read result)
+        # looks like real content but is unparseable garbage — it invites the
+        # model to reason on broken data. For complex values, flag them as
+        # "use a tool to read the full value" instead of showing a scrap.
         def _var_line(v: dict) -> str:
             head = f"- `${v['name']}` ({v['type']}, source: {v.get('source') or 'seed'})"
             if v.get("description"):
                 head += f" — {v['description']}"
             if "value" in v:
                 val = v["value"]
-                val_str = val if isinstance(val, str) else str(val)
-                # Keep a readable one-line preview
-                head += f"\n    value: `{val_str[:200]}`"
+                if isinstance(val, (str, int, float, bool)) or val is None:
+                    val_str = val if isinstance(val, str) else str(val)
+                    head += f"\n    value: `{val_str[:200]}`"
+                else:
+                    # dict / list / bytes — too large and truncation is misleading
+                    head += "\n    value: (complex — access via $var.field or read with a tool)"
             return head
 
         var_block = "\n".join(_var_line(v) for v in variables) or "None"
