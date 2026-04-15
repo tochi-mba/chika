@@ -606,7 +606,11 @@ class ChikaEngine:
         # silently so we never block the main path.
         stream_kwargs = dict(
             model=self._model,
-            max_tokens=16384 if getattr(config, "THINKING_ENABLED", False) else 8192,
+            max_tokens=(
+                getattr(config, "ANTHROPIC_MAX_TOKENS_THINKING", 32768)
+                if getattr(config, "THINKING_ENABLED", False)
+                else getattr(config, "ANTHROPIC_MAX_TOKENS", 16384)
+            ),
             system=system_block,
             messages=filtered,
             tools=[tool_schema],
@@ -619,61 +623,103 @@ class ChikaEngine:
             # Extended thinking requires temperature=1 per Anthropic docs
             stream_kwargs["temperature"] = 1.0
 
-        try:
-            stream_cm = self._client.messages.stream(**stream_kwargs)
-        except TypeError:
-            # Older SDK without `thinking` kwarg — retry without it
-            stream_kwargs.pop("thinking", None)
-            stream_kwargs.pop("temperature", None)
-            stream_cm = self._client.messages.stream(**stream_kwargs)
+        # Transient-error retry: Anthropic (and any streaming API) can return
+        # 'overloaded_error', 429 rate-limits, or connection drops mid-stream.
+        # Retry with exponential backoff — up to 4 attempts — before giving
+        # up. Non-transient errors (auth, invalid_request) propagate immediately.
+        import anthropic as _anthropic_module
+        _TRANSIENT = tuple(
+            e for e in (
+                getattr(_anthropic_module, "APIConnectionError", None),
+                getattr(_anthropic_module, "APITimeoutError", None),
+                getattr(_anthropic_module, "InternalServerError", None),
+                getattr(_anthropic_module, "RateLimitError", None),
+            ) if e is not None
+        )
+        _OVERLOADED_TYPES = ("overloaded_error", "api_error")
 
-        async with stream_cm as stream:
-            tool_use_block: dict | None = None
-            tool_input_str = ""
-            in_thinking_block = False
+        def _is_transient(exc: Exception) -> bool:
+            if _TRANSIENT and isinstance(exc, _TRANSIENT):
+                return True
+            body = getattr(exc, "body", None)
+            if isinstance(body, dict):
+                err = body.get("error") or {}
+                if isinstance(err, dict) and err.get("type") in _OVERLOADED_TYPES:
+                    return True
+            msg = str(exc).lower()
+            if any(k in msg for k in ("overloaded", "rate limit", "timeout", "connection error")):
+                return True
+            return False
 
-            async for event in stream:
-                etype = event.type
+        for attempt in range(1, 5):  # up to 4 attempts
+            try:
+                try:
+                    stream_cm = self._client.messages.stream(**stream_kwargs)
+                except TypeError:
+                    # Older SDK without `thinking` kwarg — retry without it
+                    stream_kwargs.pop("thinking", None)
+                    stream_kwargs.pop("temperature", None)
+                    stream_cm = self._client.messages.stream(**stream_kwargs)
 
-                if etype == "content_block_start":
-                    if hasattr(event, "content_block"):
-                        cb_type = event.content_block.type
-                        if cb_type == "tool_use":
-                            tool_use_block = {
-                                "id": event.content_block.id,
-                                "name": event.content_block.name,
-                            }
-                            tool_input_str = ""
-                        elif cb_type == "thinking":
-                            in_thinking_block = True
+                async with stream_cm as stream:
+                    tool_use_block: dict | None = None
+                    tool_input_str = ""
+                    in_thinking_block = False
 
-                elif etype == "content_block_delta":
-                    delta = event.delta
-                    # Thinking deltas: stream as a separate event type so the
-                    # frontend can show them in a collapsible reasoning panel.
-                    if hasattr(delta, "thinking"):
-                        yield {"type": "thinking", "text": delta.thinking}
-                    elif hasattr(delta, "text"):
-                        yield {"type": "token", "text": delta.text}
-                    elif hasattr(delta, "partial_json"):
-                        tool_input_str += delta.partial_json
+                    async for event in stream:
+                        etype = event.type
 
-                elif etype == "content_block_stop":
-                    if tool_use_block and tool_input_str:
-                        try:
-                            args = json.loads(tool_input_str)
-                        except json.JSONDecodeError:
-                            args = {}
-                        yield {"type": "_tool_call_raw", "data": {
-                            "id": tool_use_block["id"],
-                            "name": tool_use_block["name"],
-                            "args": args,
-                        }}
-                        tool_use_block = None
-                        tool_input_str = ""
-                    elif in_thinking_block:
-                        yield {"type": "thinking_end"}
-                        in_thinking_block = False
+                        if etype == "content_block_start":
+                            if hasattr(event, "content_block"):
+                                cb_type = event.content_block.type
+                                if cb_type == "tool_use":
+                                    tool_use_block = {
+                                        "id": event.content_block.id,
+                                        "name": event.content_block.name,
+                                    }
+                                    tool_input_str = ""
+                                elif cb_type == "thinking":
+                                    in_thinking_block = True
+
+                        elif etype == "content_block_delta":
+                            delta = event.delta
+                            if hasattr(delta, "thinking"):
+                                yield {"type": "thinking", "text": delta.thinking}
+                            elif hasattr(delta, "text"):
+                                yield {"type": "token", "text": delta.text}
+                            elif hasattr(delta, "partial_json"):
+                                tool_input_str += delta.partial_json
+
+                        elif etype == "content_block_stop":
+                            if tool_use_block and tool_input_str:
+                                try:
+                                    args = json.loads(tool_input_str)
+                                except json.JSONDecodeError:
+                                    args = {}
+                                yield {"type": "_tool_call_raw", "data": {
+                                    "id": tool_use_block["id"],
+                                    "name": tool_use_block["name"],
+                                    "args": args,
+                                }}
+                                tool_use_block = None
+                                tool_input_str = ""
+                            elif in_thinking_block:
+                                yield {"type": "thinking_end"}
+                                in_thinking_block = False
+                return  # stream completed successfully
+
+            except Exception as exc:
+                if attempt < 4 and _is_transient(exc):
+                    backoff = min(2 ** attempt, 16)  # 2, 4, 8 seconds
+                    _log.warn("anthropic_transient_retry",
+                              attempt=attempt, backoff=backoff, error=str(exc)[:200])
+                    yield {"type": "retry_notice",
+                           "message": f"Anthropic API transient error ({type(exc).__name__}); retry {attempt}/3 in {backoff}s",
+                           "attempt": attempt}
+                    import asyncio as _asyncio
+                    await _asyncio.sleep(backoff)
+                    continue
+                raise
 
     async def _validate_grounding(self, response_text: str) -> Event | None:
         """
@@ -825,7 +871,7 @@ class ChikaEngine:
         elif self._provider == "anthropic":
             resp = await self._client.messages.create(
                 model=self._model,
-                max_tokens=4096,
+                max_tokens=getattr(config, "ANTHROPIC_COMPLETE_MAX_TOKENS", 8192),
                 messages=[{"role": "user", "content": prompt}],
             )
             # Response may contain thinking / tool_use blocks before text.

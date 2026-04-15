@@ -508,10 +508,19 @@ class WorkflowEngine:
             result = {"error": f"Unhandled exception in {tool_name} — see chika.log for traceback"}
 
         duration = int((time.monotonic() - t0) * 1000)
-        error = result.get("error") if isinstance(result, dict) else None
+        # Treat PRESENCE of an "error" key as an error (even if the string
+        # is empty/falsy). Previously empty-string errors were logged as
+        # tool_ok, masking real failures like dispatch catching an empty
+        # exception. If error is literally "" we show a placeholder so the
+        # log entry is still informative.
+        has_error_key = isinstance(result, dict) and "error" in result
+        raw_error = result.get("error") if isinstance(result, dict) else None
+        error = raw_error if has_error_key else None
+        if has_error_key and not raw_error:
+            error = "(empty-string error from tool — likely cancelled or raised without message)"
         warning = result.get("warning") if isinstance(result, dict) else None
         exit_code = result.get("exit_code") if isinstance(result, dict) else None
-        if error:
+        if has_error_key:
             _log.error("tool_error", tool=tool_name, step_id=sid, error=error, duration_ms=duration, profile=self._profile())
         elif warning:
             _log.error("tool_warning", tool=tool_name, step_id=sid, warning=warning, exit_code=exit_code, duration_ms=duration, profile=self._profile())

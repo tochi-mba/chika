@@ -38,13 +38,22 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if tool is None:
             return {"error": f"Unknown tool: {name!r}"}
+        import asyncio as _asyncio
         try:
             result = tool.handler(**args)
             if hasattr(result, "__await__"):
                 result = await result
             return result
+        except _asyncio.CancelledError:
+            # Always propagate cancellation — never swallow it into an error
+            # dict, or the caller can't tell the task was interrupted. This
+            # was the source of mysterious `{"error": ""}` results.
+            raise
         except Exception as exc:
-            return {"error": str(exc)}
+            # Always include exception type + message (never empty) so logs
+            # and tool_result payloads are diagnosable.
+            msg = str(exc) or repr(exc)
+            return {"error": f"{type(exc).__name__}: {msg}"}
 
     def list_for_prompt(self) -> list[dict]:
         """Return a compact list of {name, description} for the system prompt."""

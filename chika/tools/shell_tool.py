@@ -53,17 +53,33 @@ class ProcessRegistry:
 # ── Background reader ─────────────────────────────────────────────────────────
 
 async def _read_stream_into_buf(stream: asyncio.StreamReader | None, buf: list[str]) -> None:
-    """Continuously read from a stream and append lines to buf."""
+    """
+    Continuously read from a stream and append COMPLETE LINES to buf.
+
+    asyncio.StreamReader.readline() on Windows sometimes returns partial reads
+    one byte at a time when the subprocess flushes per-character. That turned
+    `echo one` into 6 separate buffer entries (o,n,e, ,\r,\n). We now read
+    chunks into a carry buffer and split on real newline boundaries.
+    """
     if stream is None:
         return
-    while True:
-        try:
-            line = await stream.readline()
-            if not line:
+    carry = ""
+    try:
+        while True:
+            chunk = await stream.read(4096)
+            if not chunk:
                 break
-            buf.append(line.decode(errors="replace").rstrip("\n"))
-        except Exception:
-            break
+            carry += chunk.decode(errors="replace")
+            # Split on any newline, keep the last incomplete fragment for next iter
+            parts = carry.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+            carry = parts.pop()  # last piece may be incomplete
+            for line in parts:
+                buf.append(line)
+    except Exception:
+        pass
+    # Flush any residual partial line
+    if carry:
+        buf.append(carry)
 
 
 # ── shell_exec ────────────────────────────────────────────────────────────────
@@ -122,13 +138,50 @@ async def shell_exec(
     timeout_seconds: float = 90.0,
     wait_for_completion: bool = True,
     working_directory: str | None = None,
+    **_extra_kwargs,  # absorb common mistakes like shell=True, cwd=, env=
 ) -> dict:
-    proc = await asyncio.create_subprocess_shell(
-        command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=working_directory,
-    )
+    # Accept common aliases silently rather than raising TypeError:
+    # - cwd → working_directory (Python subprocess name)
+    # - shell=True/False → ignored (we're always shelling out)
+    if working_directory is None and "cwd" in _extra_kwargs:
+        working_directory = _extra_kwargs.get("cwd")
+    # Validate working_directory up-front so a bad path becomes a nice
+    # structured error instead of propagating NotADirectoryError/FileNotFound
+    # from create_subprocess_shell. (Observed in chika.log as mystery empty
+    # error results when the LLM sent a malformed path.)
+    if working_directory:
+        import os as _os
+        if not _os.path.isdir(working_directory):
+            return {
+                "stdout": "", "stderr": "",
+                "exit_code": -1, "timed_out": False, "pid": -1,
+                "stdout_lines": [],
+                "error": f"working_directory does not exist or is not a directory: {working_directory!r}",
+            }
+    if not command or not command.strip():
+        return {
+            "stdout": "", "stderr": "",
+            "exit_code": -1, "timed_out": False, "pid": -1,
+            "stdout_lines": [],
+            "error": "command is empty — pass a non-empty shell command",
+        }
+
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=working_directory,
+        )
+    except (NotADirectoryError, FileNotFoundError, OSError) as exc:
+        # Defensive catch — even with the isdir check above, races or
+        # permission issues could still raise. Always return a dict.
+        return {
+            "stdout": "", "stderr": "",
+            "exit_code": -1, "timed_out": False, "pid": -1,
+            "stdout_lines": [],
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
     # Register ALL processes so the shells monitor tab can show them
     managed = ManagedProcess(pid=proc.pid, command=command, process=proc)

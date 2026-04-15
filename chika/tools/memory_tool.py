@@ -1,33 +1,42 @@
 """
-Memory tools — thin wrappers around MemoryManager.
-The MemoryManager instance is injected at startup via closure.
+Memory tools — thin wrappers around the session's MemoryManager.
+
+IMPORTANT: the tools look up `engine._memory` at call time, not at
+registration time. If they captured the memory manager via closure at
+registration, a later switch_profile() would replace engine._memory but
+the tools would still write to the original — that's how memory_persist
+calls for user 'alex' ended up in default/memory.md.
 """
 from __future__ import annotations
-from typing import TYPE_CHECKING
 
 from chika.core.tool_registry import ToolDefinition
 
-if TYPE_CHECKING:
-    from chika.core.memory_manager import MemoryManager
 
+def make_memory_tools(engine) -> list[ToolDefinition]:
+    def _mem():
+        """Resolve the CURRENT memory manager every call — follows profile switches."""
+        return engine._memory
 
-def make_memory_tools(memory: "MemoryManager") -> list[ToolDefinition]:
     async def memory_persist(key: str, value: str, ttl_days: int | None = None) -> dict:
-        memory.persist(key, value, ttl_days)
-        return {"ok": True, "key": key}
+        _mem().persist(key, value, ttl_days)
+        return {
+            "ok": True, "key": key,
+            "profile": engine._active_profile.name if engine._active_profile else None,
+        }
 
     async def memory_forget(key: str) -> dict:
-        memory.forget(key)
+        _mem().forget(key)
         return {"ok": True, "key": key}
 
     async def memory_read(key: str) -> dict:
-        value = memory.read(key)
+        value = _mem().read(key)
         if value is None:
             return {"error": f"Key not found: {key!r}"}
         return {"key": key, "value": value}
 
     async def memory_list(_: str = "") -> dict:
-        return {"keys": memory.list_keys(), "entries": memory.all_entries()}
+        m = _mem()
+        return {"keys": m.list_keys(), "entries": m.all_entries()}
 
     return [
         ToolDefinition(

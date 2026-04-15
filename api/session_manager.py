@@ -135,8 +135,10 @@ class SessionManager:
             tool_registry.register(t)
         for t in WEB_FETCH_TOOLS:
             tool_registry.register(t)
-        for t in make_memory_tools(memory_manager):
-            tool_registry.register(t)
+        # Memory tools get registered AFTER the engine is built — they need
+        # to look up engine._memory dynamically so profile switches take
+        # effect. (Closure-bound memory managers were being written to the
+        # wrong profile after switch_profile swapped _memory.)
         for t in make_variable_tools(variable_store):
             tool_registry.register(t)
 
@@ -164,6 +166,11 @@ class SessionManager:
         engine.session_id = session_id
         engine._chat_store = self._chat_store
 
+        # Register memory tools now — they look up engine._memory dynamically
+        # so a profile switch correctly redirects writes to the new profile's
+        # memory file.
+        for t in make_memory_tools(engine):
+            tool_registry.register(t)
         # Register question_skill now that the engine exists — ask_user reads
         # engine._workflow_engine.question_handler at call time.
         skill_registry.register(build_question_skill(engine._workflow_engine))
