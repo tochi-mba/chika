@@ -243,9 +243,13 @@ class ChikaEngine:
                     turn_text = clean_text
                     buffered_tokens = [clean_text] if clean_text else []
 
-            # Forward (possibly cleaned) tokens to the frontend
-            for tok in buffered_tokens:
-                yield {"type": "token", "text": tok}
+            # Forward tokens to frontend — but ONLY when there is no tool call.
+            # If the LLM wrote text alongside a tool call, that text is premature:
+            # it's narrating results it hasn't received yet. Suppress it entirely.
+            # The real response will come after the workflow finishes.
+            if not tool_call:
+                for tok in buffered_tokens:
+                    yield {"type": "token", "text": tok}
 
             # No tool call → LLM is done, save and exit loop
             if not (tool_call and tool_call.get("name") == "workflow_orchestrator"):
@@ -356,6 +360,9 @@ class ChikaEngine:
         self._vars.set("profile.workspace", profile.workspace, description="Profile workspace directory")
         from chika.core.logger import LOG_PATH
         self._vars.set("chika.log", str(LOG_PATH), description="Live structured log file — read this to diagnose errors")
+        import tempfile, pathlib
+        tmp = str(pathlib.Path(tempfile.gettempdir()).as_posix())
+        self._vars.set("chika.tmp", tmp, description="OS temp directory — use this for curl output files instead of /tmp/")
         # Notify hooks so they can register/unregister profile-scoped tools
         for hook in self._profile_switch_hooks:
             try:

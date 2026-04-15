@@ -467,10 +467,14 @@ class WorkflowEngine:
 
         duration = int((time.monotonic() - t0) * 1000)
         error = result.get("error") if isinstance(result, dict) else None
+        warning = result.get("warning") if isinstance(result, dict) else None
+        exit_code = result.get("exit_code") if isinstance(result, dict) else None
         if error:
             _log.error("tool_error", tool=tool_name, step_id=sid, error=error, duration_ms=duration, profile=self._profile())
+        elif warning:
+            _log.error("tool_warning", tool=tool_name, step_id=sid, warning=warning, exit_code=exit_code, duration_ms=duration, profile=self._profile())
         else:
-            _log.info("tool_ok", tool=tool_name, step_id=sid, duration_ms=duration, profile=self._profile())
+            _log.info("tool_ok", tool=tool_name, step_id=sid, exit_code=exit_code, duration_ms=duration, profile=self._profile())
         yield {"type": "tool_result", "step_id": sid, "tool": tool_name,
                "result": result, "error": error, "duration_ms": duration}
 
@@ -498,6 +502,11 @@ class WorkflowEngine:
             if context is not None:
                 pipeline_input = context
             input_str = json.dumps(pipeline_input, indent=2) if isinstance(pipeline_input, (dict, list)) else str(pipeline_input)
+            # Hard cap: ~100k chars ≈ 25k tokens. Prevents context_length_exceeded errors.
+            # If content is this large, the agent should be using file_read with line ranges instead.
+            _MAX_INPUT = 100_000
+            if len(input_str) > _MAX_INPUT:
+                input_str = input_str[:_MAX_INPUT] + f"\n... [INPUT TRUNCATED — was {len(input_str)} chars. Use file_read with start_line/end_line to read large content in chunks instead of passing it directly to llm_transform.]"
             # Schema: tell the inner LLM exactly what JSON structure to return
             schema = args.get("schema")
             schema_instruction = ""

@@ -81,14 +81,13 @@ WEB_SKILL = Skill(
 ]}
 ```
 
-**Fetch a page with curl — save to temp file — read in sections:**
+**Fetch a page — save to temp file — read in sections:**
 ```json
 {"type": "sequential", "steps": [
-  {"tool": "shell_exec", "args": {"command": "curl -sL \"$url\" -o /tmp/chika_page.html"}, "store_result_as": "$fetch"},
-  {"tool": "shell_exec", "args": {"command": "wc -l /tmp/chika_page.html"}, "store_result_as": "$wc"},
-  {"tool": "file_read", "args": {"path": "/tmp/chika_page.html", "start_line": 1, "end_line": 80}, "store_result_as": "$top"},
-  {"tool": "llm_transform", "args": {"prompt": "What line range contains the answer?", "context": "$top", "schema": {"start": "integer", "end": "integer"}}, "store_result_as": "$range"},
-  {"tool": "file_read", "args": {"path": "/tmp/chika_page.html", "start_line": "$range.start", "end_line": "$range.end"}, "store_result_as": "$section"}
+  {"tool": "web_fetch", "args": {"url": "$url", "save_path": "$chika.tmp/chika_page.html"}, "store_result_as": "$fetch"},
+  {"tool": "file_read", "args": {"path": "$chika.tmp/chika_page.html", "start_line": 1, "end_line": 80}, "store_result_as": "$top"},
+  {"tool": "llm_transform", "args": {"prompt": "What line range contains the answer? total_lines is in the result.", "context": "$top", "schema": {"start": "integer", "end": "integer"}}, "store_result_as": "$range"},
+  {"tool": "file_read", "args": {"path": "$chika.tmp/chika_page.html", "start_line": "$range.start", "end_line": "$range.end"}, "store_result_as": "$section"}
 ]}
 ```
 
@@ -97,9 +96,15 @@ WEB_SKILL = Skill(
 {"type": "sequential", "steps": [
   {"tool": "web_search", "args": {"query": "site query here"}, "store_result_as": "$results"},
   {"tool": "llm_transform", "args": {"prompt": "Extract the best URL.", "context": "$results", "schema": {"url": "string"}}, "store_result_as": "$page"},
-  {"tool": "shell_exec", "args": {"command": "curl -sL \"$page.url\" -o /tmp/chika_page.html && echo ok"}, "store_result_as": "$fetch"},
-  {"tool": "file_read", "args": {"path": "/tmp/chika_page.html", "start_line": 1, "end_line": 80}, "store_result_as": "$preview"}
+  {"tool": "web_fetch", "args": {"url": "$page.url", "save_path": "$chika.tmp/chika_page.html"}, "store_result_as": "$fetch"},
+  {"tool": "file_read", "args": {"path": "$chika.tmp/chika_page.html", "start_line": 1, "end_line": 80}, "store_result_as": "$preview"}
 ]}
 ```
+
+**Verify a URL before using it:**
+```json
+{"tool": "web_head", "args": {"url": "$some_url"}, "store_result_as": "$check"}
+```
+Then check `$check.ok` (true = 200), `$check.is_image` (true = image), `$check.is_html` (true = webpage).
 """,
 )

@@ -96,6 +96,10 @@ export function useChika(apiKey = '') {
         chat.appendToken(`\n\n[Error: ${event.message}]`)
         chat.finaliseAssistantMessage()
         break
+
+      case 'compaction':
+        chat.addCompactionMessage(event)
+        break
     }
   }
 

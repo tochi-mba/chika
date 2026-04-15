@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Day 1: Addition & Subtraction within 20</title>
+<style>
+body {font-family: Arial, sans-serif; background:#f8f9fa; margin:0; padding:2rem;}
+h1 {color:#2c3e50;}
+.problem {margin:1rem 0; font-size:1.5rem;}
+input {font-size:1.2rem; width:5rem;}
+button {background:#27ae60; color:white; border:none; padding:0.5rem 1rem; font-size:1rem; cursor:pointer;}
+.result {font-weight:bold; margin-top:0.5rem;}
+</style>
+</head>
+<body>
+<h1>Day 1 Practice: Addition & Subtraction within 20</h1>
+<p>Solve the problems below. Click Check when done.</p>
+<div id="quiz"></div>
+<button onclick="checkAnswers()">Check</button>
+<div id="score" class="result"></div>
+<script>
+const problems = [
+  {q: '5 + 3 =', a: 8},
+  {q: '10 - 4 =', a: 6},
+  {q: '7 + 9 =', a: 16},
+  {q: '15 - 7 =', a: 8},
+  {q: '2 + 6 =', a: 8},
+  {q: '11 - 3 =', a: 8},
+  {q: '8 + 6 =', a: 14},
+  {q: '20 - 9 =', a: 11},
+  {q: '9 + 5 =', a: 14},
+  {q: '14 - 8 =', a: 6}
+];
+const quizDiv = document.getElementById('quiz');
+problems.forEach((p,i)=>{
+  quizDiv.innerHTML += `<div class='problem'>${p.q} <input id='ans${i}'></div>`;
+});
+function checkAnswers(){
+  let score=0;
+  problems.forEach((p,i)=>{let val=parseInt(document.getElementById('ans'+i).value); if(val===p.a) score++;});
+  document.getElementById('score').textContent = `You got ${score} out of ${problems.length}!`;
+  fetch('chika_api/save_score', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({score})}).then(()=>{localStorage.setItem('math_last_score', score); sessionStorage.setItem('math_last_score', score);});
+}
+</script>
+</body>
+</html>

@@ -1,5 +1,13 @@
 <template>
-  <div class="message" :class="message.role">
+  <div v-if="message.role === 'compaction'" class="compaction-divider">
+    <div class="compaction-line" />
+    <div class="compaction-label">
+      <span class="compaction-icon">⚡</span>
+      Context compacted — {{ message.removed }} messages summarised
+    </div>
+    <div class="compaction-line" />
+  </div>
+  <div v-else class="message" :class="message.role">
     <div class="bubble">
       <span class="text" v-html="formattedText" />
       <span v-if="message.streaming" class="cursor" />
@@ -76,4 +84,27 @@ const formattedText = computed(() => {
 :deep(pre)  { background: #111; padding: 10px; border-radius: 8px; margin: 6px 0; overflow-x: auto; }
 :deep(pre code) { padding: 0; background: none; }
 :deep(strong) { font-weight: 600; }
+
+.compaction-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  margin: 4px 0;
+}
+.compaction-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, transparent, #3a3a50, transparent);
+}
+.compaction-label {
+  font-size: 11px;
+  color: #6c63ff99;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  user-select: none;
+}
+.compaction-icon { font-size: 12px; }
 </style>

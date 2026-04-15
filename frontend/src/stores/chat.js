@@ -31,6 +31,26 @@ export const useChatStore = defineStore('chat', () => {
     streamingText.value = ''
   }
 
+  function addCompactionMessage(event) {
+    const compactionMsg = {
+      id: Date.now(),
+      role: 'compaction',
+      removed: event.removed || 0,
+      kept: event.kept || 0,
+      summary: event.summary_preview || '',
+      streaming: false,
+    }
+    // If the last message is an empty streaming assistant bubble (added optimistically
+    // on send before any tokens arrive), insert the compaction divider before it so it
+    // appears between the user message and the assistant response.
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant' && last.streaming && last.text === '') {
+      messages.value.splice(messages.value.length - 1, 0, compactionMsg)
+    } else {
+      messages.value.push(compactionMsg)
+    }
+  }
+
   // Called when server sends session_info — replaces all state
   function restoreSession(data) {
     sessionId.value   = data.session_id || ''
@@ -60,6 +80,6 @@ export const useChatStore = defineStore('chat', () => {
   return {
     messages, title, sessionId, isStreaming, streamingText,
     addUserMessage, startAssistantMessage, appendToken,
-    finaliseAssistantMessage, restoreSession, setTitle, clear,
+    finaliseAssistantMessage, addCompactionMessage, restoreSession, setTitle, clear,
   }
 })

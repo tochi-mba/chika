@@ -31,6 +31,7 @@ _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 from chika.tools.apps_tool import APP_OPEN_TOOL
 from chika.tools.shell_tool import ALL_SHELL_TOOLS
 from chika.tools.file_tools import FILE_TOOLS
+from chika.tools.web_fetch_tool import WEB_FETCH_TOOLS
 from chika.tools.memory_tool import make_memory_tools
 from chika.tools.profile_tools import make_profile_tools, make_set_password_tool
 from chika.tools.wait_tool import WAIT_TOOL
@@ -127,6 +128,8 @@ class SessionManager:
         tool_registry.register(APP_OPEN_TOOL)
         tool_registry.register(WAIT_TOOL)
         for t in FILE_TOOLS:
+            tool_registry.register(t)
+        for t in WEB_FETCH_TOOLS:
             tool_registry.register(t)
         for t in make_memory_tools(memory_manager):
             tool_registry.register(t)

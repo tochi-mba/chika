@@ -89,7 +89,7 @@ class ShellResult:
             stdout = (
                 f"{head}\n\n"
                 f"... [{len(lines)} lines total — truncated. "
-                f"Pipe to a file with '> /tmp/out.txt' and use file_read with start_line/end_line to read it in chunks] ...\n\n"
+                f"Pipe to a file and use file_read with start_line/end_line to read it in chunks] ...\n\n"
                 f"{tail}"
             )
             extra["stdout_truncated"] = True
@@ -98,7 +98,7 @@ class ShellResult:
         if len(stderr) > MAX_CHARS:
             stderr = stderr[:MAX_CHARS] + f"\n... [stderr truncated at {MAX_CHARS} chars]"
 
-        return {
+        result = {
             "stdout": stdout,
             "stderr": stderr,
             "exit_code": self.exit_code,
@@ -107,6 +107,14 @@ class ShellResult:
             "stdout_lines": [l for l in self.stdout.splitlines() if l.strip()][:100],
             **extra,
         }
+
+        # Surface non-zero exit as a warning so the LLM can detect command failures.
+        # Not a hard "error" (that would abort sequentials for normal grep no-match etc.)
+        # but a visible "warning" field the LLM and logs can see.
+        if self.exit_code != 0 and not self.timed_out:
+            result["warning"] = f"Command exited with non-zero code {self.exit_code}. Check stderr for details."
+
+        return result
 
 
 async def shell_exec(
@@ -122,10 +130,12 @@ async def shell_exec(
         cwd=working_directory,
     )
 
+    # Register ALL processes so the shells monitor tab can show them
+    managed = ManagedProcess(pid=proc.pid, command=command, process=proc)
+    ProcessRegistry.register(managed)
+
     if not wait_for_completion:
-        # Register and start background readers so output is captured
-        managed = ManagedProcess(pid=proc.pid, command=command, process=proc)
-        ProcessRegistry.register(managed)
+        # Background: stream output into buffers continuously
         asyncio.create_task(_read_stream_into_buf(proc.stdout, managed.stdout_buf))
         asyncio.create_task(_read_stream_into_buf(proc.stderr, managed.stderr_buf))
 
@@ -144,15 +154,24 @@ async def shell_exec(
 
     try:
         stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+        stdout_text = stdout_b.decode(errors="replace")
+        stderr_text = stderr_b.decode(errors="replace")
+        # Populate buffers so the shells monitor shows the output
+        managed.stdout_buf.extend(stdout_text.splitlines())
+        managed.stderr_buf.extend(stderr_text.splitlines())
+        managed.running = False
+        managed.exit_code = proc.returncode or 0
         return ShellResult(
-            stdout=stdout_b.decode(errors="replace"),
-            stderr=stderr_b.decode(errors="replace"),
+            stdout=stdout_text,
+            stderr=stderr_text,
             exit_code=proc.returncode or 0,
             timed_out=False,
             pid=proc.pid,
         ).to_dict()
     except asyncio.TimeoutError:
         proc.kill()
+        managed.running = False
+        managed.exit_code = -1
         return ShellResult(
             stdout="",
             stderr=f"Command timed out after {timeout_seconds}s",
