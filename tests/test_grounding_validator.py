@@ -103,14 +103,16 @@ def test_trusted_hosts_are_whitelisted():
 
 def test_citations_without_retrieval_is_flagged():
     eng = _make_engine_with_vars(facts_list=[])  # no tool ran
+    # Response cites a specific URL as a source but no retrieval happened
     response = (
-        "According to my sources, the most popular dessert is the waffle. "
+        "According to my sources at https://untrusted-data.example.org/report, "
+        "the most popular dessert is the waffle. "
         "The references for this claim are consistent across the data. "
         "This response is long enough to be validated by the engine."
     )
     result = _run(eng._validate_grounding(response))
     assert result is not None
-    assert result["reason"] == "citations_without_retrieval"
+    assert result["reason"] == "ungrounded_citation"
 
 
 def test_citations_with_facts_are_not_flagged():

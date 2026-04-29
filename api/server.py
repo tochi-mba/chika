@@ -390,6 +390,10 @@ async def websocket_endpoint(
                 try:
                     msg = json.loads(raw)
                 except json.JSONDecodeError:
+                    try:
+                        await send({"type": "error", "message": "Invalid JSON"})
+                    except Exception:
+                        break
                     continue
 
                 mtype = msg.get("type")

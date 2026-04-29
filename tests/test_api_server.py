@@ -327,32 +327,41 @@ def test_spotify_status_includes_authorized_field():
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 
-def test_websocket_accepts_connection():
-    with client.websocket_connect("/ws/test_ws_session") as ws:
-        ws.send_json({"type": "ping"})
+def _recv_of_type(ws, target_type: str, max_reads: int = 10):
+    """Read events until one with target_type is found (drains initial state events)."""
+    for _ in range(max_reads):
         data = ws.receive_json()
+        if data.get("type") == target_type:
+            return data
+    raise AssertionError(f"Expected event {target_type!r} not found in {max_reads} reads")
+
+
+def test_websocket_accepts_connection():
+    with client.websocket_connect("/ws/") as ws:
+        ws.send_json({"type": "ping"})
+        data = _recv_of_type(ws, "pong")
         assert data["type"] == "pong"
 
 
 def test_websocket_ping_pong():
-    with client.websocket_connect("/ws/ping_pong_session") as ws:
+    with client.websocket_connect("/ws/") as ws:
         ws.send_json({"type": "ping"})
-        data = ws.receive_json()
+        data = _recv_of_type(ws, "pong")
         assert data["type"] == "pong"
 
 
 def test_websocket_reset_sends_reset_done():
-    with client.websocket_connect("/ws/reset_ws_session") as ws:
+    with client.websocket_connect("/ws/") as ws:
         ws.send_json({"type": "reset"})
-        data = ws.receive_json()
+        data = _recv_of_type(ws, "reset_done")
         assert data["type"] == "reset_done"
-        assert data["session_id"] == "reset_ws_session"
+        assert data.get("session_id")  # present and non-empty (UUID assigned by server)
 
 
 def test_websocket_invalid_json_returns_error():
-    with client.websocket_connect("/ws/bad_json_session") as ws:
+    with client.websocket_connect("/ws/") as ws:
         ws.send_text("not valid json {{")
-        data = ws.receive_json()
+        data = _recv_of_type(ws, "error")
         assert data["type"] == "error"
 
 
@@ -362,7 +371,7 @@ def test_websocket_auth_rejected_with_wrong_token():
         cfg.CHIKA_API_KEY = "required_key"
         from starlette.websockets import WebSocketDisconnect as WSDisconnect
         with pytest.raises(WSDisconnect):
-            with client.websocket_connect("/ws/auth_test?token=wrong"):
+            with client.websocket_connect("/ws/?token=wrong"):
                 pass
     finally:
         cfg.CHIKA_API_KEY = original
@@ -372,9 +381,9 @@ def test_websocket_auth_accepted_with_correct_token():
     original = cfg.CHIKA_API_KEY
     try:
         cfg.CHIKA_API_KEY = "my_key"
-        with client.websocket_connect("/ws/auth_ok_session?token=my_key") as ws:
+        with client.websocket_connect("/ws/?token=my_key") as ws:
             ws.send_json({"type": "ping"})
-            data = ws.receive_json()
+            data = _recv_of_type(ws, "pong")
             assert data["type"] == "pong"
     finally:
         cfg.CHIKA_API_KEY = original
@@ -382,9 +391,9 @@ def test_websocket_auth_accepted_with_correct_token():
 
 def test_websocket_user_message_no_crash_without_llm():
     """Empty text should be skipped silently (not crash)."""
-    with client.websocket_connect("/ws/msg_session") as ws:
+    with client.websocket_connect("/ws/") as ws:
         ws.send_json({"type": "user_message", "text": ""})
         # Empty text is skipped — just check no exception thrown
         ws.send_json({"type": "ping"})
-        data = ws.receive_json()
+        data = _recv_of_type(ws, "pong")
         assert data["type"] == "pong"
