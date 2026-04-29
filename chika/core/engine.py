@@ -464,8 +464,11 @@ class ChikaEngine:
             f'"{first_message[:300]}"\n\n'
             "Reply with ONLY the title. No quotes, no trailing punctuation."
         )
-        title = await self._llm_complete(prompt)
-        return title.strip().strip('"').strip("'")[:60] or first_message[:50]
+        try:
+            title = await self._llm_complete(prompt)
+            return title.strip().strip('"').strip("'")[:60] or first_message[:50]
+        except Exception:
+            return first_message[:50]
 
     def switch_profile(self, profile: Profile) -> None:
         """Swap the active profile: new memory file, update workspace variable."""
@@ -664,9 +667,10 @@ class ChikaEngine:
             except _openai.NotFoundError as exc:
                 if self._provider == "ollama":
                     raise RuntimeError(
-                        f"Ollama returned 404 — is it running?\n"
-                        f"  Start it with: ollama serve\n"
-                        f"  Then make sure the model is pulled: ollama pull {self._model}"
+                        f"Ollama model '{self._model}' not found.\n"
+                        f"  Pull it with: ollama pull {self._model}\n"
+                        f"  Or list available models: ollama list\n"
+                        f"  (If Ollama isn't running yet: ollama serve)"
                     ) from exc
                 raise
             except (_openai.APIConnectionError, _openai.APITimeoutError,
