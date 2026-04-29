@@ -253,9 +253,9 @@ def build_frontend() -> None:
 
     print(c(DIM, "\n  Running: npm install\n"))
     try:
-        run([npm, "install", "--prefix", str(frontend)])
+        subprocess.run([npm, "install"], cwd=str(frontend), check=True)
         print(c(DIM, "\n  Running: npm run build\n"))
-        run([npm, "run", "build", "--prefix", str(frontend)])
+        subprocess.run([npm, "run", "build"], cwd=str(frontend), check=True)
         ok("Frontend built → frontend/dist/")
     except subprocess.CalledProcessError:
         err("Frontend build failed.")
