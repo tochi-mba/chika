@@ -239,7 +239,10 @@ def build_frontend() -> None:
         ok("Frontend already built")
         return
 
-    if not shutil.which("node"):
+    node = shutil.which("node")
+    npm  = shutil.which("npm") or shutil.which("npm.cmd")
+
+    if not node or not npm:
         warn("Node.js not found — skipping frontend build.")
         info("Install Node 18+ from nodejs.org, then run:")
         info("  cd frontend && npm install && npm run build")
@@ -247,9 +250,9 @@ def build_frontend() -> None:
 
     print(c(DIM, "\n  Running: npm install\n"))
     try:
-        run(["npm", "install", "--prefix", str(frontend)])
+        run([npm, "install", "--prefix", str(frontend)])
         print(c(DIM, "\n  Running: npm run build\n"))
-        run(["npm", "run", "build", "--prefix", str(frontend)])
+        run([npm, "run", "build", "--prefix", str(frontend)])
         ok("Frontend built → frontend/dist/")
     except subprocess.CalledProcessError:
         err("Frontend build failed.")
