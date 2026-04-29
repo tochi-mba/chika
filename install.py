@@ -197,6 +197,9 @@ def configure_env() -> None:
         info("Recommended models: llama3.1, qwen2.5, deepseek-r1")
         model    = ask("Model", default="llama3.1")
         base_url = ask("Ollama URL", default="http://localhost:11434/v1")
+        if not base_url.endswith("/v1"):
+            base_url = base_url.rstrip("/") + "/v1"
+            info(f"Appended /v1 → {base_url}")
         lines += [
             f"OLLAMA_MODEL={model}\n",
             f"OLLAMA_BASE_URL={base_url}\n",
