@@ -30,6 +30,10 @@ data/devices/
 data/sessions/
 data/test_traces/
 data/profiles/
+profiles/
+chika_cc_full.txt
+top_files.py
+*.log.*
 
 # Node / Frontend
 node_modules/
