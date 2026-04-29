@@ -61,13 +61,21 @@ async def main():
         print("Chika: ", end="", flush=True)
         try:
             async for event in engine.chat(user_input):
-                if event.get("type", "").startswith("_"):
+                etype = event.get("type", "")
+                if etype.startswith("_"):
+                    continue
+                if etype == "cancelled":
+                    print("\n[stopped]", end="")
                     continue
                 out = fmt_event(event)
                 if out:
                     print(out, end="", flush=True)
-        except RuntimeError as e:
-            print(f"\n\n[error] {e}\n")
+        except (RuntimeError, KeyboardInterrupt) as e:
+            if isinstance(e, KeyboardInterrupt):
+                engine.cancel()
+                print("\n[stopped]")
+            else:
+                print(f"\n\n[error] {e}\n")
             continue
 
         print()

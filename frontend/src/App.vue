@@ -89,7 +89,7 @@
 
       <div class="chat-col">
         <MessageList :messages="chat.messages" :is-streaming="chat.isStreaming" />
-        <ChatInput :disabled="chat.isStreaming" @send="send" />
+        <ChatInput :disabled="chat.isStreaming" :streaming="chat.isStreaming" @send="send" @stop="stop" />
       </div>
 
       <div class="panel-col" :class="{ collapsed: panelCollapsed }">
@@ -125,7 +125,7 @@ watchEffect(() => {
 })
 
 const storedKey = localStorage.getItem('chika_api_key') || ''
-const { send, reset, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat } = useChika(storedKey)
+const { send, stop, reset, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat } = useChika(storedKey)
 
 // Panel collapsed state — persisted across sessions
 const panelCollapsed = ref(localStorage.getItem('chika_panel_open') === 'false')

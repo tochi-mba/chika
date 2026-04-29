@@ -542,6 +542,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch(err  => sendResponse({ error: err.message }))
     return true  // keep channel open for async response
 
+  } else if (msg.type === 'send_to_server') {
+    ws.send(msg.payload)
+    sendResponse({ ok: true })
+
   } else if (msg.type === 'send_approval_response') {
     const idx = chatState.pendingApprovals.findIndex(a => a.request_id === msg.request_id)
     if (idx !== -1) chatState.pendingApprovals.splice(idx, 1)

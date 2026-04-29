@@ -186,6 +186,10 @@ export function useChika(apiKey = '') {
     _wsSend({ type: 'user_message', text })
   }
 
+  function stop() {
+    _wsSend({ type: 'stop' })
+  }
+
   function newChat() {
     chat.clear()
     system.clearSession()
@@ -234,5 +238,5 @@ export function useChika(apiKey = '') {
 
   connect()
 
-  return { send, reset, ping, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat }
+  return { send, stop, reset, ping, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat }
 }

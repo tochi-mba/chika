@@ -561,6 +561,10 @@ async def websocket_endpoint(
                 finally:
                     _current_chat[0] = None
 
+            # ── Stop / cancel current generation ─────────────────────────────
+            elif mtype == "stop":
+                engine.cancel()
+
             # ── New chat ──────────────────────────────────────────────────────
             elif mtype == "new_chat":
                 # Preserve the current profile — new chat, same user context

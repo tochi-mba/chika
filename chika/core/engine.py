@@ -225,8 +225,14 @@ class ChikaEngine:
         # Set when a chat() generator is actively running.
         # Guards against two callers (e.g. frontend WS + extension) corrupting history.
         self._chat_busy: bool = False
+        # Set by cancel() to interrupt the current streaming turn mid-flight.
+        self._cancelled: bool = False
 
     # ── Public ───────────────────────────────────────────────────────────────
+
+    def cancel(self) -> None:
+        """Interrupt the current streaming turn. Safe to call from any context."""
+        self._cancelled = True
 
     async def chat(self, user_input: str) -> AsyncGenerator[Event, None]:
         if self._chat_busy:
@@ -237,12 +243,14 @@ class ChikaEngine:
             }
             yield {"type": "done"}
             return
+        self._cancelled = False
         self._chat_busy = True
         try:
             async for event in self._chat_inner(user_input):
                 yield event
         finally:
             self._chat_busy = False
+            self._cancelled = False
 
     async def _chat_inner(self, user_input: str) -> AsyncGenerator[Event, None]:
         is_first_message = len(self._history) == 0
@@ -265,6 +273,12 @@ class ChikaEngine:
         final_text = ""
 
         for _turn in range(config.MAX_TOOL_TURNS):
+            if self._cancelled:
+                self._history.pop()  # remove the user message we just appended
+                yield {"type": "cancelled"}
+                yield {"type": "done"}
+                return
+
             _log.info("llm_turn", turn=_turn, profile=profile)
             messages = self._build_messages()
             turn_text = ""
@@ -272,6 +286,8 @@ class ChikaEngine:
             tool_call: dict | None = None
 
             async for event in self._stream_llm(messages):
+                if self._cancelled:
+                    break
                 if event["type"] == "token":
                     turn_text += event["text"]
                     buffered_tokens.append(event["text"])
@@ -279,6 +295,16 @@ class ChikaEngine:
                     tool_call = event["data"]
                 else:
                     yield event
+
+            if self._cancelled:
+                # Flush whatever text we have so the UI doesn't show a blank response
+                if turn_text.strip():
+                    for tok in buffered_tokens:
+                        yield {"type": "token", "text": tok}
+                self._history.pop()  # remove the unsaved user message
+                yield {"type": "cancelled"}
+                yield {"type": "done"}
+                return
 
             # Recover workflow JSON leaked into text response
             tool_call = self._recover_leaked_workflow(turn_text, tool_call)

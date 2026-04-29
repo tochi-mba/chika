@@ -23,6 +23,7 @@ const chatView         = document.getElementById('chatView')
 const msgList          = document.getElementById('msgList')
 const chatInput        = document.getElementById('chatInput')
 const sendBtn          = document.getElementById('sendBtn')
+const stopBtn          = document.getElementById('stopBtn')
 const tabCtxBtn        = document.getElementById('tabCtxBtn')
 
 // ── Local state ───────────────────────────────────────────────────────────────
@@ -476,15 +477,18 @@ function sendMessage() {
 // ── UI helpers ────────────────────────────────────────────────────────────────
 
 function updateSendBtn() {
-  const canSend = chatInput.value.trim().length > 0
-               && state?.sessionReady
-               && !state?.isStreaming
-  sendBtn.disabled = !canSend
+  const streaming = !!state?.isStreaming
+  const canSend   = chatInput.value.trim().length > 0
+                 && state?.sessionReady
+                 && !streaming
 
-  // Update placeholder to reflect transient states
+  sendBtn.disabled = !canSend
+  sendBtn.style.display = streaming ? 'none' : ''
+  stopBtn.style.display = streaming ? ''     : 'none'
+
   if (state?.connected && !state?.sessionReady) {
     chatInput.placeholder = 'Starting session…'
-  } else if (state?.isStreaming) {
+  } else if (streaming) {
     chatInput.placeholder = 'Responding…'
   } else {
     chatInput.placeholder = 'Message Chika…'
@@ -564,9 +568,16 @@ chatInput.addEventListener('keydown', e => {
     e.preventDefault()
     sendMessage()
   }
+  if (e.key === 'Escape' && state?.isStreaming) {
+    chrome.runtime.sendMessage({ type: 'send_to_server', payload: { type: 'stop' } })
+  }
 })
 
 sendBtn.addEventListener('click', sendMessage)
+
+stopBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'send_to_server', payload: { type: 'stop' } })
+})
 
 tabCtxBtn.addEventListener('click', () => {
   includeTabText = !includeTabText

@@ -665,6 +665,25 @@ body {
 }
 .send-btn:not(:disabled):hover { background: #7c74ff; }
 
+.stop-btn {
+  flex-shrink: 0;
+  background: var(--surface-2, #1c1c26);
+  border: 1.5px solid var(--border, rgba(255,255,255,0.1));
+  border-radius: 6px;
+  color: var(--text-2, #9898b8);
+  cursor: pointer;
+  padding: 5px 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms, color 120ms;
+  margin-bottom: 2px;
+}
+.stop-btn:hover {
+  background: var(--surface-3, #26263a);
+  color: var(--text-1, #ededf2);
+}
+
 /* ── Toast notification ──────────────────────────────────────────────────────── */
 
 .toast {
