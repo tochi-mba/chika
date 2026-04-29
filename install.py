@@ -149,6 +149,7 @@ def configure_env() -> None:
             ("anthropic", "Anthropic  (Claude — recommended)"),
             ("openai",    "OpenAI     (GPT-4o / GPT-4.1)"),
             ("azure",     "Azure OpenAI"),
+            ("ollama",    "Ollama     (local / free — requires Ollama installed)"),
         ],
     )
 
@@ -189,6 +190,30 @@ def configure_env() -> None:
             f"AZURE_OPENAI_DEPLOYMENT={deploy}\n",
             "AZURE_API_VERSION=2024-10-21\n",
         ]
+
+    elif provider == "ollama":
+        print()
+        info("Make sure Ollama is running: ollama serve")
+        info("Recommended models: llama3.1, qwen2.5, deepseek-r1")
+        model    = ask("Model", default="llama3.1")
+        base_url = ask("Ollama URL", default="http://localhost:11434/v1")
+        lines += [
+            f"OLLAMA_MODEL={model}\n",
+            f"OLLAMA_BASE_URL={base_url}\n",
+        ]
+        if not shutil.which("ollama"):
+            print()
+            warn("ollama command not found on PATH.")
+            info("Download at: ollama.com/download")
+            info(f"Then run: ollama pull {model}")
+        else:
+            print()
+            info(f"Pulling {model} (this may take a few minutes)…")
+            try:
+                run(["ollama", "pull", model])
+                ok(f"{model} ready")
+            except subprocess.CalledProcessError:
+                warn(f"Could not pull {model} — run `ollama pull {model}` manually")
 
     lines += [
         "\n# Engine settings\n",

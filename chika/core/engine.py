@@ -604,7 +604,7 @@ class ChikaEngine:
         return [{"role": "system", "content": system_prompt}] + self._history
 
     async def _stream_llm(self, messages: list[dict]) -> AsyncGenerator[Event, None]:
-        if self._provider in ("azure", "openai"):
+        if self._provider in ("azure", "openai", "ollama"):
             async for e in self._stream_openai(messages): yield e
         elif self._provider == "anthropic":
             async for e in self._stream_anthropic(messages): yield e
@@ -1017,7 +1017,7 @@ class ChikaEngine:
 
     async def _llm_complete(self, prompt: str) -> str:
         """Non-streaming single completion for meta-tools and compaction."""
-        if self._provider in ("azure", "openai"):
+        if self._provider in ("azure", "openai", "ollama"):
             resp = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[{"role": "user", "content": prompt}],

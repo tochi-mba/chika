@@ -1,6 +1,6 @@
 """
 Multi-provider LLM client factory.
-Set CHIKA_PROVIDER=azure|anthropic|openai in .env
+Set CHIKA_PROVIDER=azure|anthropic|openai|ollama in .env
 """
 from __future__ import annotations
 import os
@@ -42,6 +42,10 @@ ANTHROPIC_COMPLETE_MAX_TOKENS = int(os.getenv("CHIKA_ANTHROPIC_COMPLETE_MAX_TOKE
 OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL      = os.getenv("OPENAI_MODEL", "gpt-4o")
 OPENAI_MAX_TOKENS = int(os.getenv("CHIKA_OPENAI_MAX_TOKENS", "16384"))
+
+# Ollama (local)
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "llama3.1")
 
 # Engine settings
 MAX_HISTORY_TOKENS   = int(os.getenv("CHIKA_MAX_HISTORY_TOKENS", "10000"))
@@ -100,8 +104,14 @@ def get_provider_config() -> ProviderConfig:
         return ProviderConfig(provider="anthropic", model=ANTHROPIC_MODEL, extra={"api_key": ANTHROPIC_API_KEY})
     elif PROVIDER == "openai":
         return ProviderConfig(provider="openai", model=OPENAI_MODEL, extra={"api_key": OPENAI_API_KEY})
+    elif PROVIDER == "ollama":
+        return ProviderConfig(
+            provider="ollama",
+            model=OLLAMA_MODEL,
+            extra={"base_url": OLLAMA_BASE_URL},
+        )
     else:
-        raise ValueError(f"Unknown CHIKA_PROVIDER: {PROVIDER!r}. Use azure, anthropic, or openai.")
+        raise ValueError(f"Unknown CHIKA_PROVIDER: {PROVIDER!r}. Use anthropic, openai, azure, or ollama.")
 
 
 def make_client():
@@ -120,3 +130,7 @@ def make_client():
     elif cfg.provider == "openai":
         from openai import AsyncOpenAI
         return AsyncOpenAI(api_key=cfg.extra["api_key"])
+    elif cfg.provider == "ollama":
+        from openai import AsyncOpenAI
+        # Ollama speaks the OpenAI API — no real key needed
+        return AsyncOpenAI(base_url=cfg.extra["base_url"], api_key="ollama")
