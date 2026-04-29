@@ -231,6 +231,31 @@ def configure_env() -> None:
     ok(f".env written → {env_path}")
 
 
+def build_frontend() -> None:
+    frontend = ROOT / "frontend"
+    dist     = frontend / "dist"
+
+    if dist.exists():
+        ok("Frontend already built")
+        return
+
+    if not shutil.which("node"):
+        warn("Node.js not found — skipping frontend build.")
+        info("Install Node 18+ from nodejs.org, then run:")
+        info("  cd frontend && npm install && npm run build")
+        return
+
+    print(c(DIM, "\n  Running: npm install\n"))
+    try:
+        run(["npm", "install", "--prefix", str(frontend)])
+        print(c(DIM, "\n  Running: npm run build\n"))
+        run(["npm", "run", "build", "--prefix", str(frontend)])
+        ok("Frontend built → frontend/dist/")
+    except subprocess.CalledProcessError:
+        err("Frontend build failed.")
+        warn("Run manually: cd frontend && npm install && npm run build")
+
+
 def verify_setup() -> None:
     step(4, TOTAL_STEPS, "Verifying setup")
     try:
@@ -375,6 +400,10 @@ def main() -> None:
     install_deps()
     configure_env()
     verify_setup()
+
+    if ask_yn("Build the web frontend? (requires Node 18+)", default=True):
+        build_frontend()
+
     print_extension_instructions()
 
     if ask_yn("Set up Spotify integration?", default=False):
