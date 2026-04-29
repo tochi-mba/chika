@@ -661,8 +661,21 @@ class ChikaEngine:
                         }}
                 return  # success
 
+            except _openai.NotFoundError as exc:
+                if self._provider == "ollama":
+                    raise RuntimeError(
+                        f"Ollama returned 404 — is it running?\n"
+                        f"  Start it with: ollama serve\n"
+                        f"  Then make sure the model is pulled: ollama pull {self._model}"
+                    ) from exc
+                raise
             except (_openai.APIConnectionError, _openai.APITimeoutError,
                     _openai.InternalServerError, _openai.RateLimitError) as exc:
+                if self._provider == "ollama" and isinstance(exc, _openai.APIConnectionError):
+                    raise RuntimeError(
+                        f"Cannot connect to Ollama at {config.OLLAMA_BASE_URL}\n"
+                        f"  Start it with: ollama serve"
+                    ) from exc
                 if attempt >= max_attempts - 1:
                     raise
                 _log.warning("openai_transient_error",

@@ -59,12 +59,16 @@ async def main():
             continue
 
         print("Chika: ", end="", flush=True)
-        async for event in engine.chat(user_input):
-            if event.get("type", "").startswith("_"):
-                continue
-            out = fmt_event(event)
-            if out:
-                print(out, end="", flush=True)
+        try:
+            async for event in engine.chat(user_input):
+                if event.get("type", "").startswith("_"):
+                    continue
+                out = fmt_event(event)
+                if out:
+                    print(out, end="", flush=True)
+        except RuntimeError as e:
+            print(f"\n\n[error] {e}\n")
+            continue
 
         print()
 
