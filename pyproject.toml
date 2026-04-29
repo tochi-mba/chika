@@ -31,6 +31,12 @@ dev = [
 [project.scripts]
 chika = "chika:cli"
 
+[tool.setuptools]
+py-modules = ["chika", "config"]
+
+[tool.setuptools.packages.find]
+include = ["chika*", "api*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
