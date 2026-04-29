@@ -29,6 +29,7 @@ memory.md
 data/devices/
 data/sessions/
 data/test_traces/
+data/profiles/
 
 # Node / Frontend
 node_modules/
@@ -51,4 +52,6 @@ desktop.ini
 # Logs
 *.log
 logs/
-.claude/worktrees/
+
+# Claude Code local config
+.claude/
