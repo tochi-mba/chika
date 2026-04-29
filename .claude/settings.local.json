@@ -29,7 +29,10 @@
       "Bash(python -m pytest tests/ --tb=no -q --ignore=tests/test_api_server.py)",
       "Bash(python -m pytest tests/test_api_server.py --tb=no -q)",
       "Bash(git mv:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(mkdir -p \"/c/Users/TochukwuMba/Downloads/chika_v2-20260428T212710Z-3-001/chika_v2/.github/workflows\")",
+      "Bash(cat)",
+      "Bash(find \"C:\\\\Users\\\\TochukwuMba\\\\Downloads\\\\chika_v2-20260428T212710Z-3-001\\\\chika_v2\" -name \"*.py\" -exec grep -l \"register.*Skill\\\\|SkillRegistry\" {} \\\\;)"
     ]
   }
 }

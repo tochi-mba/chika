@@ -43,21 +43,41 @@ class Compactor:
     def needs_compaction(self, messages: list[dict]) -> bool:
         return estimate_tokens(messages) > self._max_tokens
 
-    async def compact(self, messages: list[dict]) -> tuple[list[dict], dict]:
+    async def compact(self, messages: list[dict]) -> tuple[list[dict], dict | None]:
         """
-        Returns (compacted_messages, event).
-        event has type "compaction" with counts.
+        Returns (compacted_messages, event_or_none).
+        event has type "compaction" with counts, or None if no compaction occurred.
         """
         if len(messages) <= self._keep_first + self._keep_last + 1:
-            return messages, {}
+            return messages, None
 
-        head = messages[: self._keep_first]
-        tail = messages[-self._keep_last :]
-        middle = messages[self._keep_first : -self._keep_last]
+        keep_first = self._keep_first
+        keep_last = self._keep_last
+
+        # Expand boundaries so we never split a tool_use / tool_result pair.
+        while keep_first < len(messages) - keep_last:
+            m = messages[keep_first - 1]
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                keep_first += 1
+            else:
+                break
+        while keep_last < len(messages) - keep_first:
+            m = messages[-keep_last]
+            if m.get("role") == "tool":
+                keep_last += 1
+            else:
+                break
+
+        if len(messages) <= keep_first + keep_last + 1:
+            return messages, None
+
+        head = messages[:keep_first]
+        tail = messages[-keep_last:]
+        middle = messages[keep_first:-keep_last]
 
         summary_text = await self._summarise(middle)
         summary_msg = {
-            "role": "system",
+            "role": "user",
             "content": f"[Conversation summary — {len(middle)} messages condensed]\n{summary_text}",
         }
 
@@ -74,11 +94,16 @@ class Compactor:
         text_parts = []
         for m in messages:
             role = m.get("role", "unknown")
-            content = m.get("content", "")
+            content = m.get("content") or ""
             if isinstance(content, list):
                 content = " ".join(
                     b.get("text", "") for b in content if isinstance(b, dict)
                 )
+            content = str(content)
+            # Include tool call info so the summary captures what was done
+            for tc in m.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                content += f" [called {fn.get('name', '?')}]"
             text_parts.append(f"{role.upper()}: {content[:500]}")
 
         prompt = (

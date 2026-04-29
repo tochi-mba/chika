@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import pathlib
 import re
+import tempfile
 from typing import Any, AsyncGenerator
 
 import config
 from chika.core.compactor import Compactor
-from chika.core.logger import log as _log
+from chika.core.logger import log as _log, LOG_PATH
 from chika.core.memory_manager import MemoryManager
 from chika.core.profile_manager import Profile
 from chika.core.prompt_builder import PromptBuilder
@@ -220,10 +222,29 @@ class ChikaEngine:
             keep_first=config.COMPACT_KEEP_FIRST,
             keep_last=config.COMPACT_KEEP_LAST,
         )
+        # Set when a chat() generator is actively running.
+        # Guards against two callers (e.g. frontend WS + extension) corrupting history.
+        self._chat_busy: bool = False
 
     # ── Public ───────────────────────────────────────────────────────────────
 
     async def chat(self, user_input: str) -> AsyncGenerator[Event, None]:
+        if self._chat_busy:
+            yield {
+                "type": "error",
+                "message": "Chika is busy — wait for the current response to finish.",
+                "error_code": "engine_busy",
+            }
+            yield {"type": "done"}
+            return
+        self._chat_busy = True
+        try:
+            async for event in self._chat_inner(user_input):
+                yield event
+        finally:
+            self._chat_busy = False
+
+    async def _chat_inner(self, user_input: str) -> AsyncGenerator[Event, None]:
         is_first_message = len(self._history) == 0
         profile = self._active_profile.name if self._active_profile else "unknown"
         _log.info("chat_start", profile=profile, message_preview=user_input[:120])
@@ -237,7 +258,7 @@ class ChikaEngine:
         # Compact if needed
         if self._compactor.needs_compaction(self._history):
             self._history, compact_event = await self._compactor.compact(self._history)
-            if compact_event:
+            if compact_event is not None:
                 yield compact_event
 
         # ─── Agentic loop — LLM keeps calling workflows until it decides it's done ─
@@ -313,9 +334,19 @@ class ChikaEngine:
             async for event in self._force_followup():
                 yield event
 
+        # Post-response grounding validation: flag factual claims not traceable
+        # to the $facts ledger. _validate_grounding is a no-op when facts are
+        # empty or the response is short (controlled by GROUNDING_MIN_LENGTH).
+        if final_text.strip() and config.GROUNDING_VALIDATE_RESPONSE:
+            warning_event = await self._validate_grounding(final_text)
+            if warning_event:
+                yield warning_event
+
         # Emit the chat title (runs concurrently with the first LLM turn)
         async for event in self._maybe_emit_title(title_task, user_input):
             yield event
+
+        yield {"type": "done"}
 
 
     # --- helpers extracted from chat() -----------------------------------
@@ -385,7 +416,11 @@ class ChikaEngine:
         Uses a minimal context window (last few history messages) instead
         of the full system prompt + entire history to save tokens.
         """
-        tail = self._history[-6:] if len(self._history) > 6 else self._history
+        # Slice the tail but ensure we don't break tool_use/tool_result pairs.
+        start = max(0, len(self._history) - 6)
+        while start > 0 and self._history[start].get("role") == "tool":
+            start -= 1
+        tail = self._history[start:]
         followup_messages = [
             {"role": "system", "content": (
                 "You are Chika. The user's task has been completed via tool calls. "
@@ -444,9 +479,7 @@ class ChikaEngine:
         # Expose profile info as session variables
         self._vars.set("profile.name", profile.name, description="Active profile name")
         self._vars.set("profile.workspace", profile.workspace, description="Profile workspace directory")
-        from chika.core.logger import LOG_PATH
         self._vars.set("chika.log", str(LOG_PATH), description="Live structured log file — read this to diagnose errors")
-        import tempfile, pathlib
         tmp = str(pathlib.Path(tempfile.gettempdir()).as_posix())
         self._vars.set("chika.tmp", tmp, description="OS temp directory — use this for curl output files instead of /tmp/")
         # Notify hooks so they can register/unregister profile-scoped tools
@@ -454,7 +487,9 @@ class ChikaEngine:
             try:
                 hook(profile)
             except Exception:
-                pass
+                _log.exc("profile_hook_error",
+                         hook=repr(hook),
+                         profile=profile.name if profile else "?")
 
     def reset(self) -> None:
         self._history.clear()
@@ -519,7 +554,7 @@ class ChikaEngine:
                 for tc in m.get("tool_calls") or []:
                     args_str = (tc.get("function") or {}).get("arguments") or ""
                     try:
-                        args = __import__("json").loads(args_str)
+                        args = json.loads(args_str)
                         for step in args.get("steps") or []:
                             if "tool" in step:
                                 names.add(step["tool"])
@@ -575,47 +610,65 @@ class ChikaEngine:
             async for e in self._stream_anthropic(messages): yield e
 
     async def _stream_openai(self, messages: list[dict]) -> AsyncGenerator[Event, None]:
-        response = await self._client.chat.completions.create(
-            model=self._model,
-            messages=messages,
-            tools=[WORKFLOW_ORCHESTRATOR_SCHEMA],
-            tool_choice="auto",
-            stream=True,
-        )
+        import openai as _openai
 
-        tool_builders: dict[int, dict] = {}
-        async for chunk in response:
-            choice = chunk.choices[0] if chunk.choices else None
-            if not choice:
-                continue
-            delta = choice.delta
+        max_attempts = 4
+        backoff = 2.0
 
-            if delta.content:
-                yield {"type": "token", "text": delta.content}
+        for attempt in range(max_attempts):
+            tool_builders: dict[int, dict] = {}
+            try:
+                response = await self._client.chat.completions.create(
+                    model=self._model,
+                    messages=messages,
+                    tools=[WORKFLOW_ORCHESTRATOR_SCHEMA],
+                    tool_choice="auto",
+                    max_tokens=config.OPENAI_MAX_TOKENS,
+                    stream=True,
+                )
 
-            if delta.tool_calls:
-                for tc in delta.tool_calls:
-                    idx = tc.index
-                    if idx not in tool_builders:
-                        tool_builders[idx] = {"id": "", "name": "", "arguments": ""}
-                    if tc.id:
-                        tool_builders[idx]["id"] += tc.id
-                    if tc.function and tc.function.name:
-                        tool_builders[idx]["name"] += tc.function.name
-                    if tc.function and tc.function.arguments:
-                        tool_builders[idx]["arguments"] += tc.function.arguments
+                async for chunk in response:
+                    choice = chunk.choices[0] if chunk.choices else None
+                    if not choice:
+                        continue
+                    delta = choice.delta
 
-        if tool_builders:
-            for builder in tool_builders.values():
-                try:
-                    args = json.loads(builder["arguments"] or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                yield {"type": "_tool_call_raw", "data": {
-                    "id": builder["id"],
-                    "name": builder["name"],
-                    "args": args,
-                }}
+                    if delta.content:
+                        yield {"type": "token", "text": delta.content}
+
+                    if delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            idx = tc.index
+                            if idx not in tool_builders:
+                                tool_builders[idx] = {"id": "", "name": "", "arguments": ""}
+                            if tc.id:
+                                tool_builders[idx]["id"] += tc.id
+                            if tc.function and tc.function.name:
+                                tool_builders[idx]["name"] += tc.function.name
+                            if tc.function and tc.function.arguments:
+                                tool_builders[idx]["arguments"] += tc.function.arguments
+
+                if tool_builders:
+                    for builder in tool_builders.values():
+                        try:
+                            args = json.loads(builder["arguments"] or "{}")
+                        except json.JSONDecodeError:
+                            args = {}
+                        yield {"type": "_tool_call_raw", "data": {
+                            "id": builder["id"],
+                            "name": builder["name"],
+                            "args": args,
+                        }}
+                return  # success
+
+            except (_openai.APIConnectionError, _openai.APITimeoutError,
+                    _openai.InternalServerError, _openai.RateLimitError) as exc:
+                if attempt >= max_attempts - 1:
+                    raise
+                _log.warning("openai_transient_error",
+                             attempt=attempt + 1, error=str(exc))
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
 
     async def _stream_anthropic(self, messages: list[dict]) -> AsyncGenerator[Event, None]:
         # Convert history format: system message is separate in Anthropic API
@@ -665,6 +718,36 @@ class ChikaEngine:
                 # Plain user/assistant text messages pass through as-is
                 filtered.append(m)
 
+        # Anthropic requires every tool_use to have an immediately-following
+        # tool_result. Strip any orphaned assistant+tool_use messages whose
+        # tool_result was lost (e.g. via compaction or history slicing).
+        sanitized: list[dict] = []
+        for i, msg in enumerate(filtered):
+            if msg.get("role") == "assistant":
+                content = msg.get("content")
+                has_tool_use = (
+                    isinstance(content, list)
+                    and any(b.get("type") == "tool_use" for b in content if isinstance(b, dict))
+                )
+                if has_tool_use:
+                    # Check the next message is a user/tool_result
+                    next_msg = filtered[i + 1] if i + 1 < len(filtered) else None
+                    next_content = (next_msg or {}).get("content")
+                    next_has_result = (
+                        next_msg
+                        and next_msg.get("role") == "user"
+                        and isinstance(next_content, list)
+                        and any(b.get("type") == "tool_result" for b in next_content if isinstance(b, dict))
+                    )
+                    if not next_has_result:
+                        # Strip tool_use blocks, keep only text
+                        text_blocks = [b for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                        if text_blocks:
+                            sanitized.append({"role": "assistant", "content": text_blocks})
+                        continue
+            sanitized.append(msg)
+        filtered = sanitized
+
         # Anthropic strictly requires the first message to be role=user. If the
         # conversion dropped something and left us with an assistant-leading
         # sequence (edge case during restoration), prepend a synthetic user.
@@ -703,12 +786,16 @@ class ChikaEngine:
             tools=[tool_schema],
         )
         if getattr(config, "THINKING_ENABLED", False):
-            max_budget = getattr(config, "THINKING_BUDGET_TOKENS", 4000)
-            budget = self._compute_thinking_budget(filtered, max_budget)
-            stream_kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": budget,
-            }
+            model_name = getattr(config, "ANTHROPIC_MODEL", "")
+            if "4-6" in model_name or "opus-4" in model_name or "sonnet-4" in model_name:
+                stream_kwargs["thinking"] = {"type": "adaptive"}
+            else:
+                max_budget = getattr(config, "THINKING_BUDGET_TOKENS", 4000)
+                budget = self._compute_thinking_budget(filtered, max_budget)
+                stream_kwargs["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": budget,
+                }
             stream_kwargs["temperature"] = 1.0
 
         # Transient-error retry: Anthropic (and any streaming API) can return
@@ -926,25 +1013,6 @@ class ChikaEngine:
             _log.info("ungrounded_urls_mentioned", count=len(all_ungrounded),
                       profile=self._active_profile.name if self._active_profile else "unknown")
 
-        # Keep the other citation-markers-without-retrieval heuristic below,
-        # guarded by the same smarter rule (only flag if there's actual
-        # citation language AND no $facts at all).
-        citation_markers = _CITATION_MARKERS.search(response_text)
-
-        if citation_markers and not facts_list:
-            _log.warn("grounding_warning", reason="citations_without_retrieval",
-                      profile=self._active_profile.name if self._active_profile else "unknown")
-            return {
-                "type": "validation_warning",
-                "severity": "medium",
-                "reason": "citations_without_retrieval",
-                "message": (
-                    "The response references sources, but no tool has been "
-                    "called this session to retrieve any. Citations may be "
-                    "fabricated."
-                ),
-            }
-
         return None
 
     async def _llm_complete(self, prompt: str) -> str:
@@ -953,6 +1021,7 @@ class ChikaEngine:
             resp = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=config.OPENAI_MAX_TOKENS,
                 stream=False,
             )
             return resp.choices[0].message.content or ""

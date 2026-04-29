@@ -1,7 +1,22 @@
 from __future__ import annotations
 import json
+import os
+import tempfile
 import time
 from pathlib import Path
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Write content atomically via a temp-file rename (crash-safe)."""
+    dir_ = path.parent
+    dir_.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=dir_,
+        suffix=".tmp", delete=False
+    ) as f:
+        f.write(content)
+        tmp_path = f.name
+    os.replace(tmp_path, path)  # atomic on POSIX; near-atomic on Windows
 
 
 class ChatStore:
@@ -31,7 +46,7 @@ class ChatStore:
             "updated_at": time.time(),
             "messages": messages,
         }
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        _atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False))
 
     def load(self, profile: str, session_id: str) -> dict | None:
         path = self._chat_dir(profile) / f"{session_id}.json"
@@ -49,7 +64,7 @@ class ChatStore:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             data["title"] = title
-            path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            _atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False))
         except Exception:
             pass
 

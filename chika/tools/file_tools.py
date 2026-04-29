@@ -5,6 +5,20 @@ from typing import Any
 
 from chika.core.tool_registry import ToolDefinition
 
+# Hard cap: refuse to read files larger than this in one shot.
+# The LLM should use start_line/end_line for large files.
+MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+def _safe_path(path: str) -> tuple[Path, str | None]:
+    """
+    Resolve *path* and check for traversal attempts.
+    Returns (resolved_path, None) on success or (Path(path), error_message) on failure.
+    """
+    if ".." in Path(path).parts:
+        return Path(path), f"Path traversal not allowed: {path!r}"
+    return Path(path).resolve(), None
+
 
 async def file_read(
     path: str,
@@ -18,17 +32,22 @@ async def file_read(
     - start_line / end_line: return only that slice. total_lines is always the full count.
     - as_bytes: return base64-encoded binary content (ignores line range).
     """
-    p = Path(path)
+    p, err = _safe_path(path)
+    if err:
+        return {"error": err}
     if not p.exists():
         return {"error": f"File not found: {path}"}
     if p.is_dir():
         return {"error": f"Path is a directory: {path}"}
+    size = p.stat().st_size
+    if size > MAX_FILE_SIZE_BYTES:
+        return {"error": f"File too large to read in one shot ({size} bytes). Use start_line/end_line to read in sections."}
     if as_bytes:
         return {
             "path": path,
             "content": base64.b64encode(p.read_bytes()).decode(),
             "encoding": "base64",
-            "size_bytes": p.stat().st_size,
+            "size_bytes": size,
         }
     text = p.read_text(errors="replace")
     all_lines = text.splitlines()
@@ -61,7 +80,9 @@ async def file_read(
 
 async def file_edit_lines(path: str, start_line: int, end_line: int, new_content: str) -> dict:
     """Replace lines [start_line, end_line] (1-indexed, inclusive) with new_content."""
-    p = Path(path)
+    p, err = _safe_path(path)
+    if err:
+        return {"error": err}
     if not p.exists():
         return {"error": f"File not found: {path}"}
     original = p.read_text(errors="replace")
@@ -82,7 +103,9 @@ async def file_edit_lines(path: str, start_line: int, end_line: int, new_content
 async def file_write(path: str, content: str) -> dict:
     if not isinstance(content, str):
         return {"error": f"content must be a string, got {type(content).__name__} ({str(content)[:120]}). Use $variable.field to extract a specific field from a JSON result."}
-    p = Path(path)
+    p, err = _safe_path(path)
+    if err:
+        return {"error": err}
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return {"path": path, "size_bytes": p.stat().st_size}
@@ -94,7 +117,9 @@ async def file_replace(path: str, old_string: str, new_string: str) -> dict:
         return {"error": f"old_string must be a string, got {type(old_string).__name__}. Use $variable.field to extract a specific field from a JSON result."}
     if not isinstance(new_string, str):
         return {"error": f"new_string must be a string, got {type(new_string).__name__} ({str(new_string)[:120]}). Use $variable.field to extract a specific field from a JSON result."}
-    p = Path(path)
+    p, err = _safe_path(path)
+    if err:
+        return {"error": err}
     if not p.exists():
         return {"error": f"File not found: {path}"}
     text = p.read_text(errors="replace")
@@ -111,7 +136,9 @@ async def file_replace(path: str, old_string: str, new_string: str) -> dict:
 async def file_append(path: str, content: str) -> dict:
     if not isinstance(content, str):
         return {"error": f"content must be a string, got {type(content).__name__} ({str(content)[:120]}). Use $variable.field to extract a specific field from a JSON result."}
-    p = Path(path)
+    p, err = _safe_path(path)
+    if err:
+        return {"error": err}
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as f:
         f.write(content)
@@ -119,7 +146,9 @@ async def file_append(path: str, content: str) -> dict:
 
 
 async def file_info(path: str) -> dict:
-    p = Path(path)
+    p, err = _safe_path(path)
+    if err:
+        return {"error": err}
     if not p.exists():
         return {"error": f"Not found: {path}"}
     stat = p.stat()

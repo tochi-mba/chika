@@ -26,6 +26,10 @@ export const useSystemStore = defineStore('system', () => {
   // Connection state
   const connected = ref(false)
   const sessionId = ref('')
+  const connectionError = ref(null)  // null or error string (4.3)
+
+  // Chrome extension connection state
+  const extensionConnected = ref(false)
 
   // Active profile
   const profile = ref({ name: 'default', workspace: '' })
@@ -33,6 +37,14 @@ export const useSystemStore = defineStore('system', () => {
   function setConnected(val, sid) {
     connected.value = val
     if (sid) sessionId.value = sid
+  }
+
+  function setExtensionConnected(val) {
+    extensionConnected.value = !!val
+  }
+
+  function setConnectionError(msg) {
+    connectionError.value = msg || null
   }
 
   function pushEvent(event) {
@@ -75,6 +87,10 @@ export const useSystemStore = defineStore('system', () => {
           value: event.value,
           updatedAt: Date.now(),
         }
+        break
+
+      case 'memory_delete':
+        delete memory.value[event.key]
         break
 
       case 'session_info':
@@ -204,9 +220,11 @@ export const useSystemStore = defineStore('system', () => {
 
   return {
     events, activeWorkflow, variables, memory, shellProcesses,
-    connected, sessionId, profile,
+    connected, sessionId, connectionError, profile,
+    extensionConnected,
     pendingApprovals, pendingQuestions,
-    setConnected, pushEvent, setMemorySnapshot, setVariablesSnapshot, clearSession,
+    setConnected, setConnectionError, setExtensionConnected,
+    pushEvent, setMemorySnapshot, setVariablesSnapshot, clearSession,
     resolveApproval, resolveQuestion,
     eventCount, variableCount, memoryCount, shellCount, runningShellCount,
   }

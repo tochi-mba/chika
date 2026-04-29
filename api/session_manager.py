@@ -30,6 +30,7 @@ _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 _PROFILES_DIR = Path(__file__).parent.parent / "data" / "profiles"
 _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 from chika.tools.apps_tool import APP_OPEN_TOOL
+from chika.tools.live_server_tool import LIVE_SERVER_TOOL
 from chika.tools.shell_tool import ALL_SHELL_TOOLS
 from chika.tools.file_tools import FILE_TOOLS
 from chika.tools.web_fetch_tool import WEB_FETCH_TOOLS
@@ -44,6 +45,7 @@ from chika.skills.spotify_skill import SPOTIFY_SKILL
 from chika.skills.verify_skill import build_verify_skill
 from chika.skills.plan_skill import build_plan_skill
 from chika.skills.question_skill import build_question_skill
+from chika.skills.browser_skill import BROWSER_SKILL
 import config
 
 
@@ -130,6 +132,7 @@ class SessionManager:
         for t in ALL_SHELL_TOOLS:
             tool_registry.register(t)
         tool_registry.register(APP_OPEN_TOOL)
+        tool_registry.register(LIVE_SERVER_TOOL)
         tool_registry.register(WAIT_TOOL)
         for t in FILE_TOOLS:
             tool_registry.register(t)
@@ -146,6 +149,7 @@ class SessionManager:
         skill_registry.register(GIT_SKILL)
         skill_registry.register(WEB_SKILL)
         skill_registry.register(SPOTIFY_SKILL)
+        skill_registry.register(BROWSER_SKILL)
         # verify_skill is session-scoped because fact_check needs a live reference
         # to this session's variable store (the $facts ledger lives there)
         skill_registry.register(build_verify_skill(variable_store))

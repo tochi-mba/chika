@@ -26,6 +26,10 @@ class MemoryManager:
     # ── Public API ───────────────────────────────────────────────────────────
 
     def persist(self, key: str, value: str, ttl_days: int | None = None) -> None:
+        # Sanitize key: strip chars that break the markdown heading format
+        key = key.replace("#", "").replace("\n", " ").replace("\r", "").strip()
+        if not key:
+            key = "unnamed"
         entry = MemoryEntry(key, value, ttl_days)
         self._entries[key] = entry
         self._maybe_compact()
@@ -92,7 +96,7 @@ class MemoryManager:
         # Drop expired first
         expired = [
             k for k, e in self._entries.items()
-            if e.ttl_days and (now - datetime.fromisoformat(e.created)).days > e.ttl_days
+            if e.ttl_days and (now - datetime.fromisoformat(e.created)).total_seconds() / 86400 > e.ttl_days
         ]
         for k in expired:
             del self._entries[k]

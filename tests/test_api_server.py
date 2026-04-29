@@ -286,6 +286,33 @@ def test_auth_rejects_malformed_header():
         cfg.CHIKA_API_KEY = original
 
 
+# ── Parametrized auth matrix ─────────────────────────────────────────────────
+
+@pytest.mark.parametrize("header,key,expected_status", [
+    # Auth disabled (empty key) — all requests pass regardless of header
+    (None,                          "",          200),
+    ("Bearer wrong",                "",          200),
+    # Auth enabled — various failure modes
+    (None,                          "secret",    401),  # no header
+    ("Bearer wrong",                "secret",    401),  # wrong key
+    ("Token secret",                "secret",    401),  # wrong scheme
+    ("secret",                      "secret",    401),  # no scheme prefix
+    # Auth enabled — success
+    ("Bearer secret",               "secret",    200),
+])
+def test_auth_parametrized(header, key, expected_status):
+    original = cfg.CHIKA_API_KEY
+    try:
+        cfg.CHIKA_API_KEY = key
+        headers = {"Authorization": header} if header else {}
+        resp = client.get("/api/sessions", headers=headers)
+        assert resp.status_code == expected_status, (
+            f"header={header!r}, key={key!r} → got {resp.status_code}, want {expected_status}"
+        )
+    finally:
+        cfg.CHIKA_API_KEY = original
+
+
 # ── /auth/spotify/status ─────────────────────────────────────────────────────
 
 def test_spotify_status_returns_200():

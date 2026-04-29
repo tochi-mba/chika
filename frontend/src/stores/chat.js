@@ -21,8 +21,19 @@ export const useChatStore = defineStore('chat', () => {
       text: '',
       thinking: '',          // extended-thinking reasoning (collapsible)
       warnings: [],          // validation_warning events attached to this reply
+      toolEvents: [],        // workflow/tool events shown inline in the bubble
       streaming: true,
     })
+  }
+
+  // Attach a tool/workflow event to the active assistant message.
+  // Called for: workflow_start, step_start, tool_call, tool_result,
+  // step_done, workflow_done, loop_iteration, condition_eval, variable_set
+  function attachToolEvent(event) {
+    const last = messages.value[messages.value.length - 1]
+    if (last?.role === 'assistant') {
+      last.toolEvents = [...(last.toolEvents ?? []), { ...event, _ts: Date.now() }]
+    }
   }
 
   function appendToken(text) {
@@ -104,6 +115,6 @@ export const useChatStore = defineStore('chat', () => {
   return {
     messages, title, sessionId, isStreaming, streamingText,
     addUserMessage, startAssistantMessage, appendToken, appendThinking, attachWarning,
-    finaliseAssistantMessage, addCompactionMessage, restoreSession, setTitle, clear,
+    attachToolEvent, finaliseAssistantMessage, addCompactionMessage, restoreSession, setTitle, clear,
   }
 })

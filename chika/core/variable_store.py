@@ -110,7 +110,7 @@ class VariableStore:
 
     # ── $ref resolution ──────────────────────────────────────────────────────
 
-    def resolve(self, value: Any) -> Any:
+    def resolve(self, value: Any, _depth: int = 0) -> Any:
         """
         Recursively resolve $variable references in any value.
 
@@ -118,13 +118,18 @@ class VariableStore:
         "$test_run.exit_code" → variable["exit_code"] (dict) or .exit_code (obj)
         "$items[2]"      → variable[2] (list index)
         Non-string or non-$ values pass through unchanged.
+
+        _depth guards against circular references ($a → $b → $a); bails out
+        after 20 levels rather than stack-overflowing.
         """
+        if _depth > 20:
+            return value  # circular ref or pathologically deep nesting — return as-is
         if isinstance(value, str):
             return self._resolve_str(value)
         elif isinstance(value, dict):
-            return {k: self.resolve(v) for k, v in value.items()}
+            return {k: self.resolve(v, _depth + 1) for k, v in value.items()}
         elif isinstance(value, list):
-            return [self.resolve(item) for item in value]
+            return [self.resolve(item, _depth + 1) for item in value]
         return value
 
     def _resolve_str(self, s: str) -> Any:

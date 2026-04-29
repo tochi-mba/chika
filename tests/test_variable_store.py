@@ -1,6 +1,7 @@
 """Tests for VariableStore — storage, types, and $ref resolution."""
 import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+import asyncio
 import pytest
 from chika.core.variable_store import VariableStore, VarType
 
@@ -118,3 +119,47 @@ def test_set_file(store):
     assert v.value["path"] == "/path/img.png"
     data = store.get_value("img")
     assert data == b"binary_data"
+
+
+# ── Concurrency ───────────────────────────────────────────────────────────────
+
+def test_concurrent_writes_no_corruption(store):
+    """50 concurrent coroutine writes should all land without corruption."""
+    async def write(i):
+        store.set(f"key_{i}", f"value_{i}")
+
+    async def run():
+        await asyncio.gather(*[write(i) for i in range(50)])
+
+    asyncio.run(run())
+
+    for i in range(50):
+        v = store.get(f"key_{i}")
+        assert v is not None, f"key_{i} missing"
+        assert v.value == f"value_{i}", f"key_{i} corrupted: {v.value}"
+
+
+# ── Circular reference / depth guard ─────────────────────────────────────────
+
+def test_resolve_depth_guard_no_recursion_error(store):
+    """Circular $a → $b → $a must not raise RecursionError."""
+    store.set("a", "$b")
+    store.set("b", "$a")
+    # Should return the value as-is (unresolved) rather than blowing the stack
+    try:
+        result = store.resolve("$a")
+    except RecursionError:
+        pytest.fail("RecursionError raised — depth guard not working")
+    # result is either the raw string or a resolved value; either is fine
+
+
+def test_resolve_deep_nesting_no_error(store):
+    """A dict nested 25 levels deep must not raise RecursionError."""
+    nested = "leaf"
+    for _ in range(25):
+        nested = {"child": nested}
+    store.set("deep", nested)
+    try:
+        store.resolve("$deep")
+    except RecursionError:
+        pytest.fail("RecursionError raised on deep nesting")

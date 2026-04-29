@@ -49,7 +49,9 @@ async def web_fetch(url: str, save_path: str | None = None, max_size_kb: int = 2
         is_binary = any(t in content_type for t in ("image/", "application/octet", "audio/", "video/"))
 
         if save_path:
-            p = Path(save_path)
+            if ".." in Path(save_path).parts:
+                return {"error": f"save_path traversal not allowed: {save_path!r}"}
+            p = Path(save_path).resolve()
             p.parent.mkdir(parents=True, exist_ok=True)
             content = response.content
             max_bytes = max_size_kb * 1024

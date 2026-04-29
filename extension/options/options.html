@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chika Settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="page">
+
+    <header class="page-header">
+      <div class="brand">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
+            fill="#6c63ff" stroke="#6c63ff" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>
+        <span>Chika Settings</span>
+      </div>
+    </header>
+
+    <main class="form">
+
+      <div class="field">
+        <label for="serverUrl">Server URL</label>
+        <p class="hint">URL of your Chika backend (default: http://localhost:8000)</p>
+        <input type="url" id="serverUrl" placeholder="http://localhost:8000" spellcheck="false" />
+      </div>
+
+      <div class="field">
+        <label for="apiKey">API Key</label>
+        <p class="hint">Optional. Set CHIKA_API_KEY on the server to require authentication.</p>
+        <div class="input-row">
+          <input type="password" id="apiKey" placeholder="Leave blank if auth is disabled" autocomplete="off" />
+          <button type="button" id="toggleKey" class="icon-btn" title="Show/hide key">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="blockedDomains">Additional blocked domains (write-protected)</label>
+        <p class="hint">One domain per line. Write actions (click, fill, navigate) are always blocked on these.</p>
+        <textarea id="blockedDomains" rows="4" placeholder="example.com&#10;other-sensitive-site.com"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="maxTabContent">Max tab content size: <span id="maxTabLabel">500 KB</span></label>
+        <p class="hint">Larger values may slow down text extraction on complex pages.</p>
+        <input type="range" id="maxTabContent" min="100" max="2000" step="100" value="500" />
+      </div>
+
+      <div class="actions">
+        <button type="button" id="testBtn" class="btn-secondary">Test connection</button>
+        <button type="button" id="saveBtn" class="btn-primary">Save settings</button>
+      </div>
+
+      <div class="feedback" id="feedback"></div>
+
+    </main>
+  </div>
+  <script src="options.js" type="module"></script>
+</body>
+</html>

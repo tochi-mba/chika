@@ -26,6 +26,9 @@ env/
 # Chika runtime data
 memory_*.md
 memory.md
+data/devices/
+data/sessions/
+data/test_traces/
 
 # Node / Frontend
 node_modules/

@@ -249,10 +249,11 @@ def test_facts_ledger_bounded():
     )
     engine, store = make_engine([tool])
     # The append_fact code takes only the top 8 results per call.
-    # Run 10 searches to get 80 facts → should cap at 60.
+    # 8 searches × 8 results = 64 entries → should be capped at 60.
+    # (MAX_WORKFLOW_STEPS = 8, so we stay within one workflow's limit.)
     steps = [
         {"id": f"s{i}", "tool": "web_search", "args": {"query": f"q{i}"}}
-        for i in range(10)
+        for i in range(8)
     ]
     wf = {"type": "sequential", "steps": steps}
     run(collect(engine.execute(wf)))

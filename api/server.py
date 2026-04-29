@@ -42,15 +42,17 @@ from api.readme_html import README_HTML
 from chika.core.device_store import DeviceStore
 from chika.tools.shell_tool import ProcessRegistry
 from chika.skills.spotify_skill import oauth as spotify_oauth
+from chika.skills.browser_skill.extension_manager import extension_manager
+from chika.skills.browser_skill import set_frontend_push
 
 app = FastAPI(title="Chika v2", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "PUT", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -67,6 +69,42 @@ async def require_auth(authorization: str | None = Header(default=None)) -> None
     token = authorization[len("Bearer "):]
     if token != required:
         raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+# ── Frontend socket registry (for broadcasting extension events) ──────────────
+# All connected frontend WebSockets are tracked here so that browser tool
+# events (watch triggers, extension status) can be pushed from outside the
+# per-request handler (e.g. from the /ws/extension/ endpoint).
+
+_frontend_sockets: set[WebSocket] = set()
+_frontend_send_lock = asyncio.Lock()
+
+
+async def push_to_all_frontend_sessions(event: dict) -> None:
+    """Broadcast an event to every connected frontend WebSocket."""
+    dead: set[WebSocket] = set()
+    for ws in list(_frontend_sockets):
+        try:
+            await ws.send_json(event)
+        except Exception:
+            dead.add(ws)
+    _frontend_sockets.difference_update(dead)
+
+
+# Wire up browser skill so it can push watch events to the frontend.
+set_frontend_push(push_to_all_frontend_sessions)
+
+
+# ── Extension status broadcaster ──────────────────────────────────────────────
+
+async def _on_extension_status(connected: bool) -> None:
+    await push_to_all_frontend_sessions({
+        "type":      "extension_status",
+        "connected": connected,
+    })
+
+
+extension_manager.add_status_listener(_on_extension_status)
 
 
 # ── Health ───────────────────────────────────────────────────────────────────
@@ -91,6 +129,7 @@ async def websocket_endpoint(
         return
 
     await websocket.accept()
+    _frontend_sockets.add(websocket)
 
     # ── Device identification ─────────────────────────────────────────────────
     # device_id is an opaque token the client echoes back from the first
@@ -144,10 +183,35 @@ async def websocket_endpoint(
             "workspace": p.workspace if p else "",
         })
 
+    # ── Extension session linking ─────────────────────────────────────────────
+    # Whenever this frontend tab's session changes, tell the extension so it
+    # can route chat messages to the same conversation.
+    def _recent_msgs(eng):
+        return [
+            {"role": m["role"], "text": m.get("content") or ""}
+            for m in eng._history
+            if m.get("role") in ("user", "assistant")
+            and isinstance(m.get("content"), str)
+            and m["content"].strip()
+        ][-40:]  # last 40 messages (20 turns)
+
+    async def _notify_extension_session(eng, sid: str) -> None:
+        """Push current session identity + recent history to extension."""
+        extension_manager.linked_session_id = sid
+        p = eng._active_profile
+        await extension_manager.send_raw({
+            "type":       "linked_session",
+            "session_id": sid,
+            "title":      eng._title,
+            "profile":    p.name if p else "default",
+            "messages":   _recent_msgs(eng),
+        })
+
     # Send initial state
     await _send_session_info(engine, session_id)
     await _send_chat_list(engine)
     await _send_profile(engine)
+    await _notify_extension_session(engine, session_id)
 
     # ── Per-connection approval queue state ───────────────────────────────────
     # Futures: request_id → Future[{"approved": bool, "password": str}]
@@ -508,6 +572,7 @@ async def websocket_endpoint(
                 await _send_session_info(engine, session_id)
                 await _send_chat_list(engine)
                 await _send_profile(engine)
+                await _notify_extension_session(engine, session_id)
 
             # ── Switch to existing chat ───────────────────────────────────────
             elif mtype == "switch_chat":
@@ -518,6 +583,7 @@ async def websocket_endpoint(
                     await _send_session_info(engine, session_id)
                     await _send_chat_list(engine)
                     await _send_profile(engine)
+                    await _notify_extension_session(engine, session_id)
 
             # ── Delete a chat ─────────────────────────────────────────────────
             elif mtype == "delete_chat":
@@ -534,6 +600,7 @@ async def websocket_endpoint(
                         if current_profile and current_profile.name != "default":
                             engine.switch_profile(current_profile)
                         await _send_session_info(engine, session_id)
+                        await _notify_extension_session(engine, session_id)
                     await _send_chat_list(engine)
 
             # ── Profile switch (from UI switcher) ─────────────────────────────
@@ -614,12 +681,415 @@ async def websocket_endpoint(
         pass
 
     finally:
+        _frontend_sockets.discard(websocket)
         recv_task.cancel()
         monitor_task.cancel()
         try:
             await asyncio.gather(recv_task, monitor_task, return_exceptions=True)
         except Exception:
             pass
+
+
+# ── Extension WebSocket ───────────────────────────────────────────────────────
+# Helper: extract recent chat history as [{role, text}] for extension popup
+def _ext_recent_msgs(eng, limit: int = 40) -> list[dict]:
+    return [
+        {"role": m["role"], "text": m.get("content") or ""}
+        for m in eng._history
+        if m.get("role") in ("user", "assistant")
+        and isinstance(m.get("content"), str)
+        and m["content"].strip()
+    ][-limit:]
+
+
+@app.websocket("/ws/extension/")
+async def websocket_extension_endpoint(
+    websocket: WebSocket,
+    token: str = Query(default=""),
+):
+    """Dedicated command/control channel for the Chika Chrome extension.
+
+    Handles two layers over one WebSocket:
+      1. Browser RPC commands  (browser_command / browser_action_result)
+      2. Extension chat turns  (extension_chat_message / ext_chat_*)
+
+    Uses a separate reader task so approval/question responses can arrive
+    while a chat streaming task is awaiting the LLM — exactly like /ws/.
+    """
+    required = config.CHIKA_API_KEY
+    if required and token != required:
+        await websocket.close(code=4001)
+        return
+
+    await websocket.accept()
+    await extension_manager.connect(websocket)
+
+    await websocket.send_json({
+        "type":             "extension_ready",
+        "server_version":   "2.0",
+        "protocol_version": 1,
+    })
+
+    # ── Keep-alive ping ───────────────────────────────────────────────────────
+    async def _ping_loop() -> None:
+        while extension_manager.connected:
+            await asyncio.sleep(25)
+            if not await extension_manager.send_raw({"type": "ping"}):
+                break
+
+    ping_task = asyncio.create_task(_ping_loop())
+
+    # ── Shared state for extension chat ──────────────────────────────────────
+    # Futures live here (outside the chat loop) so the reader task can resolve
+    # them while a chat streaming task is running.
+    _ext_approval_futures: dict[str, asyncio.Future] = {}
+    _ext_question_futures: dict[str, asyncio.Future] = {}
+    _ext_chat_task: list = [None]   # mutable container so closures can cancel
+
+    # ── Approval / question handlers (routed over extension WS) ──────────────
+    async def _ext_approval_handler(
+        request_id: str, tool: str, args: dict,
+        step_id: str = "", message: str = "",
+        approval_type: str = "confirm",
+    ) -> bool:
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+        _ext_approval_futures[request_id] = fut
+        try:
+            await extension_manager.send_raw({
+                "type":          "approval_required",
+                "request_id":    request_id,
+                "tool":          tool,
+                "args":          args,
+                "step_id":       step_id,
+                "message":       message or f"Allow: {tool}",
+                "approval_type": approval_type,
+            })
+            resp = await asyncio.wait_for(fut, timeout=120.0)
+            return resp.get("approved", False)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            return False
+        except Exception:
+            return False
+        finally:
+            _ext_approval_futures.pop(request_id, None)
+
+    async def _ext_question_handler(
+        *, request_id: str, question: str, options: list,
+        header: str = "", multi_select: bool = False,
+    ) -> dict:
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+        _ext_question_futures[request_id] = fut
+        try:
+            await extension_manager.send_raw({
+                "type":         "user_question",
+                "request_id":   request_id,
+                "question":     question,
+                "options":      options,
+                "header":       header,
+                "multi_select": multi_select,
+            })
+            return await asyncio.wait_for(fut, timeout=120.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError) as exc:
+            return {"error": "timeout"}
+        except Exception as exc:
+            return {"error": str(exc)}
+        finally:
+            _ext_question_futures.pop(request_id, None)
+
+    # ── Incoming message queue (reader task → main loop) ─────────────────────
+    _incoming: asyncio.Queue = asyncio.Queue()
+
+    async def _ext_recv_loop() -> None:
+        """Read all WebSocket messages into the queue so nothing blocks."""
+        try:
+            while True:
+                try:
+                    raw = await websocket.receive_text()
+                except Exception:
+                    break
+                try:
+                    _incoming.put_nowait(json.loads(raw))
+                except Exception:
+                    pass
+        finally:
+            await _incoming.put({"type": "_disconnect"})
+
+    recv_task = asyncio.create_task(_ext_recv_loop())
+
+    # ── Main dispatch loop ────────────────────────────────────────────────────
+    try:
+        while True:
+            msg = await _incoming.get()
+            msg_type = msg.get("type")
+
+            if msg_type == "_disconnect":
+                break
+
+            # ── Browser RPC ───────────────────────────────────────────────────
+            if msg_type == "browser_action_result":
+                extension_manager.resolve(msg.get("request_id", ""), msg.get("result", {}))
+
+            elif msg_type == "browser_action_error":
+                extension_manager.reject(msg.get("request_id", ""), msg.get("error", "unknown_error"))
+
+            elif msg_type == "browser_event":
+                event_name = msg.get("event")
+                if event_name == "watch_trigger":
+                    asyncio.create_task(extension_manager.handle_watch_trigger(
+                        msg.get("watch_id", ""), msg.get("data", {})))
+                elif event_name == "watch_cancelled":
+                    asyncio.create_task(extension_manager.handle_watch_cancelled(
+                        msg.get("watch_id", ""), msg.get("reason", "unknown")))
+
+            elif msg_type == "pong":
+                pass
+
+            # ── Extension identity ────────────────────────────────────────────
+            elif msg_type == "extension_hello":
+                ext_did = msg.get("device_id", "").strip()
+                print(f"[EXT] extension_hello device={ext_did!r} linked_sid={extension_manager.linked_session_id!r}", flush=True)
+                if ext_did:
+                    extension_manager.linked_device_id = ext_did
+                    # Always send linked_session on every hello — this covers
+                    # SW-kill reconnects where the extension lost its session
+                    # ID in memory, even though server still had linked_session_id
+                    # set from before.  The extension needs the canonical session
+                    # ID on every reconnect.
+                    if not extension_manager.linked_session_id:
+                        # No frontend has linked yet — give extension its own
+                        # persistent device session.
+                        ext_eng, ext_sid = session_manager.get_device_session(ext_did)
+                        extension_manager.linked_session_id = ext_sid
+                        print(f"[EXT] no prior session → created device session {ext_sid!r}", flush=True)
+                    else:
+                        # Reuse the already-linked session (e.g. frontend tab
+                        # linked it while extension was disconnected).
+                        ext_sid = extension_manager.linked_session_id
+                        ext_eng = session_manager.get(ext_sid)
+                        if ext_eng is None:
+                            # Linked session expired — fall back to device session
+                            ext_eng, ext_sid = session_manager.get_device_session(ext_did)
+                            extension_manager.linked_session_id = ext_sid
+                            print(f"[EXT] prior session expired → created device session {ext_sid!r}", flush=True)
+                        else:
+                            print(f"[EXT] reusing existing session {ext_sid!r}", flush=True)
+                    p = ext_eng._active_profile
+                    sent = await extension_manager.send_raw({
+                        "type":       "linked_session",
+                        "session_id": ext_sid,
+                        "title":      ext_eng._title,
+                        "profile":    p.name if p else "default",
+                        "messages":   _ext_recent_msgs(ext_eng),
+                    })
+                    print(f"[EXT] linked_session sent={sent} sid={ext_sid!r}", flush=True)
+                else:
+                    print("[EXT] extension_hello missing device_id — ignored", flush=True)
+
+            # ── Extension chat ────────────────────────────────────────────────
+            elif msg_type == "extension_chat_message":
+                text       = msg.get("text", "").strip()
+                session_id_hint = msg.get("session_id", "").strip()
+                ext_device = msg.get("device_id", "").strip()
+                active_tab = msg.get("active_tab")  # {url, title, text?} from popup
+                print(f"[EXT] extension_chat_message text={text[:40]!r} sid_hint={session_id_hint!r} device={ext_device!r}", flush=True)
+
+                if not text:
+                    continue
+
+                # Cancel any running extension chat (shouldn't happen normally)
+                if _ext_chat_task[0] and not _ext_chat_task[0].done():
+                    _ext_chat_task[0].cancel()
+
+                # Resolve engine: linked frontend session → extension own session
+                ext_engine = None
+                resolved_sid = session_id_hint or extension_manager.linked_session_id
+                if resolved_sid:
+                    ext_engine = session_manager.get(resolved_sid)
+                if ext_engine is None and ext_device:
+                    ext_engine, resolved_sid = session_manager.get_device_session(ext_device)
+                    # Session hint was stale — update server state and re-notify
+                    # extension so all future messages use the correct session.
+                    if ext_engine is not None:
+                        extension_manager.linked_session_id = resolved_sid
+                        p = ext_engine._active_profile
+                        await extension_manager.send_raw({
+                            "type":       "linked_session",
+                            "session_id": resolved_sid,
+                            "title":      ext_engine._title,
+                            "profile":    p.name if p else "default",
+                            "messages":   _ext_recent_msgs(ext_engine),
+                        })
+                if ext_engine is None:
+                    # No session at all — let the extension work standalone by
+                    # creating a fresh device session rather than hard-failing.
+                    if ext_device:
+                        ext_engine, resolved_sid = session_manager.get_device_session(ext_device)
+                        extension_manager.linked_session_id = resolved_sid
+                        p = ext_engine._active_profile
+                        await extension_manager.send_raw({
+                            "type":       "linked_session",
+                            "session_id": resolved_sid,
+                            "title":      ext_engine._title,
+                            "profile":    p.name if p else "default",
+                            "messages":   _ext_recent_msgs(ext_engine),
+                        })
+                    else:
+                        await extension_manager.send_raw({
+                            "type":    "ext_chat_error",
+                            "message": "Could not create a session — check the server is running.",
+                        })
+                        await extension_manager.send_raw({"type": "ext_chat_done"})
+                        continue
+
+                print(f"[EXT] resolved engine sid={resolved_sid!r} busy={ext_engine._chat_busy}", flush=True)
+                if ext_engine._chat_busy:
+                    await extension_manager.send_raw({
+                        "type":       "ext_chat_error",
+                        "message":    "Chika is busy — wait for the current response to finish.",
+                        "error_code": "engine_busy",
+                    })
+                    await extension_manager.send_raw({"type": "ext_chat_done"})
+                    continue
+
+                # Enrich message with active-tab context so Claude knows what
+                # page the user is looking at without having to call browser tools
+                enriched_text = text
+                if active_tab:
+                    url   = active_tab.get("url", "")
+                    title = active_tab.get("title", "")
+                    tab_text = active_tab.get("text", "")  # optional page text snapshot
+                    if url:
+                        ctx_lines = [f"[Active browser tab: {title!r} — {url}]"]
+                        if tab_text:
+                            snippet = tab_text[:2000]
+                            ctx_lines.append(f"[Page text snippet: {snippet!r}]")
+                        enriched_text = "\n".join(ctx_lines) + "\n\n" + text
+
+                # Wire extension approval/question handlers
+                prev_approval = ext_engine._workflow_engine.approval_handler
+                prev_question = ext_engine._workflow_engine.question_handler
+                ext_engine._workflow_engine.approval_handler = _ext_approval_handler
+                ext_engine._workflow_engine.question_handler = _ext_question_handler
+
+                async def _run_ext_chat(
+                    user_text: str, display_text: str, eng, _prev_a, _prev_q
+                ) -> None:
+                    try:
+                        print(f"[EXT] _run_ext_chat starting text={user_text[:40]!r}", flush=True)
+                        await extension_manager.send_raw({"type": "ext_chat_start"})
+                        print("[EXT] ext_chat_start sent", flush=True)
+                        # Tell the frontend a new turn has started from the extension
+                        # so it can add the user message and open the streaming slot.
+                        await push_to_all_frontend_sessions({
+                            "type":      "ext_chat_turn",
+                            "user_text": display_text,
+                        })
+                        async for event in eng.chat(user_text):
+                            etype = event.get("type", "")
+                            if etype.startswith("_") or etype == "approval_required":
+                                continue
+                            if etype == "done":
+                                await extension_manager.send_raw({"type": "ext_chat_done"})
+                            else:
+                                await extension_manager.send_raw(event)
+                            # Mirror to all frontend sockets so the main tab
+                            # shows the extension's conversation turn in real time.
+                            try:
+                                await push_to_all_frontend_sessions(event)
+                            except Exception:
+                                pass
+                    except asyncio.CancelledError:
+                        print("[EXT] _run_ext_chat cancelled", flush=True)
+                        raise
+                    except Exception as exc:
+                        print(f"[EXT] _run_ext_chat EXCEPTION: {exc}", flush=True)
+                        import traceback; traceback.print_exc()
+                        try:
+                            await extension_manager.send_raw({
+                                "type": "ext_chat_error", "message": str(exc)
+                            })
+                            await extension_manager.send_raw({"type": "ext_chat_done"})
+                            # Also tell the frontend the turn ended with an error
+                            await push_to_all_frontend_sessions({
+                                "type": "error", "message": str(exc)
+                            })
+                            await push_to_all_frontend_sessions({"type": "done"})
+                        except Exception:
+                            pass
+                    finally:
+                        eng._workflow_engine.approval_handler = _prev_a
+                        eng._workflow_engine.question_handler = _prev_q
+
+                t = asyncio.create_task(
+                    _run_ext_chat(enriched_text, text, ext_engine, prev_approval, prev_question)
+                )
+                _ext_chat_task[0] = t
+                # Register with extension_manager so reconnect can cancel it
+                # and avoid leaving _chat_busy=True on the shared engine.
+                extension_manager.set_chat_task(t)
+                t.add_done_callback(lambda _: extension_manager.set_chat_task(None))
+                # Do NOT await here — fall through so the recv loop keeps running
+                # and can handle approval_response / question_response messages
+                # that arrive while the chat is streaming.
+
+            # ── Extension approval response ───────────────────────────────────
+            elif msg_type == "extension_approval_response":
+                rid = msg.get("request_id", "")
+                fut = _ext_approval_futures.get(rid)
+                if fut and not fut.done():
+                    fut.set_result({
+                        "approved": bool(msg.get("approved", False)),
+                        "password": str(msg.get("password", "")),
+                    })
+
+            # ── Extension question response ───────────────────────────────────
+            elif msg_type == "extension_question_response":
+                rid = msg.get("request_id", "")
+                fut = _ext_question_futures.get(rid)
+                if fut and not fut.done():
+                    fut.set_result({
+                        "choice":         str(msg.get("choice", "")),
+                        "choice_index":   int(msg.get("choice_index", -1)),
+                        "choices":        [str(c) for c in (msg.get("choices") or [])],
+                        "choice_indices": [int(i) for i in (msg.get("choice_indices") or [])],
+                        "notes":          str(msg.get("notes", "")),
+                    })
+
+    except Exception as _ext_exc:
+        import traceback
+        print(f"[EXT] FATAL extension WS handler: {_ext_exc}", flush=True)
+        traceback.print_exc()
+    finally:
+        recv_task.cancel()
+        ping_task.cancel()
+        if _ext_chat_task[0] and not _ext_chat_task[0].done():
+            _ext_chat_task[0].cancel()
+        # Cancel any pending futures so handlers don't hang
+        for fut in list(_ext_approval_futures.values()):
+            if not fut.done():
+                fut.cancel()
+        for fut in list(_ext_question_futures.values()):
+            if not fut.done():
+                fut.cancel()
+        try:
+            await asyncio.gather(recv_task, ping_task, return_exceptions=True)
+        except Exception:
+            pass
+        # Pass the websocket so disconnect() can detect if a newer connection
+        # has already replaced this one and skip the teardown in that case.
+        extension_manager.disconnect(websocket)
+
+
+# ── REST — Extension status ───────────────────────────────────────────────────
+
+@app.get("/api/extension/status")
+async def extension_status(_: None = Depends(require_auth)):
+    return {
+        "connected":   extension_manager.connected,
+        "watch_count": extension_manager.watch_count(),
+    }
 
 
 # ── REST — Profiles ──────────────────────────────────────────────────────────

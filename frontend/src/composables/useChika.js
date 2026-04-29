@@ -4,6 +4,7 @@ import { useChatsStore }  from '../stores/chats'
 import { useSystemStore } from '../stores/system'
 
 const DEVICE_KEY = 'chika_device_id'
+const MAX_OFFLINE_QUEUE = 20
 
 export function useChika(apiKey = '') {
   const chat   = useChatStore()
@@ -13,6 +14,8 @@ export function useChika(apiKey = '') {
   const ws = ref(null)
   let reconnectTimer    = null
   let reconnectAttempts = 0
+  // Bounded offline queue — flushed on reconnect (4.4)
+  const offlineQueue = []
 
   function buildWsUrl() {
     const base   = typeof __API_URL__ !== 'undefined' && __API_URL__
@@ -37,17 +40,29 @@ export function useChika(apiKey = '') {
     socket.onopen = () => {
       console.log('[Chika] WS OPEN ✓')
       system.setConnected(true, chat.sessionId || '')
+      system.setConnectionError(null)   // clear any displayed error banner (4.3)
       reconnectAttempts = 0
       clearTimeout(reconnectTimer)
+
+      // Flush queued messages sent while offline (4.4)
+      while (offlineQueue.length > 0) {
+        const payload = offlineQueue.shift()
+        socket.send(JSON.stringify(payload))
+      }
     }
 
     socket.onclose = (e) => {
       console.warn('[Chika] WS CLOSED', e.code)
       system.setConnected(false, '')
+      // Reset stuck isStreaming so the input isn't locked after a disconnect (4.1)
+      chat.finaliseAssistantMessage()
       scheduleReconnect()
     }
 
-    socket.onerror = () => system.setConnected(false, '')
+    socket.onerror = () => {
+      system.setConnected(false, '')
+      system.setConnectionError('Connection lost. Reconnecting...')  // (4.3)
+    }
 
     socket.onmessage = (e) => {
       try {
@@ -60,6 +75,9 @@ export function useChika(apiKey = '') {
   }
 
   function scheduleReconnect() {
+    // Clear any pending timer before scheduling a new one — prevents
+    // multiple concurrent reconnect loops piling up (4.2)
+    clearTimeout(reconnectTimer)
     const delay = Math.min(1000 * 2 ** reconnectAttempts, 30000)
     reconnectAttempts++
     reconnectTimer = setTimeout(connect, delay)
@@ -118,13 +136,45 @@ export function useChika(apiKey = '') {
       case 'compaction':
         chat.addCompactionMessage(event)
         break
+
+      case 'workflow_start':
+      case 'step_start':
+      case 'tool_call':
+      case 'tool_result':
+      case 'step_done':
+      case 'workflow_done':
+      case 'loop_iteration':
+      case 'condition_eval':
+      case 'variable_set':
+        chat.attachToolEvent(event)
+        break
+
+      case 'extension_status':
+        system.setExtensionConnected(!!event.connected)
+        break
+
+      case 'ext_chat_turn':
+        // Extension popup started a new chat turn — mirror it to the main
+        // frontend so it appears naturally in the conversation in real time.
+        // display_text is the user's original message (without tab context).
+        chat.addUserMessage(event.user_text + ' ↗')
+        chat.startAssistantMessage()
+        break
+
+      case 'browser_watch_trigger':
+        // Push as a tool event so it appears inline in the chat
+        chat.attachToolEvent(event)
+        break
     }
   }
 
   function _wsSend(payload) {
     if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
+      // Buffer up to MAX_OFFLINE_QUEUE messages; drop oldest if full (4.4)
+      if (offlineQueue.length < MAX_OFFLINE_QUEUE) {
+        offlineQueue.push(payload)
+      }
       connect()
-      setTimeout(() => _wsSend(payload), 500)
       return
     }
     ws.value.send(JSON.stringify(payload))

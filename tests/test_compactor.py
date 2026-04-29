@@ -95,7 +95,7 @@ def test_compact_too_few_messages_returns_unchanged():
     msgs = make_messages(5)
     compacted, event = run(c.compact(msgs))
     assert compacted == msgs
-    assert event == {}
+    assert event is None
 
 
 def test_compact_summarises_middle():
@@ -126,7 +126,9 @@ def test_compact_summary_message_has_system_role():
     msgs = make_messages(5)
     compacted, _ = run(c.compact(msgs))
     summary_msg = compacted[1]  # between head and tail
-    assert summary_msg["role"] == "system"
+    # Summary is injected as a "user" message so it's valid mid-conversation
+    # for all LLM providers (some reject "system" outside position 0).
+    assert summary_msg["role"] == "user"
     assert "compact summary" in summary_msg["content"]
 
 

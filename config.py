@@ -12,6 +12,14 @@ from dotenv import load_dotenv
 # ANTHROPIC_API_KEY or CHIKA_* vars that may be set in the OS environment.
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
+
+def _bool(val: str | None, default: bool = False) -> bool:
+    """Parse a boolean environment variable. Accepts: 1/true/yes/on (case-insensitive)."""
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
 PROVIDER = os.getenv("CHIKA_PROVIDER", "anthropic").lower()
 
 # Azure OpenAI
@@ -30,22 +38,24 @@ ANTHROPIC_MAX_TOKENS_THINKING = int(os.getenv("CHIKA_ANTHROPIC_MAX_TOKENS_THINKI
 # Non-streaming paths (e.g. compaction, meta completions).
 ANTHROPIC_COMPLETE_MAX_TOKENS = int(os.getenv("CHIKA_ANTHROPIC_COMPLETE_MAX_TOKENS", "8192"))
 
-# OpenAI
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-4o")
+# OpenAI / Azure OpenAI
+OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL      = os.getenv("OPENAI_MODEL", "gpt-4o")
+OPENAI_MAX_TOKENS = int(os.getenv("CHIKA_OPENAI_MAX_TOKENS", "16384"))
 
 # Engine settings
 MAX_HISTORY_TOKENS   = int(os.getenv("CHIKA_MAX_HISTORY_TOKENS", "10000"))
 COMPACT_KEEP_FIRST   = int(os.getenv("CHIKA_COMPACT_KEEP_FIRST", "2"))
 COMPACT_KEEP_LAST    = int(os.getenv("CHIKA_COMPACT_KEEP_LAST", "4"))
 MAX_TOOL_TURNS       = int(os.getenv("CHIKA_MAX_TOOL_TURNS", "20"))
+MAX_WORKFLOW_STEPS   = int(os.getenv("CHIKA_MAX_WORKFLOW_STEPS", "8"))
 MAX_MEMORY_TOKENS    = int(os.getenv("CHIKA_MAX_MEMORY_TOKENS", "2000"))
 
 # Grounding / hallucination controls
 # When true, the engine runs a lightweight post-response validator that
 # flags factual claims in the final reply that aren't supported by the
 # $facts ledger. Emits a "validation_warning" event the frontend can show.
-GROUNDING_VALIDATE_RESPONSE = os.getenv("CHIKA_VALIDATE_RESPONSE", "true").lower() == "true"
+GROUNDING_VALIDATE_RESPONSE = _bool(os.getenv("CHIKA_VALIDATE_RESPONSE"), default=True)
 # Minimum response length (chars) to bother running the validator
 GROUNDING_MIN_LENGTH        = int(os.getenv("CHIKA_GROUNDING_MIN_LENGTH", "160"))
 
@@ -53,13 +63,23 @@ GROUNDING_MIN_LENGTH        = int(os.getenv("CHIKA_GROUNDING_MIN_LENGTH", "160")
 # When enabled, Claude runs a hidden reasoning pass before its response and
 # the tokens are streamed to the frontend as {type: "thinking", text: ...}
 # events so the user can see the agent's reasoning.
-THINKING_ENABLED        = os.getenv("CHIKA_THINKING", "true").lower() == "true"
+THINKING_ENABLED        = _bool(os.getenv("CHIKA_THINKING"), default=True)
 THINKING_BUDGET_TOKENS  = int(os.getenv("CHIKA_THINKING_BUDGET", "4000"))
 
 # API server
 API_HOST    = os.getenv("CHIKA_HOST", "0.0.0.0")
 API_PORT    = int(os.getenv("CHIKA_PORT", "8000"))
 CHIKA_API_KEY = os.getenv("CHIKA_API_KEY", "")   # empty = auth disabled
+# Comma-separated list of allowed CORS origins. Defaults to localhost dev servers.
+# Set to "*" only for fully public APIs with no credentials.
+CORS_ORIGINS: list[str] = [
+    o.strip()
+    for o in os.getenv(
+        "CHIKA_CORS_ORIGINS",
+        "http://localhost:5173,http://localhost:8000,http://127.0.0.1:5173,http://127.0.0.1:8000",
+    ).split(",")
+    if o.strip()
+]
 
 
 @dataclass

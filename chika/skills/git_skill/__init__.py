@@ -1,4 +1,5 @@
 from __future__ import annotations
+from shlex import quote
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
 from chika.tools.shell_tool import shell_exec
@@ -21,13 +22,14 @@ async def git_log(n: int = 10, working_directory: str = ".", **kwargs) -> dict:
     for `max_count` since that's what `git log` uses.
     """
     n = kwargs.get("max_count", kwargs.get("limit", n))
+    n = max(1, min(int(n), 200))  # clamp to prevent abuse
     r = await shell_exec(f"git log --oneline -{n}", working_directory=working_directory)
     return {"log": r["stdout"], "lines": r["stdout_lines"]}
 
 
 async def git_commit(message: str, working_directory: str = ".") -> dict:
     r = await shell_exec(
-        f'git add -A && git commit -m "{message}"',
+        f"git add -A && git commit -m {quote(message)}",
         working_directory=working_directory,
     )
     return {"output": r["stdout"], "error": r["stderr"], "exit_code": r["exit_code"]}
@@ -40,25 +42,23 @@ async def git_branch(working_directory: str = ".") -> dict:
 
 async def git_checkout(branch: str, create: bool = False, working_directory: str = ".") -> dict:
     flag = "-b" if create else ""
-    r = await shell_exec(f"git checkout {flag} {branch}".strip(), working_directory=working_directory)
+    r = await shell_exec(f"git checkout {flag} {quote(branch)}".strip(), working_directory=working_directory)
     return {"output": r["stdout"] or r["stderr"], "exit_code": r["exit_code"]}
 
 
 async def git_push(remote: str = "origin", branch: str = "HEAD", working_directory: str = ".") -> dict:
-    r = await shell_exec(f"git push {remote} {branch}", working_directory=working_directory)
+    r = await shell_exec(f"git push {quote(remote)} {quote(branch)}", working_directory=working_directory)
     return {"output": r["stdout"] or r["stderr"], "exit_code": r["exit_code"]}
 
 
 async def git_pull(remote: str = "origin", branch: str = "main", working_directory: str = ".") -> dict:
-    r = await shell_exec(f"git pull {remote} {branch}", working_directory=working_directory)
+    r = await shell_exec(f"git pull {quote(remote)} {quote(branch)}", working_directory=working_directory)
     return {"output": r["stdout"] or r["stderr"], "exit_code": r["exit_code"]}
 
 
 async def git_pr_create(title: str, body: str = "", base: str = "main", working_directory: str = ".") -> dict:
-    safe_title = title.replace('"', '\\"')
-    safe_body  = body.replace('"', '\\"')
     r = await shell_exec(
-        f'gh pr create --title "{safe_title}" --body "{safe_body}" --base {base}',
+        f"gh pr create --title {quote(title)} --body {quote(body)} --base {quote(base)}",
         working_directory=working_directory,
     )
     return {"output": r["stdout"] or r["stderr"], "exit_code": r["exit_code"]}

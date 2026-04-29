@@ -10,7 +10,9 @@ Every event is a dict with at minimum {"type": "..."}.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
+import re
 import time
 from typing import Any, AsyncGenerator
 
@@ -83,6 +85,9 @@ class WorkflowEngine:
         # approval_handler: async (request_id, tool_name, args) -> bool
         # Set per-WebSocket connection so the handler can talk back to that client.
         self.approval_handler: "ApprovalHandler | None" = approval_handler
+        # question_handler: async (*, request_id, question, options, ...) -> dict
+        # Set per-WebSocket connection (None until a WS wires it up).
+        self.question_handler = None
 
     def register_sub_workflow(self, workflow_id: str, steps: list[dict]) -> None:
         self._sub_workflows[workflow_id] = steps
@@ -91,8 +96,59 @@ class WorkflowEngine:
         v = self._vars.get("profile.name")
         return v.value if v else "unknown"
 
+    @staticmethod
+    def _count_steps(node: Any) -> int:
+        """Recursively count leaf tool steps in a workflow tree."""
+        if not isinstance(node, dict):
+            return 0
+        count = 1 if "tool" in node and "type" not in node else 0
+        for key in ("steps", "branches"):
+            for child in node.get(key) or []:
+                count += WorkflowEngine._count_steps(child)
+        for key in ("step", "if_true", "if_false", "then", "fan_in"):
+            child = node.get(key)
+            if isinstance(child, dict):
+                count += WorkflowEngine._count_steps(child)
+        return count
+
+    @staticmethod
+    def _count_file_writes(node: Any) -> int:
+        """Count how many file_write calls are in a workflow tree."""
+        if not isinstance(node, dict):
+            return 0
+        count = 1 if node.get("tool") == "file_write" and "type" not in node else 0
+        for key in ("steps", "branches"):
+            for child in node.get(key) or []:
+                count += WorkflowEngine._count_file_writes(child)
+        for key in ("step", "if_true", "if_false", "then", "fan_in"):
+            child = node.get(key)
+            if isinstance(child, dict):
+                count += WorkflowEngine._count_file_writes(child)
+        return count
+
     async def execute(self, workflow: dict) -> AsyncGenerator[Event, None]:
         """Top-level entry: execute a workflow dict and stream events."""
+        from config import MAX_WORKFLOW_STEPS
+        step_count = self._count_steps(workflow)
+        if step_count > MAX_WORKFLOW_STEPS:
+            yield {"type": "error", "message": (
+                f"Workflow has {step_count} steps (limit is {MAX_WORKFLOW_STEPS}). "
+                "Break it into smaller workflows across multiple turns. "
+                "Use plan_set to outline the full task, then execute one "
+                "piece per workflow (e.g. write 1 file, verify, then next)."
+            )}
+            return
+
+        fw_count = self._count_file_writes(workflow)
+        if fw_count > 1:
+            yield {"type": "error", "message": (
+                f"Workflow has {fw_count} file_write calls (limit is 1 per workflow). "
+                "Create/overwrite only one file per workflow. Use separate "
+                "workflows across turns for additional files. "
+                "file_replace and file_append are not limited."
+            )}
+            return
+
         wf_id = workflow.get("id", "workflow")
         wf_name = workflow.get("name", wf_id)
         _log.info("workflow_start", workflow_id=wf_id, name=wf_name, profile=self._profile())
@@ -250,10 +306,15 @@ class WorkflowEngine:
         if op == "not_null":     return raw is not None
         if op == "in":           return raw in (expected or [])
         if op == "not_in":       return raw not in (expected or [])
-        if op == "gt":           return float(raw) > float(expected)
-        if op == "lt":           return float(raw) < float(expected)
-        if op == "gte":          return float(raw) >= float(expected)
-        if op == "lte":          return float(raw) <= float(expected)
+        if op in ("gt", "lt", "gte", "lte"):
+            try:
+                lhs, rhs = float(raw), float(expected)
+            except (TypeError, ValueError):
+                return False  # non-numeric values can't be compared numerically
+            if op == "gt":  return lhs > rhs
+            if op == "lt":  return lhs < rhs
+            if op == "gte": return lhs >= rhs
+            if op == "lte": return lhs <= rhs
         if op == "contains":     return str(expected) in str(raw)
         return False
 
@@ -312,20 +373,24 @@ class WorkflowEngine:
 
         semaphore = asyncio.Semaphore(concurrency)
         queue: asyncio.Queue[Event | None] = asyncio.Queue()
+        # Serialize item-var writes so concurrent tasks don't overwrite each
+        # other's $item before the step template resolves it.
+        _map_item_lock = asyncio.Lock()
 
         yield {"type": "map_item", "step_id": sid, "index": 0, "total": len(items)}
 
         async def run_item(idx: int, item: Any) -> None:
             async with semaphore:
-                self._vars.set(item_var, item)
-                await queue.put({"type": "map_item", "step_id": sid, "index": idx, "total": len(items)})
-                step = json.loads(json.dumps(step_template))  # deep copy
-                async for e in self._exec_node(step):
-                    await queue.put(e)
-                store_ref = step_template.get("store_result_as", "").lstrip("$")
-                if store_ref:
-                    v = self._vars.get(store_ref)
-                    results[idx] = v.value if v else None
+                async with _map_item_lock:
+                    self._vars.set(item_var, item)
+                    await queue.put({"type": "map_item", "step_id": sid, "index": idx, "total": len(items)})
+                    step = copy.deepcopy(step_template)
+                    async for e in self._exec_node(step):
+                        await queue.put(e)
+                    store_ref = step_template.get("store_result_as", "").lstrip("$")
+                    if store_ref:
+                        v = self._vars.get(store_ref)
+                        results[idx] = v.value if v else None
 
         tasks = [asyncio.create_task(run_item(i, item)) for i, item in enumerate(items)]
 
@@ -552,6 +617,20 @@ class WorkflowEngine:
         yield {"type": "tool_result", "step_id": sid, "tool": tool_name,
                "result": result, "error": error, "duration_ms": duration}
 
+        # Emit live memory events so the frontend panel updates without polling
+        if not error:
+            if tool_name == "memory_persist":
+                yield {
+                    "type": "memory_update",
+                    "key":   resolved_args.get("key", ""),
+                    "value": resolved_args.get("value", ""),
+                }
+            elif tool_name == "memory_forget":
+                yield {
+                    "type": "memory_delete",
+                    "key": resolved_args.get("key", ""),
+                }
+
         if store_as:
             from chika.core.variable_store import VarType
             var_type = VarType.JSON if isinstance(result, (dict, list)) else VarType.TEXT
@@ -657,10 +736,35 @@ class WorkflowEngine:
         if name == "llm_summarise":
             prompt = args.get("prompt", "Summarise the following.")
             context = args.get("context", {})
+            # Strip raw image bytes from context before serialising — base64 PNG blobs
+            # are for the outer multimodal model only and will blow up the inner LLM's
+            # context window.  Replace them with a short placeholder.
+            # Known image-bearing keys: "image", "_vision_image", any key ending in "_image".
+            _IMAGE_PREFIXES = ("iVBOR", "/9j/", "AAAB", "R0lGO", "UEs")  # PNG, JPEG, WEBP, GIF, ZIP/WEBP
+            def _strip_images(obj: Any, depth: int = 0) -> Any:
+                if depth > 10:
+                    return obj
+                if isinstance(obj, dict):
+                    out: dict = {}
+                    for k, v in obj.items():
+                        if (
+                            isinstance(v, str) and len(v) > 500
+                            and (
+                                "image" in k.lower()
+                                or (isinstance(v, str) and any(v.startswith(p) for p in _IMAGE_PREFIXES))
+                            )
+                        ):
+                            out[k] = "[image data stripped — visual content available to outer model]"
+                        else:
+                            out[k] = _strip_images(v, depth + 1)
+                    return out
+                if isinstance(obj, list):
+                    return [_strip_images(item, depth + 1) for item in obj]
+                return obj
+            context = _strip_images(context)
             ctx_str = json.dumps(context, indent=2) if isinstance(context, (dict, list)) else str(context)
             return await self._llm.complete(f"{prompt}\n\n{ctx_str}")
         elif name == "llm_transform":
-            import re as _re
             prompt = args.get("prompt", "Transform the following.")
             pipeline_input = args.get("input") or self._vars.resolve("$pipeline_input")
             # Use context if provided (preferred over pipeline_input)
@@ -698,6 +802,13 @@ class WorkflowEngine:
                             break
                         except json.JSONDecodeError:
                             pass
+            # When a schema is provided, return the parsed value directly so that
+            # $var[0].field and $var.key access patterns work without an extra
+            # ".result" indirection.  Without a schema we always return
+            # {"result": ...} so the model has a consistent key to read from.
+            if schema is not None and parsed is not None:
+                return parsed
+
             # Normalize: always guarantee a "result" key with the primary value
             if parsed is None:
                 # Plain text response (URL, single line, etc.)

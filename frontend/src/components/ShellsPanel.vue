@@ -126,59 +126,59 @@ function fmtDuration(start, end) {
 
 .empty-hint {
   text-align: center;
-  color: #444;
+  color: var(--text-3);
   font-size: 12px;
   padding: 24px;
 }
 
 .proc-card {
-  border: 1px solid #2a2a35;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   overflow: hidden;
 }
-.proc-card.running { border-color: #40d08055; }
-.proc-card.exited   { border-color: #2a2a35; }
+.proc-card.running { border-color: var(--green); }
+.proc-card.exited  { border-color: var(--border-strong); }
 
 .proc-header {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  background: #1a1a24;
+  background: var(--surface-2);
   cursor: pointer;
   user-select: none;
   font-size: 12px;
 }
-.proc-header:hover { background: #1e1e2c; }
+.proc-header:hover { background: var(--surface-3); }
 
 .status-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #444;
+  background: var(--text-3);
   flex-shrink: 0;
 }
 .status-dot.running {
-  background: #40d080;
-  box-shadow: 0 0 5px #40d08088;
+  background: var(--green);
+  box-shadow: 0 0 5px rgba(61, 214, 140, 0.5);
   animation: pulse 1.5s ease-in-out infinite;
 }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  50%       { opacity: 0.4; }
 }
 
 .pid {
-  font-family: monospace;
-  color: #6c63ff;
+  font-family: var(--font-mono);
+  color: var(--accent);
   flex-shrink: 0;
   font-size: 11px;
 }
 
 .cmd {
   flex: 1;
-  font-family: monospace;
-  color: #c8c8d8;
+  font-family: var(--font-mono);
+  color: var(--text-1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -186,12 +186,12 @@ function fmtDuration(start, end) {
 }
 
 .exit-badge {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 4px;
-  background: #2a1a1a;
-  color: #cc6666;
+  background: var(--red-dim);
+  color: var(--red);
   flex-shrink: 0;
 }
 
@@ -199,27 +199,28 @@ function fmtDuration(start, end) {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 4px;
-  background: #1a2a1a;
-  color: #40d080;
+  background: var(--green-dim);
+  color: var(--green);
   flex-shrink: 0;
   animation: pulse 1.5s ease-in-out infinite;
 }
 
 .duration {
   font-size: 10px;
-  color: #555;
+  color: var(--text-3);
   flex-shrink: 0;
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .chevron {
-  color: #555;
+  color: var(--text-3);
   font-size: 10px;
   flex-shrink: 0;
 }
 
+/* Terminal output area — stays dark in both themes */
 .proc-body {
-  background: #0d0d12;
+  background: var(--surface-0);
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -236,35 +237,39 @@ function fmtDuration(start, end) {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #555;
+  color: var(--text-3);
 }
-.stderr-label { color: #884444; }
+.stderr-label {
+  color: var(--red);
+  opacity: 0.7;
+}
 
 .output-scroll {
   max-height: 200px;
   overflow-y: auto;
-  background: #111118;
-  border: 1px solid #1e1e28;
+  background: var(--surface-0);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   padding: 6px 8px;
 }
-.output-scroll::-webkit-scrollbar { width: 4px; }
+.output-scroll::-webkit-scrollbar       { width: 4px; }
 .output-scroll::-webkit-scrollbar-track { background: transparent; }
-.output-scroll::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 3px; }
+.output-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
 
 .out-line {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
 }
+/* Terminal text always light-on-dark regardless of theme */
 .out-line.stdout { color: #c0c8d0; }
 .out-line.stderr { color: #d08080; }
 
 .no-output {
   font-size: 11px;
-  color: #444;
+  color: var(--text-3);
   padding: 4px;
 }
 </style>

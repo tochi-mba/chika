@@ -1,21 +1,32 @@
 <template>
-  <div class="chat-input">
-    <textarea
-      ref="textarea"
-      v-model="text"
-      :disabled="disabled"
-      placeholder="Message Chika…"
-      rows="1"
-      @keydown.enter.exact.prevent="submit"
-      @keydown.enter.shift.exact="newline"
-      @input="autoResize"
-    />
-    <button :disabled="disabled || !text.trim()" @click="submit">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <line x1="22" y1="2" x2="11" y2="13"/>
-        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-      </svg>
-    </button>
+  <div class="input-bar">
+    <div class="input-box" :class="{ focused, disabled }">
+      <textarea
+        ref="textarea"
+        v-model="text"
+        :disabled="disabled"
+        placeholder="Message Chika…"
+        rows="1"
+        @keydown.enter.exact.prevent="submit"
+        @keydown.enter.shift.exact="newline"
+        @input="autoResize"
+        @focus="focused = true"
+        @blur="focused = false"
+      />
+      <button
+        class="send-btn"
+        :disabled="disabled || !text.trim()"
+        @click="submit"
+        title="Send (Enter)"
+        aria-label="Send message"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="19" x2="12" y2="5"/>
+          <polyline points="5 12 12 5 19 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="input-hint">Shift+Enter for newline</div>
   </div>
 </template>
 
@@ -27,6 +38,7 @@ const emit  = defineEmits(['send'])
 
 const text     = ref('')
 const textarea = ref(null)
+const focused  = ref(false)
 
 function submit() {
   const msg = text.value.trim()
@@ -45,51 +57,97 @@ function autoResize() {
   const el = textarea.value
   if (!el) return
   el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+  el.style.height = Math.min(el.scrollHeight, 180) + 'px'
 }
 </script>
 
 <style scoped>
-.chat-input {
+.input-bar {
+  flex-shrink: 0;
+  padding: 10px 16px 14px;
+  background: var(--bg, #09090d);
+  border-top: 1px solid var(--border, rgba(255,255,255,0.07));
+}
+
+.input-box {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 12px 16px;
-  background: #16161a;
-  border-top: 1px solid #2a2a35;
+  background: var(--surface-1, #111117);
+  border: 1.5px solid var(--border, rgba(255,255,255,0.07));
+  border-radius: var(--radius-lg, 14px);
+  padding: 9px 10px 9px 14px;
+  transition: border-color 180ms var(--ease, cubic-bezier(0.16, 1, 0.3, 1)),
+              box-shadow 180ms var(--ease, cubic-bezier(0.16, 1, 0.3, 1));
 }
+
+.input-box.focused {
+  border-color: var(--accent, #6c63ff);
+  box-shadow: 0 0 0 3px var(--accent-dim, rgba(108,99,255,0.15));
+}
+
+.input-box.disabled {
+  opacity: 0.5;
+}
+
 textarea {
   flex: 1;
   resize: none;
-  background: #1e1e28;
-  border: 1px solid #2a2a35;
-  border-radius: 10px;
-  padding: 10px 14px;
-  font-size: 14px;
-  color: #e8e8f0;
-  line-height: 1.5;
-  min-height: 40px;
-  max-height: 200px;
-  outline: none;
-  transition: border-color 0.15s;
-}
-textarea:focus { border-color: #6c63ff; }
-textarea:disabled { opacity: 0.4; cursor: not-allowed; }
-button {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  background: none;
   border: none;
-  background: #6c63ff;
+  outline: none;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text-1, #ededf2);
+  line-height: 1.6;
+  min-height: 24px;
+  max-height: 180px;
+  padding: 0;
+  letter-spacing: -0.004em;
+}
+
+textarea::placeholder {
+  color: var(--text-3, #4f4f6a);
+}
+
+textarea:disabled {
+  cursor: not-allowed;
+}
+
+.send-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius, 9px);
+  border: none;
+  background: var(--accent, #6c63ff);
   color: #fff;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s, opacity 0.15s;
+  transition: background 150ms, opacity 150ms, transform 100ms;
 }
-button:disabled { background: #333; opacity: 0.4; cursor: not-allowed; }
-button:not(:disabled):hover { background: #7c72ff; }
-button svg { width: 18px; height: 18px; }
+
+.send-btn:not(:disabled):hover {
+  background: #7c74ff;
+}
+
+.send-btn:not(:disabled):active {
+  transform: scale(0.93);
+}
+
+.send-btn:disabled {
+  background: var(--surface-3, #20202a);
+  color: var(--text-3, #4f4f6a);
+  cursor: not-allowed;
+}
+
+.input-hint {
+  margin-top: 5px;
+  padding-left: 4px;
+  font-size: 11px;
+  color: var(--text-3, #4f4f6a);
+  user-select: none;
+}
 </style>
