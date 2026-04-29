@@ -1,9 +1,11 @@
 """Tests for ToolRegistry — register, dispatch, unregister, schema generation."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+import asyncio
 
 import pytest
-import asyncio
-from chika.core.tool_registry import ToolRegistry, ToolDefinition
+
+from chika.core.tool_registry import ToolDefinition, ToolRegistry
 
 
 @pytest.fixture

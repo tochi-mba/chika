@@ -1,7 +1,7 @@
 from __future__ import annotations
+
 import base64
 from pathlib import Path
-from typing import Any
 
 from chika.core.tool_registry import ToolDefinition
 

@@ -3,9 +3,11 @@ Multi-provider LLM client factory.
 Set CHIKA_PROVIDER=azure|anthropic|openai|ollama in .env
 """
 from __future__ import annotations
+
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # override=True so the project's .env always wins over any stale/empty
@@ -52,7 +54,8 @@ MAX_HISTORY_TOKENS   = int(os.getenv("CHIKA_MAX_HISTORY_TOKENS", "10000"))
 COMPACT_KEEP_FIRST   = int(os.getenv("CHIKA_COMPACT_KEEP_FIRST", "2"))
 COMPACT_KEEP_LAST    = int(os.getenv("CHIKA_COMPACT_KEEP_LAST", "4"))
 MAX_TOOL_TURNS       = int(os.getenv("CHIKA_MAX_TOOL_TURNS", "20"))
-MAX_WORKFLOW_STEPS   = int(os.getenv("CHIKA_MAX_WORKFLOW_STEPS", "8"))
+MAX_WORKFLOW_STEPS        = int(os.getenv("CHIKA_MAX_WORKFLOW_STEPS", "8"))
+MAX_FILE_WRITES_PER_WF    = int(os.getenv("CHIKA_MAX_FILE_WRITES_PER_WF", "3"))
 MAX_MEMORY_TOKENS    = int(os.getenv("CHIKA_MAX_MEMORY_TOKENS", "2000"))
 
 # Grounding / hallucination controls

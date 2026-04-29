@@ -1,14 +1,15 @@
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
-from chika.core.tool_registry import ToolDefinition
 from chika.core.profile_manager import ProfileManager
+from chika.core.tool_registry import ToolDefinition
 
 if TYPE_CHECKING:
     from chika.core.engine import ChikaEngine
 
 
-def make_profile_tools(engine: "ChikaEngine", profile_manager: ProfileManager) -> list[ToolDefinition]:
+def make_profile_tools(engine: ChikaEngine, profile_manager: ProfileManager) -> list[ToolDefinition]:
     """Return profile tools with a closure over the engine and profile manager."""
 
     async def profile_list() -> dict:

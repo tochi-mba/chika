@@ -11,11 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import secrets
 import sys
-import os
 from pathlib import Path
-from typing import Any
 
 # ── Windows event-loop policy ────────────────────────────────────────────────
 # uvicorn on Windows defaults to the Selector event loop, which does NOT
@@ -29,21 +26,21 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Header
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import config
-from api.session_manager import session_manager
 from api.readme_html import README_HTML
+from api.session_manager import session_manager
 from chika.core.device_store import DeviceStore
-from chika.tools.shell_tool import ProcessRegistry
-from chika.skills.spotify_skill import oauth as spotify_oauth
-from chika.skills.browser_skill.extension_manager import extension_manager
 from chika.skills.browser_skill import set_frontend_push
+from chika.skills.browser_skill.extension_manager import extension_manager
+from chika.skills.spotify_skill import oauth as spotify_oauth
+from chika.tools.shell_tool import ProcessRegistry
 
 app = FastAPI(title="Chika v2", version="2.0.0")
 
@@ -771,7 +768,7 @@ async def websocket_extension_endpoint(
             })
             resp = await asyncio.wait_for(fut, timeout=120.0)
             return resp.get("approved", False)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except (TimeoutError, asyncio.CancelledError):
             return False
         except Exception:
             return False
@@ -795,7 +792,7 @@ async def websocket_extension_endpoint(
                 "multi_select": multi_select,
             })
             return await asyncio.wait_for(fut, timeout=120.0)
-        except (asyncio.TimeoutError, asyncio.CancelledError) as exc:
+        except (TimeoutError, asyncio.CancelledError):
             return {"error": "timeout"}
         except Exception as exc:
             return {"error": str(exc)}

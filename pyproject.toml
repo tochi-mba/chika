@@ -44,10 +44,30 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+exclude = [
+    ".workspace",
+    "data",
+    "*.log",
+    "*.log.*",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
-ignore = ["E501"]
+ignore = [
+    "E501",   # line too long (handled by line-length)
+    "E402",   # module-level import not at top — intentional lazy imports
+    "E701",   # multiple statements on one line (colon) — guard-clause style used throughout
+    "E702",   # multiple statements on one line (semicolon) — same
+    "E741",   # ambiguous variable name — l, O, etc. acceptable in short scopes
+    "F821",   # undefined name — forward refs in TYPE_CHECKING blocks
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401", "I001"]         # test helpers may import for side effects; sort not enforced
+"_test_*.py" = ["E401", "I001", "F401"]  # test harness files use multi-imports
+"api/server.py" = ["I001"]           # inline 'import traceback' inside except blocks
+"api/session_manager.py" = ["I001"]
+"chika/skills/*/  __init__.py" = ["I001"]  # skill files loaded at runtime
 
 [tool.mypy]
 python_version = "3.11"

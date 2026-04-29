@@ -16,7 +16,7 @@ import json
 import logging
 import logging.handlers
 import traceback as tb
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +65,7 @@ class _ChikaLogger:
 
     def _write(self, level: str, event: str, **fields: Any) -> None:
         record: dict[str, Any] = {
-            "ts":    datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "ts":    datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
             "level": level,
             "event": event,
         }

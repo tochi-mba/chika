@@ -7,7 +7,11 @@ Usage:
     python _test_chat.py --resume           # resume last session
     python _test_chat.py "hello" "do X"     # non-interactive: run these prompts and exit
 """
-import sys, os, asyncio, json, time, argparse
+import argparse
+import asyncio
+import json
+import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, ".")

@@ -1,13 +1,12 @@
 """Tests for FastAPI server — REST endpoints, health, auth, WebSocket."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import json
+
 import pytest
-import asyncio
-from unittest.mock import patch, AsyncMock, MagicMock
 
 # Patch config before importing server to avoid real LLM calls
 import config as cfg
+
 cfg.MAX_MEMORY_TOKENS = 1000
 cfg.MAX_HISTORY_TOKENS = 10000
 cfg.MAX_TOOL_TURNS = 10
@@ -16,8 +15,8 @@ cfg.COMPACT_KEEP_LAST = 4
 cfg.CHIKA_API_KEY = ""
 
 from fastapi.testclient import TestClient
-from api.server import app
 
+from api.server import app
 
 client = TestClient(app)
 
@@ -363,7 +362,7 @@ def test_websocket_auth_rejected_with_wrong_token():
         cfg.CHIKA_API_KEY = "required_key"
         from starlette.websockets import WebSocketDisconnect as WSDisconnect
         with pytest.raises(WSDisconnect):
-            with client.websocket_connect("/ws/auth_test?token=wrong") as ws:
+            with client.websocket_connect("/ws/auth_test?token=wrong"):
                 pass
     finally:
         cfg.CHIKA_API_KEY = original

@@ -1,14 +1,14 @@
 """Tests for SkillRegistry — register, unregister, tool propagation, workflow examples."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
 
 import pytest
-import tempfile
-from pathlib import Path
-from chika.core.tool_registry import ToolRegistry, ToolDefinition
-from chika.core.variable_store import VariableStore
+
 from chika.core.memory_manager import MemoryManager
 from chika.core.prompt_builder import PromptBuilder
 from chika.core.skill_registry import Skill, SkillRegistry
+from chika.core.tool_registry import ToolDefinition, ToolRegistry
+from chika.core.variable_store import VariableStore
 
 
 def make_tool(name):
@@ -19,7 +19,7 @@ def make_tool(name):
 @pytest.fixture
 def registry(tmp_path):
     tool_reg = ToolRegistry()
-    var_store = VariableStore()
+    VariableStore()
     mem = MemoryManager(path=str(tmp_path / "memory.md"))
     prompt = PromptBuilder()
     return SkillRegistry(tool_reg, mem, prompt), tool_reg, mem, prompt

@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 MAX_MEMORY_TOKENS = 2000
@@ -11,7 +12,7 @@ class MemoryEntry:
     def __init__(self, key: str, value: str, ttl_days: int | None = None) -> None:
         self.key = key
         self.value = value
-        self.created = datetime.now(timezone.utc).isoformat()
+        self.created = datetime.now(UTC).isoformat()
         self.accessed = 0
         self.ttl_days = ttl_days
 
@@ -91,7 +92,7 @@ class MemoryManager:
     def _maybe_compact(self) -> None:
         if self._estimate_tokens() <= self._max_tokens:
             return
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Drop expired first
         expired = [

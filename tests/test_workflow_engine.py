@@ -1,12 +1,11 @@
 """Tests for WorkflowEngine — all 10 step types, variable interpolation, meta-tools."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import asyncio
-import pytest
-from chika.core.tool_registry import ToolRegistry, ToolDefinition
+
+from chika.core.tool_registry import ToolDefinition, ToolRegistry
 from chika.core.variable_store import VariableStore
 from chika.core.workflow_engine import WorkflowEngine
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

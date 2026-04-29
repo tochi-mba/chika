@@ -12,13 +12,13 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-import re
 import time
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
+from chika.core.logger import log as _log
 from chika.core.tool_registry import ToolRegistry
 from chika.core.variable_store import VariableStore
-from chika.core.logger import log as _log
 
 Event = dict[str, Any]
 
@@ -75,8 +75,8 @@ class WorkflowEngine:
         self,
         tool_registry: ToolRegistry,
         variable_store: VariableStore,
-        llm_caller: "LLMCaller | None" = None,
-        approval_handler: "ApprovalHandler | None" = None,
+        llm_caller: LLMCaller | None = None,
+        approval_handler: ApprovalHandler | None = None,
     ) -> None:
         self._tools = tool_registry
         self._vars = variable_store
@@ -84,7 +84,7 @@ class WorkflowEngine:
         self._sub_workflows: dict[str, list[dict]] = {}
         # approval_handler: async (request_id, tool_name, args) -> bool
         # Set per-WebSocket connection so the handler can talk back to that client.
-        self.approval_handler: "ApprovalHandler | None" = approval_handler
+        self.approval_handler: ApprovalHandler | None = approval_handler
         # question_handler: async (*, request_id, question, options, ...) -> dict
         # Set per-WebSocket connection (None until a WS wires it up).
         self.question_handler = None
@@ -139,12 +139,12 @@ class WorkflowEngine:
             )}
             return
 
+        from config import MAX_FILE_WRITES_PER_WF
         fw_count = self._count_file_writes(workflow)
-        if fw_count > 1:
+        if fw_count > MAX_FILE_WRITES_PER_WF:
             yield {"type": "error", "message": (
-                f"Workflow has {fw_count} file_write calls (limit is 1 per workflow). "
-                "Create/overwrite only one file per workflow. Use separate "
-                "workflows across turns for additional files. "
+                f"Workflow has {fw_count} file_write calls (limit is {MAX_FILE_WRITES_PER_WF} per workflow). "
+                "Split additional new files into separate workflows across turns. "
                 "file_replace and file_append are not limited."
             )}
             return
@@ -462,7 +462,6 @@ class WorkflowEngine:
         error_var = node.get("store_error_as", "").lstrip("$")
         step = node.get("step", {})
 
-        last_result = None
         for attempt in range(1, max_attempts + 1):
             yield {"type": "retry_attempt", "step_id": sid, "attempt": attempt, "max": max_attempts}
             buffered: list[Event] = []
@@ -477,7 +476,6 @@ class WorkflowEngine:
             if not retry_cond_met:
                 break  # success
 
-            last_result = buffered
             if attempt < max_attempts:
                 delay = backoffs[min(attempt - 1, len(backoffs) - 1)]
                 yield {"type": "retry_backoff", "step_id": sid, "delay_seconds": delay}

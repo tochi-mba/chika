@@ -17,11 +17,13 @@ import json
 import pathlib
 import re
 import tempfile
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 import config
 from chika.core.compactor import Compactor
-from chika.core.logger import log as _log, LOG_PATH
+from chika.core.logger import LOG_PATH
+from chika.core.logger import log as _log
 from chika.core.memory_manager import MemoryManager
 from chika.core.profile_manager import Profile
 from chika.core.prompt_builder import PromptBuilder
@@ -38,6 +40,50 @@ _WORKFLOW_TYPES = {
     "sequential", "parallel", "conditional", "loop",
     "map", "fan_out", "retry", "pipeline", "sub_workflow",
 }
+
+# ── Ollama text-mode tool instructions ────────────────────────────────────────
+# Injected at the END of the system prompt for Ollama providers. Overrides the
+# "tool call" framing in _CORE, which Ollama models can't act on.
+
+_OLLAMA_TOOL_INSTRUCTIONS = """
+## TOOL USE — CRITICAL OVERRIDE FOR THIS MODEL
+
+You do NOT have access to function-calling. To take any action, output a JSON
+code block. The engine detects it, executes it, and returns the result as a
+`<tool_result>` message. Do NOT explain what you're about to do — just output
+the JSON block directly.
+
+Format — ALWAYS `{"type": "sequential", "steps": [...]}`:
+
+Write a file:
+```json
+{"type": "sequential", "steps": [{"tool": "file_write", "args": {"path": "hello.html", "content": "..."}}]}
+```
+
+Run a shell command:
+```json
+{"type": "sequential", "steps": [{"tool": "shell_exec", "args": {"command": "ls -la"}}]}
+```
+
+Read a file:
+```json
+{"type": "sequential", "steps": [{"tool": "file_read", "args": {"path": "app.py", "start_line": 1, "end_line": 80}}]}
+```
+
+Multi-step (save result, use it next):
+```json
+{"type": "sequential", "steps": [
+  {"tool": "file_read", "args": {"path": "notes.txt", "start_line": 1, "end_line": 80}, "store_result_as": "$content"},
+  {"tool": "llm_summarise", "args": {"text": "$content", "instruction": "Summarise"}}
+]}
+```
+
+Rules:
+- Output ONE json block per turn. The engine runs it and returns results.
+- After you see `<tool_result>`, use the data to reply to the user.
+- Never fabricate tool results. Wait for the actual `<tool_result>`.
+- Keep prose to the minimum. Act first, explain after.
+"""
 
 
 def _is_workflow(data: object) -> bool:
@@ -177,7 +223,7 @@ WORKFLOW_ORCHESTRATOR_SCHEMA = {
 
 class LLMCaller:
     """Thin wrapper so WorkflowEngine can call the LLM for meta-tools."""
-    def __init__(self, engine: "ChikaEngine") -> None:
+    def __init__(self, engine: ChikaEngine) -> None:
         self._engine = engine
 
     async def complete(self, prompt: str) -> str:
@@ -259,7 +305,7 @@ class ChikaEngine:
         self._history.append({"role": "user", "content": user_input})
 
         # Start title generation in parallel for the first message of a new chat
-        title_task: "asyncio.Task | None" = None
+        title_task: asyncio.Task | None = None
         if is_first_message and not self._title:
             title_task = asyncio.create_task(self._generate_title(user_input))
 
@@ -328,28 +374,45 @@ class ChikaEngine:
                 break
 
             # Tool call → save assistant turn, execute workflow, loop back
-            self._history.append({
-                "role": "assistant",
-                "content": turn_text or None,
-                "tool_calls": [{
-                    "id": tool_call["id"],
-                    "type": "function",
-                    "function": {
-                        "name": "workflow_orchestrator",
-                        "arguments": json.dumps(tool_call["args"]),
-                    },
-                }],
-            })
+            if self._provider == "ollama":
+                # Ollama doesn't support role:tool or tool_calls — use plain text
+                workflow_json_str = json.dumps(tool_call["args"])
+                assistant_content = (turn_text + "\n" if turn_text else "") + \
+                    f"```json\n{workflow_json_str}\n```"
+                self._history.append({
+                    "role": "assistant",
+                    "content": assistant_content,
+                })
+            else:
+                self._history.append({
+                    "role": "assistant",
+                    "content": turn_text or None,
+                    "tool_calls": [{
+                        "id": tool_call["id"],
+                        "type": "function",
+                        "function": {
+                            "name": "workflow_orchestrator",
+                            "arguments": json.dumps(tool_call["args"]),
+                        },
+                    }],
+                })
 
             self._last_result_content = "{}"
             async for event in self._run_workflow(tool_call):
                 yield event
 
-            self._history.append({
-                "role": "tool",
-                "tool_call_id": tool_call["id"],
-                "content": self._last_result_content,
-            })
+            if self._provider == "ollama":
+                # Inject result as a user message (Ollama text-mode)
+                self._history.append({
+                    "role": "user",
+                    "content": f"<tool_result>\n{self._last_result_content}\n</tool_result>",
+                })
+            else:
+                self._history.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call["id"],
+                    "content": self._last_result_content,
+                })
             # Loop → next LLM turn with full context
 
         else:
@@ -380,8 +443,8 @@ class ChikaEngine:
     def _recover_leaked_workflow(
         self,
         turn_text: str,
-        tool_call: "dict | None",
-    ) -> "dict | None":
+        tool_call: dict | None,
+    ) -> dict | None:
         """Check whether the LLM leaked workflow JSON into its text output.
 
         If *tool_call* is already set (proper API call), returns it unchanged.
@@ -406,7 +469,7 @@ class ChikaEngine:
     async def _run_workflow(
         self,
         tool_call: dict,
-    ) -> "AsyncGenerator[Event, None]":
+    ) -> AsyncGenerator[Event, None]:
         """Stream all events from a workflow_orchestrator call.
 
         Stores the formatted result string in ``self._last_result_content``
@@ -435,7 +498,7 @@ class ChikaEngine:
         else:
             self._last_result_content = variables_content
 
-    async def _force_followup(self) -> "AsyncGenerator[Event, None]":
+    async def _force_followup(self) -> AsyncGenerator[Event, None]:
         """Yield a forced LLM reply when the model completed tool calls
         without producing any visible text response to the user.
 
@@ -468,9 +531,9 @@ class ChikaEngine:
 
     async def _maybe_emit_title(
         self,
-        title_task: "asyncio.Task | None",
+        title_task: asyncio.Task | None,
         user_input: str,
-    ) -> "AsyncGenerator[Event, None]":
+    ) -> AsyncGenerator[Event, None]:
         """Await the title generation background task and emit chat_title."""
         if title_task is None:
             return
@@ -630,6 +693,8 @@ class ChikaEngine:
             memory=self._memory.render_for_prompt(),
             recent_tools=self._recent_tool_names(),
         )
+        if self._provider == "ollama":
+            system_prompt += _OLLAMA_TOOL_INSTRUCTIONS
         return [{"role": "system", "content": system_prompt}] + self._history
 
     async def _stream_llm(self, messages: list[dict]) -> AsyncGenerator[Event, None]:
@@ -647,14 +712,18 @@ class ChikaEngine:
         for attempt in range(max_attempts):
             tool_builders: dict[int, dict] = {}
             try:
-                response = await self._client.chat.completions.create(
-                    model=self._model,
-                    messages=messages,
-                    tools=[WORKFLOW_ORCHESTRATOR_SCHEMA],
-                    tool_choice="auto",
-                    max_tokens=config.OPENAI_MAX_TOKENS,
-                    stream=True,
-                )
+                # Ollama doesn't reliably support the tools API — skip it and
+                # rely on _recover_leaked_workflow to extract JSON from text.
+                create_kwargs: dict = {
+                    "model": self._model,
+                    "messages": messages,
+                    "max_tokens": config.OPENAI_MAX_TOKENS,
+                    "stream": True,
+                }
+                if self._provider != "ollama":
+                    create_kwargs["tools"] = [WORKFLOW_ORCHESTRATOR_SCHEMA]
+                    create_kwargs["tool_choice"] = "auto"
+                response = await self._client.chat.completions.create(**create_kwargs)
 
                 async for chunk in response:
                     choice = chunk.choices[0] if chunk.choices else None

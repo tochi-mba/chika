@@ -3,9 +3,9 @@ Chika v2 — CLI entry point.
 Usage: python chika.py
 """
 import asyncio
-import sys
-import os
 import json
+import os
+import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -35,7 +35,7 @@ def fmt_event(event: dict) -> str | None:
     if t == "loop_iteration":
         return f"  ↻ loop iter {event['iteration']}/{event['max']}\n"
     if t == "workflow_done":
-        return f"[workflow done]\n"
+        return "[workflow done]\n"
     if t == "compaction":
         return f"\n[history compacted: -{event['removed']} msgs]\n"
     if t == "error":

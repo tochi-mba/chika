@@ -4,12 +4,11 @@ Chika — interactive setup wizard.
 Run: python install.py
 """
 
-import sys
-import os
-import subprocess
-import shutil
 import getpass
-import textwrap
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -116,7 +115,7 @@ def install_deps() -> None:
     if not req.exists():
         warn("requirements.txt not found — skipping.")
         return
-    print(c(DIM, f"\n  Running: pip install -r requirements.txt\n"))
+    print(c(DIM, "\n  Running: pip install -r requirements.txt\n"))
     try:
         run([sys.executable, "-m", "pip", "install", "-r", str(req), "--quiet"])
         ok("All dependencies installed")

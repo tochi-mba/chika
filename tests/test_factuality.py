@@ -14,11 +14,11 @@ of hallucination:
 4. `fact_check` tool can look up whether a claim is supported by ledger.
 5. `verify_url` reports reachability without raising on network errors.
 """
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import asyncio
 
-from chika.core.tool_registry import ToolRegistry, ToolDefinition
+from chika.core.tool_registry import ToolDefinition, ToolRegistry
 from chika.core.variable_store import VariableStore, VarType
 from chika.core.workflow_engine import WorkflowEngine, _looks_empty
 
@@ -348,7 +348,7 @@ def test_end_to_end_empty_search_blocks_fabrication():
                   "schema": {"url": "string"}},
          "store_result_as": "$extracted"},
     ]}
-    events = run(collect(engine.execute(wf)))
+    run(collect(engine.execute(wf)))
     # Sequential aborts on tool_result error — llm_transform returns error dict.
     # But importantly: no fabricated URL ever reaches the variable store.
     extracted_var = store.get("extracted")

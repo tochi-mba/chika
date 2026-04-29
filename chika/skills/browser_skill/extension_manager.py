@@ -16,7 +16,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import Any, Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from fastapi import WebSocket
 
@@ -49,7 +50,7 @@ class ExtensionManager:
 
         # The currently-running ext chat task.  Cancelled on reconnect to avoid
         # leaving a stale _chat_busy=True that blocks new messages.
-        self._chat_task: "asyncio.Task | None" = None
+        self._chat_task: asyncio.Task | None = None
 
     # ── Connection lifecycle ──────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ class ExtensionManager:
         _log.info("Extension connected")
         await self._notify_status(True)
 
-    def disconnect(self, ws: "WebSocket | None" = None) -> None:
+    def disconnect(self, ws: WebSocket | None = None) -> None:
         """Called when the extension WebSocket closes.
 
         Pass the WebSocket that closed so we can guard against a stale handler
@@ -174,7 +175,7 @@ class ExtensionManager:
         try:
             result = await asyncio.wait_for(fut, timeout=timeout)
             return result
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._pending.pop(request_id, None)
             return {
                 "error":   "timeout",
@@ -199,7 +200,7 @@ class ExtensionManager:
         if fut and not fut.done():
             fut.set_result({"error": "cancelled", "message": "Command cancelled by workflow engine"})
 
-    def set_chat_task(self, task: "asyncio.Task | None") -> None:
+    def set_chat_task(self, task: asyncio.Task | None) -> None:
         """Register the currently-running ext chat task so it can be cancelled on reconnect."""
         self._chat_task = task
 

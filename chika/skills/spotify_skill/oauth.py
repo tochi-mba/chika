@@ -10,6 +10,7 @@ Flow:
   6. Agent calls spotify_auth_status again → "authorized"
 """
 from __future__ import annotations
+
 import base64
 import hashlib
 import os
@@ -62,11 +63,11 @@ def build_auth_url() -> tuple[str, str, str]:
 
     params = "&".join([
         f"client_id={CLIENT_ID}",
-        f"response_type=code",
+        "response_type=code",
         f"redirect_uri={REDIRECT_URI}",
         f"scope={_SCOPES.replace(' ', '%20')}",
         f"state={state}",
-        f"code_challenge_method=S256",
+        "code_challenge_method=S256",
         f"code_challenge={challenge}",
     ])
     url = f"https://accounts.spotify.com/authorize?{params}"
@@ -164,7 +165,6 @@ def _update_env_file() -> None:
         return
     text = env_path.read_text(encoding="utf-8")
     lines = text.splitlines()
-    updated = {}
     new_vals = {
         "CHIKA_SPOTIFY_ACCESS_TOKEN":  _tokens["access_token"],
         "CHIKA_SPOTIFY_REFRESH_TOKEN": _tokens["refresh_token"],

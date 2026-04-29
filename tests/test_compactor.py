@@ -1,8 +1,8 @@
 """Tests for Compactor — needs_compaction, compact, estimate_tokens."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import asyncio
-import pytest
+
 from chika.core.compactor import Compactor, estimate_tokens
 
 

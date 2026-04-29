@@ -1,10 +1,10 @@
 """Tests for shell_tool — execute, timeout, fire-and-forget."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import asyncio
 import platform
-import pytest
-from chika.tools.shell_tool import shell_exec, SHELL_TOOL
+
+from chika.tools.shell_tool import SHELL_TOOL, shell_exec
 
 
 def run(coro):

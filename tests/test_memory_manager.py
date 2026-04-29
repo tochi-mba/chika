@@ -1,9 +1,9 @@
 """Tests for MemoryManager — persist, forget, compact, seed, render."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
 
 import pytest
-import tempfile
-from pathlib import Path
+
 from chika.core.memory_manager import MemoryManager
 
 

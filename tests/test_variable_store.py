@@ -1,8 +1,10 @@
 """Tests for VariableStore — storage, types, and $ref resolution."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import asyncio
+
 import pytest
+
 from chika.core.variable_store import VariableStore, VarType
 
 
@@ -147,7 +149,7 @@ def test_resolve_depth_guard_no_recursion_error(store):
     store.set("b", "$a")
     # Should return the value as-is (unresolved) rather than blowing the stack
     try:
-        result = store.resolve("$a")
+        store.resolve("$a")
     except RecursionError:
         pytest.fail("RecursionError raised — depth guard not working")
     # result is either the raw string or a resolved value; either is fine

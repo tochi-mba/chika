@@ -1,7 +1,8 @@
 """Tests for PromptBuilder — build(), workflow examples, tool/variable/memory injection."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import pytest
+
 from chika.core.prompt_builder import PromptBuilder
 
 

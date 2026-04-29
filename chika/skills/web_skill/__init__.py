@@ -1,9 +1,10 @@
 from __future__ import annotations
+
+import re as _re
+
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
 
-
-import re as _re
 
 def _simplify_query(query: str) -> str | None:
     """Strip site:, filetype:, inurl: etc. and return a simpler query. Returns None if nothing to strip."""

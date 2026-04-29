@@ -1,12 +1,13 @@
 """Integration test — full chat turn through ChikaEngine with a mocked LLM."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import asyncio
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 import config as cfg
+
 cfg.MAX_MEMORY_TOKENS = 1000
 cfg.MAX_HISTORY_TOKENS = 10000
 cfg.MAX_TOOL_TURNS = 10
@@ -15,13 +16,12 @@ cfg.COMPACT_KEEP_LAST = 4
 cfg.CHIKA_API_KEY = ""
 cfg.GROUNDING_VALIDATE_RESPONSE = False
 
-from chika.core.tool_registry import ToolRegistry, ToolDefinition
-from chika.core.variable_store import VariableStore
+from chika.core.engine import ChikaEngine
 from chika.core.memory_manager import MemoryManager
 from chika.core.prompt_builder import PromptBuilder
 from chika.core.skill_registry import SkillRegistry
-from chika.core.engine import ChikaEngine
-
+from chika.core.tool_registry import ToolDefinition, ToolRegistry
+from chika.core.variable_store import VariableStore
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

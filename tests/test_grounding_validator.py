@@ -2,7 +2,7 @@
 Tests for ChikaEngine._validate_grounding — the post-response check that
 flags fabricated URLs and ungrounded citations in the final reply.
 """
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import asyncio
 from unittest.mock import MagicMock

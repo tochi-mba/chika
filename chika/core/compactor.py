@@ -4,8 +4,6 @@ When the estimated token count exceeds the threshold, the middle section of
 history is summarised into a single dense block via an LLM call.
 """
 from __future__ import annotations
-from typing import Any
-
 
 CHARS_PER_TOKEN = 4  # rough estimate
 
@@ -30,7 +28,7 @@ def estimate_tokens(messages: list[dict]) -> int:
 class Compactor:
     def __init__(
         self,
-        llm_caller: "LLMCaller",
+        llm_caller: LLMCaller,
         max_tokens: int = 80_000,
         keep_first: int = 2,
         keep_last: int = 4,

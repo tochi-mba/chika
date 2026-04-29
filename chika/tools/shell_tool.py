@@ -1,10 +1,9 @@
 from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
 
 from chika.core.tool_registry import ToolDefinition
-
 
 # ── Process registry ──────────────────────────────────────────────────────────
 
@@ -358,7 +357,7 @@ async def shell_exec(
             timed_out=False,
             pid=proc.pid,
         ).to_dict()
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         managed.running = False
         managed.exit_code = -1
@@ -435,7 +434,7 @@ async def shell_wait(pid: int, timeout_seconds: float = 60.0) -> dict:
         managed.running = False
         managed.exit_code = managed.process.returncode
         return await shell_get_output(pid)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return {
             "pid": pid, "timed_out": True,
             "stdout_lines": list(managed.stdout_buf),

@@ -1,8 +1,9 @@
 from __future__ import annotations
+
 import base64
 import re
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 # Matches $var, $var.field, $var.field.sub, $var[0], $var.field[0]
@@ -11,7 +12,7 @@ _VAR_RE = re.compile(
 )
 
 
-class VarType(str, Enum):
+class VarType(StrEnum):
     TEXT      = "text"
     JSON      = "json"
     BYTES     = "bytes"

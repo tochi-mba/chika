@@ -9,20 +9,23 @@ The extension connects to /ws/extension/ — see api/server.py.
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 from typing import Any
 
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
-from chika.skills.browser_skill.extension_manager import extension_manager
-from chika.skills.browser_skill.extension_manager import MAX_WATCH_COUNT, MIN_DEBOUNCE_MS, MAX_DEBOUNCE_MS
+from chika.skills.browser_skill.extension_manager import (
+    MAX_DEBOUNCE_MS,
+    MAX_WATCH_COUNT,
+    MIN_DEBOUNCE_MS,
+    extension_manager,
+)
 from chika.skills.browser_skill.security import (
-    validate_url,
-    validate_selector,
-    is_write_blocked,
     check_response_size,
+    is_write_blocked,
     rate_limiter,
+    validate_selector,
+    validate_url,
 )
 
 # Forward reference — server.py sets this after startup so browser tools can

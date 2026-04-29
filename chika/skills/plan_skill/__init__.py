@@ -18,7 +18,7 @@ Why this helps the agent:
 from __future__ import annotations
 
 import time
-from typing import Any, Iterable
+from typing import Any
 
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition

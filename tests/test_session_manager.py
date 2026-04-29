@@ -1,11 +1,10 @@
 """Tests for SessionManager — session creation, isolation, listing, deletion."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import pytest
-from unittest.mock import patch, MagicMock
 
 # Patch config before importing session_manager to avoid needing real env vars
 import config
+
 config.MAX_MEMORY_TOKENS = 1000
 config.MAX_HISTORY_TOKENS = 10000
 config.MAX_TOOL_TURNS = 10
@@ -15,7 +14,6 @@ config.CHIKA_API_KEY = ""
 
 from api.session_manager import SessionManager
 from chika.core.engine import ChikaEngine
-
 
 # ── Session creation ──────────────────────────────────────────────────────────
 

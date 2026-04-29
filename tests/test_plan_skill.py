@@ -1,10 +1,10 @@
 """Tests for the plan skill — session-scoped task tracking."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import asyncio
 
 from chika.core.variable_store import VariableStore
-from chika.skills.plan_skill import build_plan_skill, _make_plan_tools
+from chika.skills.plan_skill import _make_plan_tools, build_plan_skill
 
 
 def _run(coro):

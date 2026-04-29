@@ -13,7 +13,6 @@ import subprocess
 import sys
 import threading
 import webbrowser
-from typing import Any
 
 from chika.core.tool_registry import ToolDefinition
 from chika.tools.shell_tool import ManagedProcess, ProcessRegistry

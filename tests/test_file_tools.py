@@ -1,11 +1,10 @@
 """Tests for file_tools — read, edit_lines, write, append, info."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import asyncio
 import base64
-import pytest
-from pathlib import Path
-from chika.tools.file_tools import file_read, file_edit_lines, file_write, file_append, file_info
+
+from chika.tools.file_tools import file_append, file_edit_lines, file_info, file_read, file_write
 
 
 def run(coro):

@@ -3,6 +3,7 @@ Variable tools — expose the VariableStore to the AI as explicit tools.
 Injected at startup via closure.
 """
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from chika.core.tool_registry import ToolDefinition
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
     from chika.core.variable_store import VariableStore
 
 
-def make_variable_tools(store: "VariableStore") -> list[ToolDefinition]:
+def make_variable_tools(store: VariableStore) -> list[ToolDefinition]:
     async def set_variable(name: str, value: object, var_type: str = "text", description: str = "") -> dict:
         t = VarType(var_type) if var_type in VarType._value2member_map_ else VarType.TEXT
         v = store.set(name.lstrip("$"), value, t, description)

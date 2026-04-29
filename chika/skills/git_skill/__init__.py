@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 from shlex import quote
+
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
 from chika.tools.shell_tool import shell_exec

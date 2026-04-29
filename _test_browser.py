@@ -17,9 +17,12 @@ Workflow:
     5. Assertions show what the model got right / wrong
     6. Tweak rules in browser_skill/__init__.py, re-run, repeat
 """
-import sys, os, asyncio, json, time, argparse
-from pathlib import Path
-from typing import Any, Callable
+import argparse
+import asyncio
+import json
+import sys
+import time
+from collections.abc import Callable
 
 sys.path.insert(0, ".")
 try:
@@ -28,7 +31,6 @@ except Exception:
     pass
 
 from api.session_manager import SessionManager
-from chika.core.tool_registry import ToolDefinition
 from chika.core.compactor import estimate_tokens
 
 # ── Colors ────────────────────────────────────────────────────────────────────

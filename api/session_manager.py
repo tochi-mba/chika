@@ -3,17 +3,18 @@ SessionManager — creates and maintains one ChikaEngine per session_id.
 Each session gets its own history, variable store, and memory file.
 """
 from __future__ import annotations
-import sys
+
 import os
+import sys
 
 # Ensure project root is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+import secrets as _secrets
 from pathlib import Path
 
 from chika.core.chat_store import ChatStore
 from chika.core.device_store import DeviceStore
-import secrets as _secrets
 from chika.core.engine import ChikaEngine
 from chika.core.memory_manager import MemoryManager
 from chika.core.prompt_builder import PromptBuilder
@@ -29,24 +30,24 @@ _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 # all persistent state is under one folder (easier to gitignore, back up, etc.)
 _PROFILES_DIR = Path(__file__).parent.parent / "data" / "profiles"
 _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-from chika.tools.apps_tool import APP_OPEN_TOOL
-from chika.tools.live_server_tool import LIVE_SERVER_TOOL
-from chika.tools.shell_tool import ALL_SHELL_TOOLS
-from chika.tools.file_tools import FILE_TOOLS
-from chika.tools.web_fetch_tool import WEB_FETCH_TOOLS
-from chika.tools.memory_tool import make_memory_tools
-from chika.tools.profile_tools import make_profile_tools, make_set_password_tool
-from chika.tools.wait_tool import WAIT_TOOL
-from chika.tools.variable_tools import make_variable_tools
+import config
 from chika.core.profile_manager import ProfileManager
+from chika.skills.browser_skill import BROWSER_SKILL
 from chika.skills.git_skill import GIT_SKILL
-from chika.skills.web_skill import WEB_SKILL
-from chika.skills.spotify_skill import SPOTIFY_SKILL
-from chika.skills.verify_skill import build_verify_skill
 from chika.skills.plan_skill import build_plan_skill
 from chika.skills.question_skill import build_question_skill
-from chika.skills.browser_skill import BROWSER_SKILL
-import config
+from chika.skills.spotify_skill import SPOTIFY_SKILL
+from chika.skills.verify_skill import build_verify_skill
+from chika.skills.web_skill import WEB_SKILL
+from chika.tools.apps_tool import APP_OPEN_TOOL
+from chika.tools.file_tools import FILE_TOOLS
+from chika.tools.live_server_tool import LIVE_SERVER_TOOL
+from chika.tools.memory_tool import make_memory_tools
+from chika.tools.profile_tools import make_profile_tools, make_set_password_tool
+from chika.tools.shell_tool import ALL_SHELL_TOOLS
+from chika.tools.variable_tools import make_variable_tools
+from chika.tools.wait_tool import WAIT_TOOL
+from chika.tools.web_fetch_tool import WEB_FETCH_TOOLS
 
 
 class SessionManager:
@@ -92,7 +93,7 @@ class SessionManager:
             })
         return result
 
-    def get_device_session(self, device_id: str) -> tuple["ChikaEngine", str]:
+    def get_device_session(self, device_id: str) -> tuple[ChikaEngine, str]:
         """Get the current session for a device, creating one if it doesn't exist."""
         session_id = self._device_store.get_session(device_id)
         if not session_id:
@@ -101,14 +102,14 @@ class SessionManager:
         engine = self.get_or_create(session_id)
         return engine, session_id
 
-    def new_chat_for_device(self, device_id: str) -> tuple["ChikaEngine", str]:
+    def new_chat_for_device(self, device_id: str) -> tuple[ChikaEngine, str]:
         """Create a fresh chat session for a device and set it as current."""
         session_id = "sess_" + _secrets.token_hex(8)
         self._device_store.set_session(device_id, session_id)
         engine = self.get_or_create(session_id)
         return engine, session_id
 
-    def switch_device_chat(self, device_id: str, chat_id: str) -> tuple["ChikaEngine", str]:
+    def switch_device_chat(self, device_id: str, chat_id: str) -> tuple[ChikaEngine, str]:
         """Switch a device to an existing chat session."""
         self._device_store.set_session(device_id, chat_id)
         engine = self.get_or_create(chat_id)
@@ -191,7 +192,8 @@ class SessionManager:
         # Platform + shell hints so the agent picks the right commands.
         # On Windows: prefer `dir /s /b`, `type`, PowerShell; avoid `ls`, `find`,
         # `grep` (not available in plain cmd.exe). On POSIX: prefer ls/find/grep.
-        import platform as _platform, tempfile as _tempfile
+        import platform as _platform
+        import tempfile as _tempfile
         os_name = "windows" if _platform.system().lower().startswith("win") else _platform.system().lower()
         variable_store.set(
             "os",

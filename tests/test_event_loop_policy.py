@@ -7,8 +7,8 @@ subprocesses.
 This was observed in production as `NotImplementedError: NotImplementedError()`
 when the LLM tried to run any shell command via chat.
 """
-import sys
 import asyncio
+import sys
 
 
 def test_server_sets_proactor_policy_on_windows():

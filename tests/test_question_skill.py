@@ -1,9 +1,9 @@
 """Tests for question_skill — structured ask_user questions."""
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import asyncio
 
-from chika.skills.question_skill import build_question_skill, _make_ask_user
+from chika.skills.question_skill import _make_ask_user, build_question_skill
 
 
 def _run(coro):

@@ -1,8 +1,9 @@
 import sys
 
+
 def count_words(filename):
     try:
-        with open(filename, 'r') as f:
+        with open(filename) as f:
             content = f.read()
         words = content.split()
         return len(words)
