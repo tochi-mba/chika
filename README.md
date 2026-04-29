@@ -4,7 +4,7 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-An agentic AI assistant with **full browser control** — reads your open tabs, navigates pages, extracts data, takes screenshots, and answers questions about anything you can see in Chrome. Powered by Claude, GPT-4o, or Azure OpenAI.
+An agentic AI assistant with **full browser control** — reads your open tabs, navigates pages, extracts data, takes screenshots, and answers questions about anything you can see in Chrome. Powered by Claude, GPT-4o, Azure OpenAI, or **Ollama (local/free)**.
 
 ---
 
@@ -63,7 +63,7 @@ Once connected, Chika can see everything in your browser. Try:
 ## Features
 
 - **Browser control** — read DOM, extract text, navigate, screenshot, wait for elements, run JavaScript
-- **Multi-provider** — Anthropic (Claude), OpenAI, Azure OpenAI; switch via env var
+- **Multi-provider** — Anthropic (Claude), OpenAI, Azure OpenAI, or Ollama (local/free); switch via env var
 - **Workflow engine** — 10 step types: `sequential`, `parallel`, `conditional`, `loop`, `map`, `fan_out`, `retry`, `pipeline`, `sub_workflow`, plus single-step recovery
 - **Grounding / anti-hallucination** — `$facts` ledger tracks every tool result; LLM sees source tags; post-response validator flags unsupported claims
 - **Extended thinking** — Anthropic extended thinking streamed in real time so you can follow the reasoning
@@ -246,7 +246,9 @@ The WebSocket endpoint is the primary interface.
 
 | Variable | Default | Description |
 |---|---|---|
-| `CHIKA_PROVIDER` | `anthropic` | LLM provider: `anthropic`, `openai`, `azure` |
+| `CHIKA_PROVIDER` | `anthropic` | LLM provider: `anthropic`, `openai`, `azure`, `ollama` |
+| `OLLAMA_MODEL` | `llama3.1` | Model name for Ollama (e.g. `qwen2.5`, `deepseek-r1`) |
+| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama API endpoint |
 | `CHIKA_MAX_HISTORY_TOKENS` | `10000` | Token budget before history compaction triggers |
 | `CHIKA_COMPACT_KEEP_FIRST` | `2` | Messages preserved at history start during compaction |
 | `CHIKA_COMPACT_KEEP_LAST` | `4` | Messages preserved at history end during compaction |
@@ -266,7 +268,7 @@ The WebSocket endpoint is the primary interface.
 ## Tech Stack
 
 - **Backend:** Python 3.11, FastAPI, Uvicorn, Pydantic v2, httpx
-- **LLM:** Anthropic SDK, OpenAI SDK (covers Azure OpenAI)
+- **LLM:** Anthropic SDK, OpenAI SDK (covers Azure OpenAI and Ollama)
 - **Search:** DuckDuckGo (`ddgs`)
 - **Frontend:** Vue 3, Pinia, Vite
 - **Extension:** Chrome Manifest V3, WebSocket
