@@ -124,6 +124,14 @@ def install_deps() -> None:
         err("pip install failed. Fix the errors above and re-run.")
         sys.exit(1)
 
+    # Register the `chika` CLI command so users can run it from anywhere
+    print(c(DIM, "\n  Running: pip install -e .  (registers the `chika` command)\n"))
+    try:
+        run([sys.executable, "-m", "pip", "install", "-e", str(ROOT), "--quiet"])
+        ok("`chika` command registered — type `chika` anywhere to start the REPL")
+    except subprocess.CalledProcessError:
+        warn("Could not register `chika` command. You can still run: python chika.py")
+
 
 def configure_env() -> None:
     step(3, TOTAL_STEPS, "Configuring environment")
@@ -242,6 +250,50 @@ def print_extension_instructions() -> None:
     print()
 
 
+def configure_spotify(env_path: Path) -> None:
+    print()
+    rule("─", 60)
+    print()
+    print(c(BOLD, "  Spotify setup"))
+    print()
+    print(c(DIM,  "  You'll need a free Spotify Developer app (2 minutes):"))
+    print()
+    steps = [
+        ("Go to",       c(CYAN + BOLD, "developer.spotify.com/dashboard")),
+        ("Click",       c(BOLD, "Create app")),
+        ("App name:",   c(DIM, "anything, e.g. 'Chika'")),
+        ("Redirect URI — add exactly:", c(CYAN, "http://localhost:8000/auth/spotify/callback")),
+        ("Copy your",   c(BOLD, "Client ID") + " and " + c(BOLD, "Client Secret")),
+    ]
+    for i, (label, value) in enumerate(steps, 1):
+        print(f"    {c(BOLD+CYAN, str(i)+'.')}  {label} {value}")
+    print()
+
+    client_id     = ask("Client ID")
+    client_secret = ask_secret("Client Secret")
+
+    if not client_id or not client_secret:
+        warn("Skipping Spotify — you can add these to .env later:")
+        info("CHIKA_SPOTIFY_CLIENT_ID=...")
+        info("CHIKA_SPOTIFY_CLIENT_SECRET=...")
+        return
+
+    # Append to existing .env
+    with env_path.open("a", encoding="utf-8") as f:
+        f.write(
+            "\n# Spotify\n"
+            f"CHIKA_SPOTIFY_CLIENT_ID={client_id}\n"
+            f"CHIKA_SPOTIFY_CLIENT_SECRET={client_secret}\n"
+            "CHIKA_SPOTIFY_REDIRECT_URI=http://localhost:8000/auth/spotify/callback\n"
+        )
+
+    ok("Spotify credentials saved to .env")
+    print()
+    print(c(DIM, "  After the server starts, complete OAuth once:"))
+    print(f"    {c(CYAN + BOLD, 'http://localhost:8000/auth/spotify')}")
+    print(c(DIM, "  Tokens are saved automatically — you won't need to do this again."))
+
+
 def print_start_instructions(start_now: bool) -> None:
     rule()
     print()
@@ -263,7 +315,8 @@ def print_start_instructions(start_now: bool) -> None:
     print(c(CYAN + BOLD, "    http://localhost:8000"))
     print()
     print(c(DIM,  "  CLI mode (no browser needed):"))
-    print(c(CYAN, "    python chika.py"))
+    print(c(CYAN, "    chika"))
+    print(c(DIM,  "  (or `python chika.py` if the command isn't on PATH yet)"))
     print()
     rule()
     print()
@@ -298,6 +351,13 @@ def main() -> None:
     configure_env()
     verify_setup()
     print_extension_instructions()
+
+    if ask_yn("Set up Spotify integration?", default=False):
+        env_path = ROOT / ".env"
+        if env_path.exists():
+            configure_spotify(env_path)
+        else:
+            warn(".env not found — run configure step first")
 
     start_now = ask_yn("Start Chika server now?", default=True)
     print_start_instructions(start_now)

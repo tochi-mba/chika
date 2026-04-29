@@ -69,5 +69,10 @@ async def main():
         print()
 
 
-if __name__ == "__main__":
+def cli() -> None:
+    """Entry point for the `chika` CLI command (installed via pip install -e .)."""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    cli()
