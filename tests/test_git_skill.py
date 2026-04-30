@@ -44,7 +44,7 @@ class TestGitStatus:
 class TestGitDiff:
     def test_returns_diff(self):
         with patch("chika.skills.git_skill.shell_exec", new_callable=AsyncMock,
-                   return_value=_shell_result(stdout="diff --git a/f.py b/f.py")) as mock_exec:
+                   return_value=_shell_result(stdout="diff --git a/f.py b/f.py")):
             result = asyncio.run(git_diff())
         assert "diff" in result
         assert result["diff"] == "diff --git a/f.py b/f.py"

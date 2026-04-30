@@ -15,7 +15,7 @@ def run(coro):
 class TestAppOpen:
     def test_windows_success(self):
         with patch("platform.system", return_value="Windows"), \
-             patch("os.startfile") as mock_startfile:
+             patch("os.startfile"):
             result = run(app_open("notepad"))
         assert result["success"] is True
         assert result["opened"] == "notepad"

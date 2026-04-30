@@ -13,7 +13,7 @@ def pm(tmp_path):
 
 class TestGetOrCreate:
     def test_creates_profile_directories(self, pm, tmp_path):
-        profile = pm.get_or_create("tochi")
+        pm.get_or_create("tochi")
         assert (tmp_path / "profiles" / "tochi").is_dir()
         assert (tmp_path / "profiles" / "tochi" / "workspace").is_dir()
 
