@@ -872,7 +872,7 @@ async def websocket_extension_endpoint(
                         # Reuse the already-linked session (e.g. frontend tab
                         # linked it while extension was disconnected).
                         ext_sid = extension_manager.linked_session_id
-                        ext_eng = session_manager.get(ext_sid)
+                        ext_eng = session_manager.get(ext_sid)  # type: ignore[assignment]
                         if ext_eng is None:
                             # Linked session expired — fall back to device session
                             ext_eng, ext_sid = session_manager.get_device_session(ext_did)

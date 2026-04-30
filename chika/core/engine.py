@@ -18,9 +18,13 @@ import pathlib
 import re
 import tempfile
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import config
+
+if TYPE_CHECKING:
+    from chika.core.chat_store import ChatStore
+
 from chika.core.compactor import Compactor
 from chika.core.logger import LOG_PATH
 from chika.core.logger import log as _log
@@ -150,7 +154,7 @@ def _extract_workflow_json(text: str) -> tuple[dict, str] | None:
 
 
 # ── The one tool the AI sees
-WORKFLOW_ORCHESTRATOR_SCHEMA = {
+WORKFLOW_ORCHESTRATOR_SCHEMA: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "workflow_orchestrator",
@@ -248,7 +252,7 @@ class ChikaEngine:
         self._active_profile: Profile | None = None
         self.session_id: str = ""
         self._title: str = ""
-        self._chat_store = None  # ChatStore | None, injected by session_manager
+        self._chat_store: ChatStore | None = None
         self._needs_restore_event: bool = False
         self._last_result_content: str = "{}"  # written by _run_workflow
         # Hooks called after every switch_profile(). Each receives the new Profile.
@@ -777,7 +781,7 @@ class ChikaEngine:
                     ) from exc
                 if attempt >= max_attempts - 1:
                     raise
-                _log.warning("openai_transient_error",
+                _log.warn("openai_transient_error",
                              attempt=attempt + 1, error=str(exc))
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30.0)
@@ -837,11 +841,7 @@ class ChikaEngine:
         for i, msg in enumerate(filtered):
             if msg.get("role") == "assistant":
                 content = msg.get("content")
-                has_tool_use = (
-                    isinstance(content, list)
-                    and any(b.get("type") == "tool_use" for b in content if isinstance(b, dict))
-                )
-                if has_tool_use:
+                if isinstance(content, list) and any(b.get("type") == "tool_use" for b in content if isinstance(b, dict)):
                     # Check the next message is a user/tool_result
                     next_msg = filtered[i + 1] if i + 1 < len(filtered) else None
                     next_content = (next_msg or {}).get("content")
@@ -1100,7 +1100,7 @@ class ChikaEngine:
         # Deduplicate preserving order
         seen = set()
         ungrounded_cited_urls = [u for u in ungrounded_cited_urls
-                                 if not (u in seen or seen.add(u))]
+                                 if not (u in seen or seen.add(u))]  # type: ignore[func-returns-value]
 
         if ungrounded_cited_urls:
             _log.warn("grounding_warning", reason="ungrounded_citation",

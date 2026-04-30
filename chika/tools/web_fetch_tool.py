@@ -13,7 +13,7 @@ async def web_fetch(url: str, save_path: str | None = None, max_size_kb: int = 2
     Returns the response status, headers, and either saves to file or returns text content.
     """
     try:
-        import requests
+        import requests  # type: ignore[import-untyped]
     except ImportError:
         return {"error": "requests library not installed. Run: pip install requests"}
 

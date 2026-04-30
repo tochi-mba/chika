@@ -39,6 +39,7 @@ def make_profile_tools(engine: ChikaEngine, profile_manager: ProfileManager) -> 
                 )
             }
         profile = profile_manager.get(name)
+        assert profile is not None
         engine.switch_profile(profile)
         return {
             "switched_to": name,
@@ -56,6 +57,7 @@ def make_profile_tools(engine: ChikaEngine, profile_manager: ProfileManager) -> 
         if profile_manager.exists(safe_name):
             # Already exists — just switch (password was verified in approval flow)
             profile = profile_manager.get(safe_name)
+            assert profile is not None
             engine.switch_profile(profile)
             return {
                 "note": f"Profile '{safe_name}' already existed",

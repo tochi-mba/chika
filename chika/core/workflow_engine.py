@@ -12,13 +12,19 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import re as _re
 import time
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from chika.core.logger import log as _log
 from chika.core.tool_registry import ToolRegistry
 from chika.core.variable_store import VariableStore
+
+if TYPE_CHECKING:
+    from chika.core.engine import LLMCaller
+
+ApprovalHandler = Callable[..., Any]
 
 Event = dict[str, Any]
 
@@ -87,7 +93,7 @@ class WorkflowEngine:
         self.approval_handler: ApprovalHandler | None = approval_handler
         # question_handler: async (*, request_id, question, options, ...) -> dict
         # Set per-WebSocket connection (None until a WS wires it up).
-        self.question_handler = None
+        self.question_handler: Callable[..., Any] | None = None
 
     def register_sub_workflow(self, workflow_id: str, steps: list[dict]) -> None:
         self._sub_workflows[workflow_id] = steps
@@ -308,7 +314,7 @@ class WorkflowEngine:
         if op == "not_in":       return raw not in (expected or [])
         if op in ("gt", "lt", "gte", "lte"):
             try:
-                lhs, rhs = float(raw), float(expected)
+                lhs, rhs = float(raw), float(expected)  # type: ignore[arg-type]
             except (TypeError, ValueError):
                 return False  # non-numeric values can't be compared numerically
             if op == "gt":  return lhs > rhs

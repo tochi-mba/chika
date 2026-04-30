@@ -17,7 +17,7 @@ async def app_open(target: str) -> dict:
     try:
         if system == "Windows":
             # os.startfile is the cleanest Windows launcher — no cmd.exe, no exit-code ambiguity
-            await asyncio.get_event_loop().run_in_executor(None, os.startfile, target)
+            await asyncio.get_event_loop().run_in_executor(None, os.startfile, target)  # type: ignore[attr-defined]
         elif system == "Darwin":
             subprocess.Popen(["open", target])
         else:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from typing import Any
 
 from chika.core.tool_registry import ToolDefinition
 
@@ -11,7 +12,7 @@ from chika.core.tool_registry import ToolDefinition
 class ManagedProcess:
     pid: int
     command: str
-    process: asyncio.subprocess.Process
+    process: Any
     stdout_buf: list[str] = field(default_factory=list)
     stderr_buf: list[str] = field(default_factory=list)
     running: bool = True

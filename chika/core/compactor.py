@@ -5,6 +5,11 @@ history is summarised into a single dense block via an LLM call.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from chika.core.engine import LLMCaller
+
 CHARS_PER_TOKEN = 4  # rough estimate
 
 

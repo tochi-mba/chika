@@ -16,7 +16,7 @@ from __future__ import annotations
 import base64
 import os
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -89,7 +89,7 @@ async def _req(
     user_auth: bool = False,
     params: dict | None = None,
     json_body: dict | None = None,
-) -> dict | list | None:
+) -> dict:
     token = await _get_user_token() if user_auth else await _get_client_token()
     if not token:
         return {"error": "No Spotify token available. Set CHIKA_SPOTIFY_ACCESS_TOKEN or CLIENT_ID+SECRET."}
@@ -103,13 +103,13 @@ async def _req(
         elif method == "PUT":
             r = await client.put(url, headers=headers, params=params, json=json_body)
         elif method == "DELETE":
-            r = await client.delete(url, headers=headers, params=params, json=json_body)
+            r = await client.delete(url, headers=headers, params=params, json=json_body)  # type: ignore[call-arg]
         else:
             return {"error": f"Unknown method: {method}"}
     if r.status_code == 204:
         return {"ok": True}
     try:
-        return r.json()
+        return cast(dict, r.json())
     except Exception:
         return {"status_code": r.status_code, "text": r.text[:500]}
 
@@ -133,7 +133,7 @@ async def spotify_get_audio_features(track_id: str) -> dict:
     return await _req("GET", f"/audio-features/{track_id}")
 
 async def spotify_get_recommendations(seed_tracks: str = "", seed_artists: str = "", seed_genres: str = "", limit: int = 10, **kwargs) -> dict:
-    params = {"limit": limit}
+    params: dict[str, Any] = {"limit": limit}
     if seed_tracks:  params["seed_tracks"]  = seed_tracks
     if seed_artists: params["seed_artists"] = seed_artists
     if seed_genres:  params["seed_genres"]  = seed_genres
@@ -146,7 +146,7 @@ async def spotify_get_album(album_id: str, market: str = "") -> dict:
     return await _req("GET", f"/albums/{album_id}", params=params)
 
 async def spotify_get_album_tracks(album_id: str, limit: int = 20, offset: int = 0, market: str = "") -> dict:
-    params = {"limit": limit, "offset": offset}
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
     if market: params["market"] = market
     return await _req("GET", f"/albums/{album_id}/tracks", params=params)
 

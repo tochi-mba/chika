@@ -454,7 +454,7 @@ async def browser_run_research(
     if len(urls) > 10:
         urls = urls[:10]
 
-    results = []
+    results: list[dict[str, Any]] = []
     opened_tabs: list[int] = []
 
     for url in urls:
