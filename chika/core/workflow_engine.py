@@ -14,8 +14,8 @@ import copy
 import json
 import re as _re
 import time
-from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import AsyncGenerator, Callable
+from typing import TYPE_CHECKING, Any
 
 from chika.core.logger import log as _log
 from chika.core.tool_registry import ToolRegistry
