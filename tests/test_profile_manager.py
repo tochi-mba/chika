@@ -17,6 +17,11 @@ class TestGetOrCreate:
         assert (tmp_path / "profiles" / "tochi").is_dir()
         assert (tmp_path / "profiles" / "tochi" / "workspace").is_dir()
 
+    def test_path_traversal_rejected(self, pm):
+        import pytest
+        with pytest.raises(ValueError):
+            pm.get_or_create("../evil")
+
     def test_returns_profile_with_correct_name(self, pm):
         profile = pm.get_or_create("alice")
         assert profile.name == "alice"

@@ -362,6 +362,8 @@ export async function takeScreenshot({ tab_id = null }) {
   const base64 = dataUrl.replace(/^data:image\/png;base64,/, '')
   const sizeBytes = Math.round(base64.length * 0.75)
 
+  let compressionFailed = false
+
   // If > 4MB compress to jpeg
   if (sizeBytes > 4 * 1024 * 1024) {
     try {
@@ -387,7 +389,8 @@ export async function takeScreenshot({ tab_id = null }) {
         warning:    !wasActive ? 'tab_was_briefly_focused' : null,
       }
     } catch (e) {
-      // Fall through to return original oversized PNG with warning
+      console.error('Screenshot JPEG compression failed:', e)
+      compressionFailed = true
     }
   }
 
@@ -397,13 +400,18 @@ export async function takeScreenshot({ tab_id = null }) {
     size_bytes: sizeBytes,
     url:        tab.url,
     title:      tab.title,
-    warning:    !wasActive ? 'tab_was_briefly_focused' : null,
+    warning:    compressionFailed
+      ? 'compression_failed_oversized'
+      : (!wasActive ? 'tab_was_briefly_focused' : null),
   }
 }
 
 // ── Write actions ─────────────────────────────────────────────────────────────
 
 export async function navigate({ url, tab_id = null, new_tab = false }) {
+  if (!/^https?:\/\//.test(url) && url !== 'about:blank') {
+    return { error: 'invalid_url_scheme', url }
+  }
   if (isWriteBlocked(url)) {
     return { error: 'blocked_domain', url, message: 'Write actions are blocked on this domain.' }
   }

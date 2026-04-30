@@ -128,8 +128,23 @@ chika/
     └── spotify_skill/      # OAuth Spotify integration
 
 api/
-├── server.py               # FastAPI + Uvicorn; WebSocket /ws/ + REST endpoints
-└── session_manager.py      # Singleton — creates/caches ChikaEngine per session
+├── server.py               # FastAPI app + both WebSocket handlers (WS stays here)
+├── auth.py                 # require_auth FastAPI dependency
+├── broadcast.py            # Frontend socket registry + push_to_all_frontend_sessions
+├── session_manager.py      # Singleton — creates/caches ChikaEngine per session
+├── settings_store.py       # Runtime settings persisted to data/settings.json
+└── routes/
+    ├── health.py           # GET /health
+    ├── extension.py        # GET /api/extension/status
+    ├── profiles.py         # GET /api/profiles
+    ├── sessions.py         # GET/DELETE/POST /api/session/*
+    ├── registry.py         # GET /api/tools, /api/skills, /api/workflows
+    ├── config.py           # GET /api/config
+    ├── settings.py         # GET/PATCH /api/settings
+    ├── spotify.py          # GET /auth/spotify/*
+    ├── chat_history.py     # GET/DELETE /api/profile/*/chats/*
+    ├── docs.py             # GET /readme
+    └── static.py           # StaticFiles mount (frontend/dist/)
 
 extension/                  # Chrome extension (Manifest V3)
 ├── background.js           # Service worker — WebSocket bridge to Chika server
@@ -179,6 +194,81 @@ Parallel execution:
   ]
 }
 ```
+
+---
+
+## Testing
+
+Run the full suite:
+
+```bash
+pytest tests/ -v
+pytest tests/ --cov=chika --cov=api --cov-report=term-missing
+```
+
+**Test structure** — 540+ tests across 35+ files:
+- Unit tests for every tool, skill, and core module
+- Integration tests for the engine + workflow pipeline with a mocked LLM
+- API tests hitting every REST endpoint via `TestClient`
+- WebSocket end-to-end tests covering `user_message → token → done`, session management, approval gates, and auth rejection
+
+**Mocking the LLM** — no API key needed:
+
+```python
+from unittest.mock import patch
+from chika.core.engine import ChikaEngine
+
+async def _fake_stream(self, messages):
+    yield {"type": "token", "text": "Hello world"}
+
+with patch.object(ChikaEngine, "_stream_llm", _fake_stream):
+    # engine.chat() will yield the fake token without calling any LLM API
+```
+
+**Async tests** — `asyncio_mode = "auto"` is set in `pyproject.toml`, so async test functions run automatically without an explicit marker.
+
+---
+
+## Development
+
+```bash
+# Backend — auto-reload on file changes
+uvicorn api.server:app --reload --port 8000
+
+# Frontend — Vite dev server with HMR
+cd frontend && npm install && npm run dev
+
+# CLI — no server needed
+python chika.py
+# or after pip install -e .
+chika
+```
+
+Enable structured log output to the terminal:
+
+```bash
+CHIKA_LOG_CONSOLE=1 uvicorn api.server:app --port 8000
+```
+
+**CI checks (run before committing):**
+
+```bash
+ruff check .
+bandit -r chika/ api/ -ll -x tests/
+pytest tests/ --cov=chika --cov=api --cov-fail-under=60 -q
+```
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `chika: command not found` | Run `pip install -e .` from the project root |
+| Server won't start | Check `.env` for typos; all int vars are safe-parsed and will log warnings |
+| Extension not connecting | Make sure `CHIKA_API_KEY` matches exactly in both `.env` and the extension Options page |
+| LLM errors / empty responses | Verify provider API keys in `.env`; check `chika.log` for structured error detail |
+| `asyncio.NotImplementedError` on Windows | Already handled — server forces `WindowsProactorEventLoopPolicy` at startup |
 
 ---
 
@@ -262,6 +352,8 @@ The WebSocket endpoint is the primary interface.
 | `CHIKA_HOST` | `0.0.0.0` | API server bind address |
 | `CHIKA_PORT` | `8000` | API server port |
 | `CHIKA_API_KEY` | _(empty)_ | Optional bearer token for API auth |
+| `CHIKA_AUTONOMY` | `supervised` | Default autonomy mode: `supervised` (ask before tools) or `autonomous` (skip all approvals) |
+| `CHIKA_LOG_CONSOLE` | _(empty)_ | Set to `1` to echo structured logs to stdout in addition to `chika.log` |
 
 ---
 

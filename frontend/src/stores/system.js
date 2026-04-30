@@ -34,6 +34,25 @@ export const useSystemStore = defineStore('system', () => {
   // Active profile
   const profile = ref({ name: 'default', workspace: '' })
 
+  // Autonomy mode: "supervised" | "autonomous"
+  const autonomy = ref('supervised')
+  // Per-category permission overrides: category_id → "ask" | "skip"
+  const toolPermissions = ref({})
+  // Category metadata from server: category_id → label string
+  const permissionCategories = ref({})
+
+  function setAutonomy(val) {
+    if (val === 'supervised' || val === 'autonomous') {
+      autonomy.value = val
+    }
+  }
+
+  function setSettings(data) {
+    if (data.autonomy) autonomy.value = data.autonomy
+    if (data.tool_permissions) toolPermissions.value = { ...data.tool_permissions }
+    if (data.categories) permissionCategories.value = { ...data.categories }
+  }
+
   function setConnected(val, sid) {
     connected.value = val
     if (sid) sessionId.value = sid
@@ -133,6 +152,11 @@ export const useSystemStore = defineStore('system', () => {
         pendingApprovals.value = []
         break
 
+      case 'settings_info':
+      case 'settings_update':
+        setSettings(event)
+        break
+
       case 'profile_info':
         profile.value = { name: event.name, workspace: event.workspace }
         break
@@ -223,7 +247,8 @@ export const useSystemStore = defineStore('system', () => {
     connected, sessionId, connectionError, profile,
     extensionConnected,
     pendingApprovals, pendingQuestions,
-    setConnected, setConnectionError, setExtensionConnected,
+    autonomy, toolPermissions, permissionCategories,
+    setConnected, setConnectionError, setExtensionConnected, setAutonomy, setSettings,
     pushEvent, setMemorySnapshot, setVariablesSnapshot, clearSession,
     resolveApproval, resolveQuestion,
     eventCount, variableCount, memoryCount, shellCount, runningShellCount,

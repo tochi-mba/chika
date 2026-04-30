@@ -63,8 +63,14 @@ def _make_ask_user(workflow_engine):
                 "reason": "ask_user requires 2+ options. Ask in text instead.",
             }
         if len(normalised) > 6:
-            # Trim hard — huge lists suggest chika should offer a different UX.
-            normalised = normalised[:6]
+            return {
+                "_source": "ask_user",
+                "error": "too_many_options",
+                "reason": (
+                    f"ask_user supports at most 6 options, got {len(normalised)}. "
+                    "Split into multiple questions or use plain text."
+                ),
+            }
 
         import secrets as _secrets
         request_id = "q_" + _secrets.token_hex(6)

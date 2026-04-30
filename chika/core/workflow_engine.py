@@ -94,6 +94,8 @@ class WorkflowEngine:
         # question_handler: async (*, request_id, question, options, ...) -> dict
         # Set per-WebSocket connection (None until a WS wires it up).
         self.question_handler: Callable[..., Any] | None = None
+        # Tracks which sub-workflow IDs are currently executing to detect circular references
+        self._executing_workflow_ids: set[str] = set()
 
     def register_sub_workflow(self, workflow_id: str, steps: list[dict]) -> None:
         self._sub_workflows[workflow_id] = steps
@@ -351,8 +353,21 @@ class WorkflowEngine:
                 yield {"type": "error", "step_id": sid, "message": f"Loop {sid!r} hit max_iterations={max_iter}"}
 
         if store_as:
-            # Store whatever is in the last updated variable from the loop
-            pass  # variables already stored by inner steps
+            # Resolve the last step's store_result_as variable as the final loop value
+            last_step_store = ""
+            for step in steps:
+                sr = step.get("store_result_as", "").lstrip("$")
+                if sr:
+                    last_step_store = sr
+            last_val = None
+            if last_step_store:
+                v = self._vars.get(last_step_store)
+                last_val = v.value if v else None
+            from chika.core.variable_store import VarType
+            var_type = VarType.JSON if isinstance(last_val, (dict, list)) else VarType.TEXT
+            sv = self._vars.set(store_as, last_val, var_type)
+            yield {"type": "variable_set", "name": f"${store_as}",
+                   "var_type": sv.type.value, "size_bytes": sv.size_bytes}
 
         yield {"type": "step_done", "step_id": sid,
                "iterations": iteration, "duration_ms": int((time.monotonic() - t0) * 1000)}
@@ -536,12 +551,20 @@ class WorkflowEngine:
                "workflow_id": wf_id}
         t0 = time.monotonic()
 
-        steps = self._sub_workflows.get(wf_id)
-        if steps is None:
-            yield {"type": "error", "step_id": sid, "message": f"Sub-workflow {wf_id!r} not found"}
+        if wf_id in self._executing_workflow_ids:
+            yield {"type": "error", "step_id": sid,
+                   "message": f"Circular sub_workflow detected: {wf_id!r}"}
         else:
-            for step in steps:
-                async for e in self._exec_node(step): yield e
+            steps = self._sub_workflows.get(wf_id)
+            if steps is None:
+                yield {"type": "error", "step_id": sid, "message": f"Sub-workflow {wf_id!r} not found"}
+            else:
+                self._executing_workflow_ids.add(wf_id)
+                try:
+                    for step in steps:
+                        async for e in self._exec_node(step): yield e
+                finally:
+                    self._executing_workflow_ids.discard(wf_id)
 
         yield {"type": "step_done", "step_id": sid, "duration_ms": int((time.monotonic() - t0) * 1000)}
 

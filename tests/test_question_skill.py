@@ -66,19 +66,17 @@ def test_handler_response_flows_through():
     assert r["question"] == "Pick"
 
 
-def test_options_capped_at_six():
-    captured = {}
+def test_options_too_many_returns_error():
     async def fake_handler(**kw):
-        captured["options"] = kw["options"]
-        return {"choice": "A", "choice_index": 0}
+        return {"choice": "a", "choice_index": 0}
 
     engine = _FakeEngine(handler=fake_handler)
     ask = _make_ask_user(engine)
-    _run(ask(
+    result = _run(ask(
         question="Too many",
         options=["a", "b", "c", "d", "e", "f", "g", "h"],
     ))
-    assert len(captured["options"]) == 6
+    assert result.get("error") == "too_many_options"
 
 
 def test_skill_registers_ask_user_tool():

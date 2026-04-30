@@ -114,7 +114,9 @@ def _extract_workflow_json(text: str) -> tuple[dict, str] | None:
     Handles both ```json ... ``` fences and bare { ... } blocks.
     """
     # 1. Code-fenced blocks first (```json or ```)
-    for m in re.finditer(r"```(?:json)?\s*(\{.*?})\s*```", text, re.DOTALL):
+    # Cap input to prevent catastrophic backtracking on pathological LLM output
+    text = text[:50_000]
+    for m in re.finditer(r"```(?:json)?\s*(\{[^`]*})\s*```", text, re.DOTALL):
         try:
             data = json.loads(m.group(1))
             if _is_workflow(data):
@@ -306,7 +308,9 @@ class ChikaEngine:
         is_first_message = len(self._history) == 0
         profile = self._active_profile.name if self._active_profile else "unknown"
         _log.info("chat_start", profile=profile, message_preview=user_input[:120])
+        _user_msg_appended = False
         self._history.append({"role": "user", "content": user_input})
+        _user_msg_appended = True
 
         # Start title generation in parallel for the first message of a new chat
         title_task: asyncio.Task | None = None
@@ -324,7 +328,9 @@ class ChikaEngine:
 
         for _turn in range(config.MAX_TOOL_TURNS):
             if self._cancelled:
-                self._history.pop()  # remove the user message we just appended
+                if _user_msg_appended:
+                    self._history.pop()
+                    _user_msg_appended = False
                 yield {"type": "cancelled"}
                 yield {"type": "done"}
                 return
@@ -351,7 +357,9 @@ class ChikaEngine:
                 if turn_text.strip():
                     for tok in buffered_tokens:
                         yield {"type": "token", "text": tok}
-                self._history.pop()  # remove the unsaved user message
+                if _user_msg_appended:
+                    self._history.pop()
+                    _user_msg_appended = False
                 yield {"type": "cancelled"}
                 yield {"type": "done"}
                 return
@@ -545,8 +553,6 @@ class ChikaEngine:
             title = await title_task
             self._title = title
         except Exception:
-            if not title_task.done():
-                title_task.cancel()
             self._title = user_input[:50]
         yield {"type": "chat_title", "title": self._title, "session_id": self.session_id}
 

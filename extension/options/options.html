@@ -50,6 +50,21 @@
         <input type="range" id="maxTabContent" min="100" max="2000" step="100" value="500" />
       </div>
 
+      <div class="field">
+        <label>AI permissions</label>
+        <p class="hint">Control which actions require your approval before the AI executes them.</p>
+
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <button type="button" id="presetSupervised" class="btn-secondary" style="flex:1">Supervised (ask all)</button>
+          <button type="button" id="presetAutonomous" class="btn-secondary" style="flex:1">Autonomous (skip all)</button>
+        </div>
+
+        <div id="permCategoryList">
+          <!-- Populated by options.js after fetching server settings -->
+          <p class="hint" id="permLoadStatus">Loading server settings…</p>
+        </div>
+      </div>
+
       <div class="actions">
         <button type="button" id="testBtn" class="btn-secondary">Test connection</button>
         <button type="button" id="saveBtn" class="btn-primary">Save settings</button>

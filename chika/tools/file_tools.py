@@ -49,7 +49,16 @@ async def file_read(
             "encoding": "base64",
             "size_bytes": size,
         }
-    text = p.read_text(errors="replace")
+    try:
+        text = p.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        return {
+            "error": "encoding_error",
+            "encoding": "utf-8",
+            "path": path,
+            "detail": str(exc),
+            "hint": "File may be binary or use a different encoding. Try as_bytes=True.",
+        }
     all_lines = text.splitlines()
     total_lines = len(all_lines)
 

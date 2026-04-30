@@ -15,10 +15,14 @@ from __future__ import annotations
 import json
 import logging
 import logging.handlers
+import os
+import sys
 import traceback as tb
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+_LEVEL_MAP = {"INFO": "info", "WARN": "warning", "ERROR": "error"}
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 LOG_PATH = _REPO_ROOT / "chika.log"
@@ -61,6 +65,11 @@ class _ChikaLogger:
         self._logger.setLevel(logging.DEBUG)
         if not self._logger.handlers:
             self._logger.addHandler(handler)
+            if os.getenv("CHIKA_LOG_CONSOLE") or os.getenv("CHIKA_ENV") == "development":
+                console = logging.StreamHandler(sys.stdout)
+                console.setLevel(logging.INFO)
+                console.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+                self._logger.addHandler(console)
         self._logger.propagate = False
 
     def _write(self, level: str, event: str, **fields: Any) -> None:
@@ -71,7 +80,8 @@ class _ChikaLogger:
         }
         record.update(_truncate(fields))
         try:
-            self._logger.info(json.dumps(record, default=str, ensure_ascii=False))
+            method = _LEVEL_MAP.get(level, "info")
+            getattr(self._logger, method)(json.dumps(record, default=str, ensure_ascii=False))
         except Exception:
             pass  # logging must never crash the app
 

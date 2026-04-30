@@ -5,6 +5,8 @@ import secrets
 import time
 from pathlib import Path
 
+from chika.core._io import atomic_write as _atomic_write
+
 
 class DeviceStore:
     """
@@ -47,7 +49,7 @@ class DeviceStore:
         })
         if "created_at" not in existing:
             existing["created_at"] = time.time()
-        p.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        _atomic_write(p, json.dumps(existing, indent=2))
 
     def exists(self, device_id: str) -> bool:
         return self._path(device_id).exists()

@@ -62,6 +62,7 @@ const focused  = ref(false)
 function submit() {
   const msg = text.value.trim()
   if (!msg || props.disabled) return
+  if (msg.length > 32_000) return
   emit('send', msg)
   text.value = ''
   nextTick(() => autoResize())

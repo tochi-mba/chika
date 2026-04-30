@@ -171,7 +171,7 @@ def _update_env_file() -> None:
     }
     result = []
     for line in lines:
-        key = line.split("=")[0] if "=" in line else ""
+        key = line.split("=", 1)[0] if "=" in line else ""
         if key in new_vals:
             result.append(f"{key}={new_vals.pop(key)}")
         else:

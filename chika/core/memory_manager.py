@@ -30,7 +30,8 @@ class MemoryManager:
         # Sanitize key: strip chars that break the markdown heading format
         key = key.replace("#", "").replace("\n", " ").replace("\r", "").strip()
         if not key:
-            key = "unnamed"
+            import hashlib
+            key = f"unnamed_{hashlib.md5(value.encode()).hexdigest()[:6]}"  # nosec B324 — not cryptographic
         entry = MemoryEntry(key, value, ttl_days)
         self._entries[key] = entry
         self._maybe_compact()

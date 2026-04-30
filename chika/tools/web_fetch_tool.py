@@ -69,7 +69,7 @@ async def web_fetch(url: str, save_path: str | None = None, max_size_kb: int = 2
             result["hint"] = "Binary content — provide save_path to save it to a file"
         else:
             text = response.text
-            max_chars = max_size_kb * 512  # ~half KB per char estimate
+            max_chars = max_size_kb * 1024
             if len(text) > max_chars:
                 result["text"] = text[:max_chars]
                 result["truncated"] = True

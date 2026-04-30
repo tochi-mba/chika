@@ -69,7 +69,7 @@ async def verify_url(url: str, timeout: float = 8.0) -> dict:
                 resp = await client.head(url)
                 if resp.status_code == 405:  # Method Not Allowed
                     raise ValueError("HEAD not allowed")
-            except Exception:
+            except ValueError:
                 resp = await client.get(url)
             final_url = str(resp.url)
             ct = resp.headers.get("content-type", "")

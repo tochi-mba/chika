@@ -161,6 +161,46 @@ input[type="range"]::-webkit-slider-thumb {
   border-color: rgba(108,99,255,0.4);
 }
 
+/* ── Permission category controls ──────────────────────────────────────────── */
+
+.perm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+.perm-row:last-child { border-bottom: none; }
+
+.perm-label {
+  font-size: 12px;
+  color: var(--text-2);
+  flex: 1;
+}
+
+.perm-toggle {
+  display: flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.perm-opt {
+  padding: 3px 12px;
+  font-size: 11px;
+  font-family: inherit;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 100ms;
+}
+.perm-opt + .perm-opt { border-left: 1px solid var(--border-strong); }
+.perm-opt:hover { color: var(--text-2); background: var(--surface-2); }
+.perm-opt.active { background: rgba(108,99,255,0.15); color: var(--accent); }
+
 /* ── Feedback ────────────────────────────────────────────────────────────────── */
 
 .feedback {

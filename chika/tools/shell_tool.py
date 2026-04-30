@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 from chika.core.tool_registry import ToolDefinition
+
+
+def _log_task_exception(task: asyncio.Task) -> None:
+    try:
+        exc = task.exception()
+        if exc:
+            logging.warning("Background shell task raised: %s: %s", type(exc).__name__, exc)
+    except asyncio.CancelledError:
+        pass
 
 # ── Process registry ──────────────────────────────────────────────────────────
 
@@ -249,7 +259,7 @@ async def _shell_exec_threaded(
         managed.running = False
         managed.exit_code = rc
         fake_proc.returncode = rc
-    asyncio.create_task(_watch_exit())
+    asyncio.create_task(_watch_exit()).add_done_callback(_log_task_exception)
 
     return {
         "stdout": "", "stderr": "", "exit_code": -1,
@@ -334,7 +344,7 @@ async def shell_exec(
             managed.running = False
             managed.exit_code = proc.returncode
 
-        asyncio.create_task(_watch_exit())
+        asyncio.create_task(_watch_exit()).add_done_callback(_log_task_exception)
         return {
             "stdout": "", "stderr": "", "exit_code": -1,
             "timed_out": False, "pid": proc.pid, "stdout_lines": [],

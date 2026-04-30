@@ -17,6 +17,13 @@ export function useChika(apiKey = '') {
   // Bounded offline queue — flushed on reconnect (4.4)
   const offlineQueue = []
 
+  function buildApiUrl(path) {
+    const base = typeof __API_URL__ !== 'undefined' && __API_URL__
+      ? __API_URL__
+      : `${location.protocol}//${location.host}`
+    return `${base.replace(/\/$/, '')}${path}`
+  }
+
   function buildWsUrl() {
     const base   = typeof __API_URL__ !== 'undefined' && __API_URL__
       ? __API_URL__.replace(/^http/, 'ws')
@@ -28,6 +35,26 @@ export function useChika(apiKey = '') {
     if (deviceId) params.set('device', deviceId)
     const qs = params.toString()
     return `${base}/ws/${qs ? '?' + qs : ''}`
+  }
+
+  async function patchSettings(patch) {
+    const token = apiKey || localStorage.getItem('chika_api_key') || ''
+    const headers = { 'Content-Type': 'application/json' }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    try {
+      const res = await fetch(buildApiUrl('/api/settings'), {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(patch),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      system.setSettings(data)
+      return data
+    } catch (err) {
+      console.error('[Chika] patchSettings failed:', err)
+      throw err
+    }
   }
 
   function connect() {
@@ -165,14 +192,21 @@ export function useChika(apiKey = '') {
         // Push as a tool event so it appears inline in the chat
         chat.attachToolEvent(event)
         break
+
+      case 'settings_info':
+      case 'settings_update':
+        system.setSettings(event)
+        break
     }
   }
 
   function _wsSend(payload) {
     if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-      // Buffer up to MAX_OFFLINE_QUEUE messages; drop oldest if full (4.4)
+      // Buffer up to MAX_OFFLINE_QUEUE messages; drop if full and notify user (4.4)
       if (offlineQueue.length < MAX_OFFLINE_QUEUE) {
         offlineQueue.push(payload)
+      } else {
+        system.setConnectionError('Message dropped: offline queue is full. Please wait for reconnection.')
       }
       connect()
       return
@@ -238,5 +272,5 @@ export function useChika(apiKey = '') {
 
   connect()
 
-  return { send, stop, reset, ping, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat }
+  return { send, stop, reset, ping, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat, patchSettings }
 }

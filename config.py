@@ -15,11 +15,26 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
 
+import logging as _logging
+
+
 def _bool(val: str | None, default: bool = False) -> bool:
     """Parse a boolean environment variable. Accepts: 1/true/yes/on (case-insensitive)."""
     if val is None:
         return default
     return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _int_env(key: str, default: int) -> int:
+    """Parse an integer environment variable, falling back to default on bad values."""
+    val = os.getenv(key)
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except ValueError:
+        _logging.warning("Config: %s=%r is not a valid integer; using default %d", key, val, default)
+        return default
 
 
 PROVIDER = os.getenv("CHIKA_PROVIDER", "anthropic").lower()
@@ -34,29 +49,29 @@ AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2024-10-21")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 # Messages API max output tokens (raise CHIKA_ANTHROPIC_* if the model truncates long replies).
-ANTHROPIC_MAX_TOKENS = int(os.getenv("CHIKA_ANTHROPIC_MAX_TOKENS", "16384"))
+ANTHROPIC_MAX_TOKENS = _int_env("CHIKA_ANTHROPIC_MAX_TOKENS", 16384)
 # With extended thinking, output + thinking must fit under max_tokens — default higher ceiling.
-ANTHROPIC_MAX_TOKENS_THINKING = int(os.getenv("CHIKA_ANTHROPIC_MAX_TOKENS_THINKING", "32768"))
+ANTHROPIC_MAX_TOKENS_THINKING = _int_env("CHIKA_ANTHROPIC_MAX_TOKENS_THINKING", 32768)
 # Non-streaming paths (e.g. compaction, meta completions).
-ANTHROPIC_COMPLETE_MAX_TOKENS = int(os.getenv("CHIKA_ANTHROPIC_COMPLETE_MAX_TOKENS", "8192"))
+ANTHROPIC_COMPLETE_MAX_TOKENS = _int_env("CHIKA_ANTHROPIC_COMPLETE_MAX_TOKENS", 8192)
 
 # OpenAI / Azure OpenAI
 OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL      = os.getenv("OPENAI_MODEL", "gpt-4o")
-OPENAI_MAX_TOKENS = int(os.getenv("CHIKA_OPENAI_MAX_TOKENS", "16384"))
+OPENAI_MAX_TOKENS = _int_env("CHIKA_OPENAI_MAX_TOKENS", 16384)
 
 # Ollama (local)
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "llama3.1")
 
 # Engine settings
-MAX_HISTORY_TOKENS   = int(os.getenv("CHIKA_MAX_HISTORY_TOKENS", "10000"))
-COMPACT_KEEP_FIRST   = int(os.getenv("CHIKA_COMPACT_KEEP_FIRST", "2"))
-COMPACT_KEEP_LAST    = int(os.getenv("CHIKA_COMPACT_KEEP_LAST", "4"))
-MAX_TOOL_TURNS       = int(os.getenv("CHIKA_MAX_TOOL_TURNS", "20"))
-MAX_WORKFLOW_STEPS        = int(os.getenv("CHIKA_MAX_WORKFLOW_STEPS", "8"))
-MAX_FILE_WRITES_PER_WF    = int(os.getenv("CHIKA_MAX_FILE_WRITES_PER_WF", "3"))
-MAX_MEMORY_TOKENS    = int(os.getenv("CHIKA_MAX_MEMORY_TOKENS", "2000"))
+MAX_HISTORY_TOKENS   = _int_env("CHIKA_MAX_HISTORY_TOKENS", 10000)
+COMPACT_KEEP_FIRST   = _int_env("CHIKA_COMPACT_KEEP_FIRST", 2)
+COMPACT_KEEP_LAST    = _int_env("CHIKA_COMPACT_KEEP_LAST", 4)
+MAX_TOOL_TURNS       = _int_env("CHIKA_MAX_TOOL_TURNS", 20)
+MAX_WORKFLOW_STEPS        = _int_env("CHIKA_MAX_WORKFLOW_STEPS", 8)
+MAX_FILE_WRITES_PER_WF    = _int_env("CHIKA_MAX_FILE_WRITES_PER_WF", 3)
+MAX_MEMORY_TOKENS    = _int_env("CHIKA_MAX_MEMORY_TOKENS", 2000)
 
 # Grounding / hallucination controls
 # When true, the engine runs a lightweight post-response validator that
@@ -64,18 +79,24 @@ MAX_MEMORY_TOKENS    = int(os.getenv("CHIKA_MAX_MEMORY_TOKENS", "2000"))
 # $facts ledger. Emits a "validation_warning" event the frontend can show.
 GROUNDING_VALIDATE_RESPONSE = _bool(os.getenv("CHIKA_VALIDATE_RESPONSE"), default=True)
 # Minimum response length (chars) to bother running the validator
-GROUNDING_MIN_LENGTH        = int(os.getenv("CHIKA_GROUNDING_MIN_LENGTH", "160"))
+GROUNDING_MIN_LENGTH        = _int_env("CHIKA_GROUNDING_MIN_LENGTH", 160)
 
 # Extended thinking (Anthropic only).
 # When enabled, Claude runs a hidden reasoning pass before its response and
 # the tokens are streamed to the frontend as {type: "thinking", text: ...}
 # events so the user can see the agent's reasoning.
 THINKING_ENABLED        = _bool(os.getenv("CHIKA_THINKING"), default=True)
-THINKING_BUDGET_TOKENS  = int(os.getenv("CHIKA_THINKING_BUDGET", "4000"))
+THINKING_BUDGET_TOKENS  = _int_env("CHIKA_THINKING_BUDGET", 4000)
+
+# Autonomy mode — controls whether tool calls require user approval.
+# "supervised" (default): approval dialogs shown for each tool call.
+# "autonomous": AI runs freely without approval popups.
+# The runtime value can be overridden via PATCH /api/settings.
+AUTONOMY_MODE = os.getenv("CHIKA_AUTONOMY", "supervised")
 
 # API server
 API_HOST    = os.getenv("CHIKA_HOST", "0.0.0.0")
-API_PORT    = int(os.getenv("CHIKA_PORT", "8000"))
+API_PORT    = _int_env("CHIKA_PORT", 8000)
 CHIKA_API_KEY = os.getenv("CHIKA_API_KEY", "")   # empty = auth disabled
 # Comma-separated list of allowed CORS origins. Defaults to localhost dev servers.
 # Set to "*" only for fully public APIs with no credentials.

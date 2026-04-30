@@ -134,3 +134,8 @@ class MemoryEntryInfo(BaseModel):
     created: str
     accessed: int
     ttl_days: int | None
+
+
+class SettingsPatch(BaseModel):
+    autonomy: str | None = None
+    tool_permissions: dict[str, str] | None = None

@@ -21,6 +21,68 @@
         />
         <span class="conn-indicator" :class="{ connected: system.connected }" :title="system.connected ? 'Connected' : 'Disconnected'" />
 
+        <!-- Autonomy toggle + permissions popover -->
+        <div class="perm-wrap" ref="permWrapRef">
+          <button
+            class="icon-btn"
+            :class="{ 'icon-btn--autonomous': system.autonomy === 'autonomous', 'icon-btn--active': permOpen }"
+            @click="permOpen = !permOpen"
+            :title="system.autonomy === 'autonomous' ? 'Autonomous — click to configure permissions' : 'Supervised — click to configure permissions'"
+          >
+            <!-- Lock: supervised -->
+            <svg v-if="system.autonomy !== 'autonomous'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            <!-- Unlock: autonomous -->
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+            </svg>
+          </button>
+
+          <!-- Permissions popover -->
+          <div v-if="permOpen" class="perm-popover">
+            <div class="perm-header">AI Permissions</div>
+
+            <!-- Global preset -->
+            <div class="perm-preset">
+              <button
+                class="perm-preset-btn"
+                :class="{ active: system.autonomy === 'supervised' }"
+                @click="setGlobalAutonomy('supervised')"
+              >Supervised</button>
+              <button
+                class="perm-preset-btn"
+                :class="{ active: system.autonomy === 'autonomous' }"
+                @click="setGlobalAutonomy('autonomous')"
+              >Autonomous</button>
+            </div>
+            <p class="perm-hint">Or configure per category:</p>
+
+            <!-- Per-category rows -->
+            <div
+              v-for="(label, cat) in system.permissionCategories"
+              :key="cat"
+              class="perm-row"
+            >
+              <span class="perm-label">{{ label }}</span>
+              <div class="perm-toggle">
+                <button
+                  class="perm-opt"
+                  :class="{ active: effectivePerm(cat) === 'ask' }"
+                  @click="setCategoryPerm(cat, 'ask')"
+                >Ask</button>
+                <button
+                  class="perm-opt"
+                  :class="{ active: effectivePerm(cat) === 'skip' }"
+                  @click="setCategoryPerm(cat, 'skip')"
+                >Skip</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Theme toggle -->
         <button class="icon-btn" @click="theme.toggle()" :title="theme.isDark ? 'Switch to light mode' : 'Switch to dark mode'">
           <!-- Moon: currently dark, click to go light -->
@@ -100,7 +162,7 @@
 </template>
 
 <script setup>
-import { ref, watch, watchEffect } from 'vue'
+import { ref, watch, watchEffect, onMounted, onUnmounted } from 'vue'
 import { useChika }       from './composables/useChika'
 import { useChatStore }   from './stores/chat'
 import { useChatsStore }  from './stores/chats'
@@ -125,7 +187,38 @@ watchEffect(() => {
 })
 
 const storedKey = localStorage.getItem('chika_api_key') || ''
-const { send, stop, reset, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat } = useChika(storedKey)
+const { send, stop, reset, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat, patchSettings } = useChika(storedKey)
+
+// ── Permissions popover ────────────────────────────────────────────────────
+
+const permOpen = ref(false)
+const permWrapRef = ref(null)
+
+function effectivePerm(cat) {
+  const explicit = system.toolPermissions[cat]
+  if (explicit) return explicit
+  return system.autonomy === 'autonomous' ? 'skip' : 'ask'
+}
+
+async function setGlobalAutonomy(val) {
+  try {
+    await patchSettings({ autonomy: val })
+  } catch { /* logged */ }
+}
+
+async function setCategoryPerm(cat, perm) {
+  try {
+    await patchSettings({ tool_permissions: { [cat]: perm } })
+  } catch { /* logged */ }
+}
+
+function onOutsideClick(e) {
+  if (permWrapRef.value && !permWrapRef.value.contains(e.target)) {
+    permOpen.value = false
+  }
+}
+onMounted(() => document.addEventListener('mousedown', onOutsideClick))
+onUnmounted(() => document.removeEventListener('mousedown', onOutsideClick))
 
 // Panel collapsed state — persisted across sessions
 const panelCollapsed = ref(localStorage.getItem('chika_panel_open') === 'false')
@@ -277,6 +370,116 @@ watch(panelCollapsed, v => localStorage.setItem('chika_panel_open', v ? 'false' 
   background: var(--surface-2);
 }
 .icon-btn--active {
+  color: var(--accent);
+}
+.icon-btn--autonomous {
+  color: var(--yellow);
+}
+
+/* ── Permissions popover ────────────────────────────────────────────────── */
+.perm-wrap {
+  position: relative;
+}
+
+.perm-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 280px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 200;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.perm-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.perm-preset {
+  display: flex;
+  gap: 6px;
+}
+
+.perm-preset-btn {
+  flex: 1;
+  padding: 5px 0;
+  font-size: 12px;
+  font-family: inherit;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 120ms;
+}
+.perm-preset-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+.perm-preset-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.perm-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  margin: 0;
+}
+
+.perm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.perm-label {
+  font-size: 12px;
+  color: var(--text-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.perm-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.perm-opt {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 100ms;
+}
+.perm-opt + .perm-opt {
+  border-left: 1px solid var(--border);
+}
+.perm-opt:hover {
+  color: var(--text-2);
+  background: var(--surface-2);
+}
+.perm-opt.active {
+  background: var(--accent-dim);
   color: var(--accent);
 }
 

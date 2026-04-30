@@ -109,10 +109,24 @@ class Compactor:
                 content += f" [called {fn.get('name', '?')}]"
             text_parts.append(f"{role.upper()}: {content[:500]}")
 
+        full_text = "\n\n".join(text_parts)
+
+        # If the context is too large for one LLM call, split and summarise recursively
+        if len(messages) > 1 and len(full_text) // CHARS_PER_TOKEN > 80_000:
+            mid = len(messages) // 2
+            left = await self._summarise(messages[:mid])
+            right = await self._summarise(messages[mid:])
+            prompt = (
+                "Combine these two conversation summaries into a single dense, factual paragraph. "
+                "Preserve all key decisions, tool results, variable values, and conclusions:\n\n"
+                f"Part 1:\n{left}\n\nPart 2:\n{right}"
+            )
+            return await self._llm.complete(prompt)
+
         prompt = (
             "Summarise the following conversation segment into a dense, factual paragraph. "
             "Preserve all key decisions, tool results, variable values, and conclusions. "
             "Be concise but complete.\n\n"
-            + "\n\n".join(text_parts)
+            + full_text
         )
         return await self._llm.complete(prompt)

@@ -58,7 +58,19 @@ class ProfileManager:
     def exists(self, name: str) -> bool:
         return (self._dir / name).is_dir()
 
+    @staticmethod
+    def _sanitize_name(name: str) -> str:
+        name = name.strip().lower().replace(" ", "_")
+        # Reject traversal and path separators before any stripping
+        if ".." in name or "/" in name or "\\" in name:
+            raise ValueError(f"Invalid profile name: {name!r}")
+        name = name.lstrip(".")
+        if not name:
+            raise ValueError(f"Invalid profile name (empty after sanitization): {name!r}")
+        return name
+
     def get_or_create(self, name: str) -> Profile:
+        name = self._sanitize_name(name)
         profile_dir = self._dir / name
         profile_dir.mkdir(parents=True, exist_ok=True)
         workspace = profile_dir / "workspace"

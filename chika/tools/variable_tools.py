@@ -15,7 +15,10 @@ if TYPE_CHECKING:
 
 def make_variable_tools(store: VariableStore) -> list[ToolDefinition]:
     async def set_variable(name: str, value: object, var_type: str = "text", description: str = "") -> dict:
-        t = VarType(var_type) if var_type in VarType._value2member_map_ else VarType.TEXT
+        try:
+            t = VarType(var_type)
+        except ValueError:
+            t = VarType.TEXT
         v = store.set(name.lstrip("$"), value, t, description)
         return {"name": f"${v.name}", "type": v.type.value, "size_bytes": v.size_bytes}
 

@@ -409,7 +409,8 @@ function renderQuestions(questions) {
 
     card.querySelectorAll('.question-option').forEach(btn => {
       btn.addEventListener('click', () => {
-        const idx   = parseInt(btn.dataset.index, 10)
+        const idx = parseInt(btn.dataset.index, 10)
+        if (idx < 0 || idx >= q.options.length) return
         const label = q.options[idx]
         submitQuestion(q.request_id, String(label), idx)
       })
