@@ -1,9 +1,13 @@
-"""Tests for chika/tools/apps_tool.py."""
+"""Tests for chika/tools/apps_tool.py.
+
+os.startfile only exists on Windows. We use patch.object(..., create=True) so
+the attribute is temporarily added to the os module on Linux/macOS in CI.
+"""
 from __future__ import annotations
 
 import asyncio
-import platform
-from unittest.mock import MagicMock, patch
+import os
+from unittest.mock import patch
 
 from chika.tools.apps_tool import app_open, APP_OPEN_TOOL
 
@@ -15,7 +19,7 @@ def run(coro):
 class TestAppOpen:
     def test_windows_success(self):
         with patch("platform.system", return_value="Windows"), \
-             patch("os.startfile"):
+             patch.object(os, "startfile", create=True):
             result = run(app_open("notepad"))
         assert result["success"] is True
         assert result["opened"] == "notepad"
