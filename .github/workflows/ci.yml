@@ -20,6 +20,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: |
@@ -29,25 +30,29 @@ jobs:
       - name: Lint
         run: ruff check .
 
-      - name: Run tests
-        env:
-          CHIKA_PROVIDER: anthropic
-          ANTHROPIC_API_KEY: test-key
-        run: pytest tests/ -v --tb=short
-
       - name: Type check
         run: mypy chika/ api/ config.py --ignore-missing-imports
 
-      - name: Coverage
+      - name: Security scan
+        run: bandit -r chika/ api/ -ll -x tests/
+
+      - name: Test + coverage
         env:
           CHIKA_PROVIDER: anthropic
           ANTHROPIC_API_KEY: test-key
-        run: pytest tests/ --cov=chika --cov=api --cov-report=term-missing --cov-fail-under=60
-
-      - name: Security scan
         run: |
-          pip install bandit
-          bandit -r chika/ api/ -ll -x tests/
+          pytest tests/ -v --tb=short \
+            --cov=chika --cov=api \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=60
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        if: matrix.python-version == '3.12'
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
 
   test-windows:
     runs-on: windows-latest
@@ -58,6 +63,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Install dependencies
         run: |
@@ -68,4 +74,6 @@ jobs:
         env:
           CHIKA_PROVIDER: anthropic
           ANTHROPIC_API_KEY: test-key
+        # Starlette's TestClient WebSocket support requires threading primitives
+        # that behave differently on Windows — skip those tests in the Windows job.
         run: pytest tests/ -v --tb=short -k "not test_websocket"
