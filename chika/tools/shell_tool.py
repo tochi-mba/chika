@@ -162,7 +162,7 @@ async def _shell_exec_threaded(
             try:
                 r = _subproc.run(
                     command,
-                    shell=True,
+                    shell=True,  # nosec B602 — intentional: this tool exists to run shell commands
                     cwd=working_directory,
                     capture_output=True,
                     text=True,
@@ -198,7 +198,7 @@ async def _shell_exec_threaded(
     try:
         popen = _subproc.Popen(
             command,
-            shell=True,
+            shell=True,  # nosec B602 — intentional: this tool exists to run shell commands
             cwd=working_directory,
             stdout=_subproc.PIPE,
             stderr=_subproc.PIPE,
