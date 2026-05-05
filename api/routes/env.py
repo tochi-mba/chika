@@ -112,7 +112,7 @@ async def patch_provider(body: ProviderUpdate) -> dict[str, Any]:
     if not body.provider and not body.model:
         raise HTTPException(status_code=400, detail="Provide provider and/or model")
 
-    updates: dict[str, str] = {}
+    updates: dict[str, str | None] = {}
     target_provider = body.provider or config.PROVIDER
 
     if body.provider:

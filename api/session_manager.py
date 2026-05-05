@@ -166,7 +166,7 @@ class SessionManager:
         # plan_skill is session-scoped too — stores the live plan in $plan.
         # plan_reconcile needs the engine for LLM access; late-bind via a
         # getter that resolves the engine after the engine is constructed.
-        _engine_holder = {"engine": None}
+        _engine_holder: dict[str, ChikaEngine | None] = {"engine": None}
         skill_registry.register(
             build_plan_skill(
                 variable_store,

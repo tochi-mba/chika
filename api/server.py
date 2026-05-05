@@ -232,8 +232,14 @@ async def websocket_endpoint(
         request_id: str, tool: str, args: dict,
         step_id: str = "", message: str = "",
         approval_type: str = "confirm",
-    ) -> bool:
-        """Serialised approval: queues requests, shows one dialog at a time."""
+    ) -> bool | dict:
+        """Serialised approval: queues requests, shows one dialog at a time.
+
+        Return shape varies by ``approval_type``:
+          * ``confirm`` / ``verify_password`` / ``set_password`` → bool
+          * ``workspace_scope`` → ``{"scope": ..., "reason": ...}``
+          * ``plan_review``     → ``{"action": ..., "feedback": ..., "reason": ...}``
+        """
         if settings_store.get_tool_permission(tool) == "skip":
             return True
 

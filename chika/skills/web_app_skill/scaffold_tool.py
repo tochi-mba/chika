@@ -316,7 +316,7 @@ def _run_sync(cmd: str, cwd: Path, timeout: float = 120.0) -> tuple[int, str]:
     else:
         # Put the shell in its own process group so killpg reaches all
         # descendants.
-        preexec_fn = _os.setsid  # type: ignore[assignment]
+        preexec_fn = _os.setsid  # type: ignore[assignment,attr-defined]
 
     try:
         popen = subprocess.Popen(

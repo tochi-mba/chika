@@ -1342,6 +1342,7 @@ class ChikaEngine:
                 if self._provider != "ollama":
                     create_kwargs["tools"] = [WORKFLOW_ORCHESTRATOR_SCHEMA]
                     create_kwargs["tool_choice"] = "auto"
+                assert self._client is not None  # stub path returns earlier
                 response = await self._client.chat.completions.create(**create_kwargs)
 
                 async for chunk in response:
@@ -1555,6 +1556,7 @@ class ChikaEngine:
 
         for attempt in range(1, 5):  # up to 4 attempts
             try:
+                assert self._client is not None  # stub path returns earlier
                 try:
                     stream_cm = self._client.messages.stream(**stream_kwargs)
                 except TypeError:
@@ -1746,6 +1748,7 @@ class ChikaEngine:
         """Non-streaming single completion for meta-tools and compaction."""
         if self._stub_runner is not None:
             return await self._stub_runner.complete(prompt)
+        assert self._client is not None  # stub branch returns earlier
         if self._provider in ("azure", "openai", "ollama"):
             resp = await self._client.chat.completions.create(
                 model=self._model,

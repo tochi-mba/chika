@@ -307,6 +307,7 @@ def _cmd_env(ctx: CommandContext, args: list[str]) -> None:
         return
 
     raw = " ".join(args)
+    value: str | None
     if "=" in raw:
         key, _, value = raw.partition("=")
     elif len(args) >= 2:
@@ -817,24 +818,26 @@ def _cmd_killall(ctx: CommandContext, _args: list[str]) -> None:
     failed: list[tuple[int, str]] = []
     for p in running:
         pid = p.get("pid")
-        managed = ProcessRegistry.get(pid)
+        if pid is None:
+            continue
+        managed = ProcessRegistry.get(int(pid))
         if managed is None:
             continue
         try:
             managed.process.kill()
             managed.running = False
-            killed.append(pid)
+            killed.append(int(pid))
         except Exception as exc:
-            failed.append((pid, str(exc)))
+            failed.append((int(pid), str(exc)))
     if killed:
         ctx.console.print(Text(
             f"  killed {len(killed)} shell{'s' if len(killed) != 1 else ''}: "
             + ", ".join(str(p) for p in killed),
             style=THEME.accent,
         ))
-    for pid, exc in failed:
+    for pid_failed, err_msg in failed:
         ctx.console.print(Text(
-            f"  /kill {pid} failed: {exc}", style=THEME.error,
+            f"  /kill {pid_failed} failed: {err_msg}", style=THEME.error,
         ))
 
 

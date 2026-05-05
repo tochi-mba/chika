@@ -129,6 +129,11 @@ async def _bounded_complete(engine: ChikaEngine, prompt: str, *, max_tokens: int
     cfg = config.get_provider_config()
     cap = max(8, min(int(max_tokens), 200))
 
+    if engine._client is None:
+        # Stub-only sessions don't have a live client; pet speech is
+        # cosmetic, so silently return an empty quote.
+        return ""
+
     if cfg.provider in ("azure", "openai", "ollama"):
         resp = await engine._client.chat.completions.create(
             model=engine._model,

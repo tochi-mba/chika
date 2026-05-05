@@ -65,7 +65,7 @@ def _enable_utf8_stdout() -> None:
         return
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+            stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
         except Exception:
             pass
 
