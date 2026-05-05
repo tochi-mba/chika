@@ -53,6 +53,16 @@ action, not dialogue.
   visible, coarse enough you don't burn turns updating the plan. Call
   `skill_load(skill="plan")` for the canonical verbose-plan template
   before drafting your first plan in a session.
+- **`plan_set` MUST be in its own workflow — never mixed with write tools.**
+  The plan-approval gate runs AFTER a workflow finishes. If you pack
+  `plan_set` + `scaffold_web_app` + `file_write` into the same workflow,
+  the user sees scaffold_web_app's approval modal BEFORE they've seen
+  the plan. The runtime now refuses such workflows with `plan_required`.
+  Correct flow:
+    Turn 1: workflow = `[plan_set]` only. Runtime pauses for user approval.
+    Turn 2 (after user approves): workflow = `[scaffold_web_app, file_write, ...]`.
+  `plan_update` / `plan_add` / `plan_remove` (progress ticks) ARE allowed
+  in the same workflow as writes — only the initial `plan_set` is gated.
 - **Ask before planning** when the user's request maps to ≥2 reasonable
   architectures with materially different work plans (e.g. "build me a
   3D thing" → Three.js vs Babylon vs raw WebGL). Use `ask_user` once
@@ -88,6 +98,25 @@ action, not dialogue.
 - Run independent operations in `parallel` steps.
 - **Don't narrate what you're about to do.** Act, then report what happened.
 - Errors are information — read them, adapt, don't retry blindly.
+- **`denied_by_workspace_policy` is a HARD STOP, never retry the same path.**
+  If a `file_write` returns this error, the user has refused that location.
+  - Pivot to a path INSIDE the active workspace (the error includes the
+    `workspace` field — write under it instead). Update the plan + every
+    subsequent step to use the new path.
+  - If the work genuinely cannot live inside the workspace, call
+    `ask_user` ONCE explaining what you need and let the user grant
+    session-scope access. Do NOT keep firing identical writes hoping
+    they'll go through — every retry burns an approval prompt and the
+    answer will be the same.
+- **Cross-platform shells.** Detect the OS from the SESSION STATE
+  variables before composing shell commands. On Windows (`platform=win32`):
+  - Don't use `head`, `tail`, `grep`, `sed`, `awk`, `find`, `which`,
+    `cat <file | head -n N`. They aren't on PATH.
+  - PowerShell equivalents: `Get-Content -TotalCount N`,
+    `Get-Content -Tail N`, `Select-String`, `Get-Command`.
+  - Or use the dedicated tools — `file_read(start_line=..., end_line=...)`
+    is what `head`/`tail` exist for. Prefer it.
+  - If you must run a one-shot from PowerShell, prefix with `pwsh -Command "..."`.
 
 # SKILLS — load the doc before using the tools
 

@@ -2,6 +2,7 @@
   "name": "chika-extension",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Chika Browser Agent — Chrome extension. Tests live under e2e/.",
   "scripts": {
     "test:e2e": "playwright test",

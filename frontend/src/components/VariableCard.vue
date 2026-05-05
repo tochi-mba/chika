@@ -20,32 +20,51 @@ function fmtSize(bytes) {
 
 <style scoped>
 .var-card {
-  background: #1a1a22;
-  border: 1px solid #2a2a35;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 10px;
-  margin: 3px 0;
+  padding: 10px 12px;
+  margin: 6px 12px;
+  transition: border-color 140ms var(--spring);
 }
+.var-card:hover { border-color: var(--border-strong); }
+
 .header { display: flex; align-items: center; gap: 8px; }
-.name { font-family: monospace; font-size: 13px; color: #a8a0ff; flex: 1; }
+.name {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--accent);
+  font-weight: 500;
+  flex: 1;
+}
 .badge {
   font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 500;
+  background: var(--surface-2);
+  color: var(--text-2);
 }
-.badge.text     { background: #1a2a3a; color: #60a0e0; }
-.badge.json     { background: #2a2a1a; color: #d0c060; }
-.badge.bytes    { background: #2a1a2a; color: #c060d0; }
-.badge.file_path { background: #1a2a1a; color: #60d080; }
-.size { font-size: 11px; color: #555; }
+.badge.text      { color: var(--accent); background: var(--accent-dim); }
+.badge.json      { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.badge.bytes     { color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 14%, transparent); }
+.badge.file_path { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+
+.size {
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
 
 .preview {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
-  color: #888;
-  margin-top: 4px;
+  color: var(--text-3);
+  margin-top: 6px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.4;
 }
 </style>

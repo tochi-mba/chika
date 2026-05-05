@@ -2,10 +2,11 @@
   <div class="profile-gate" v-if="!unlocked">
     <div class="gate-card">
       <div class="gate-brand">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
-                   fill="#6c63ff" stroke="#6c63ff" stroke-width="1.4" stroke-linejoin="round"/>
-        </svg>
+        <div class="gate-mark" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+        </div>
         <span>Chika</span>
       </div>
 
@@ -221,7 +222,7 @@ onMounted(loadProfiles)
 .profile-gate {
   position: fixed;
   inset: 0;
-  background: var(--bg, #0f0f15);
+  background: var(--bg);
   display: grid;
   place-items: center;
   z-index: 9999;
@@ -229,31 +230,51 @@ onMounted(loadProfiles)
 }
 .gate-card {
   width: min(420px, 100%);
-  background: var(--surface, #161622);
-  border: 1px solid var(--border, rgba(255,255,255,0.08));
-  border-radius: 14px;
-  padding: 28px;
-  box-shadow: 0 18px 60px rgba(0,0,0,0.35);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
 }
+:root.dark .gate-card {
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
 .gate-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-weight: 600;
   font-size: 15px;
-  color: var(--text, #ededf2);
-  margin-bottom: 20px;
+  color: var(--text-1);
+  margin-bottom: 24px;
+  letter-spacing: -0.015em;
 }
+.gate-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
 .gate-title {
   font-size: 22px;
-  margin: 0 0 4px;
-  color: var(--text);
+  margin: 0 0 6px;
+  color: var(--text-1);
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 .gate-sub {
   margin: 0 0 24px;
-  color: var(--text-3, #888);
-  font-size: 14px;
+  color: var(--text-3);
+  font-size: 13.5px;
+  line-height: 1.5;
 }
+
 .gate-list {
   list-style: none;
   margin: 0;
@@ -266,27 +287,38 @@ onMounted(loadProfiles)
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
-  gap: 8px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  gap: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 12px 14px;
-  color: var(--text);
-  font-size: 15px;
+  padding: 13px 14px;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: border-color 120ms cubic-bezier(.2,.7,.2,1),
-              background-color 120ms cubic-bezier(.2,.7,.2,1);
+  transition: border-color 140ms var(--spring),
+              background-color 140ms var(--spring),
+              transform 140ms var(--spring);
   text-align: left;
 }
 .gate-pick:hover {
-  border-color: var(--accent, #6c63ff);
-  background: rgba(108, 99, 255, 0.08);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  transform: translateY(-1px);
 }
-.gate-name { color: var(--text); }
+.gate-name { color: var(--text-1); }
 .gate-badge { font-size: 12px; opacity: 0.7; }
-.gate-arrow { color: var(--text-3, #888); }
-.gate-create { color: var(--text-3, #888); border-style: dashed; }
+.gate-arrow {
+  color: var(--text-3);
+  transition: color 140ms, transform 140ms var(--spring);
+}
+.gate-pick:hover .gate-arrow { color: var(--accent); transform: translateX(2px); }
+.gate-create {
+  color: var(--text-3);
+  border-style: dashed;
+  background: transparent;
+}
 .gate-create:hover { color: var(--accent); }
 
 .gate-pwd, .gate-create-form {
@@ -297,34 +329,44 @@ onMounted(loadProfiles)
 .gate-pwd label, .gate-create-form label {
   display: grid;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 500;
 }
 .gate-pwd input, .gate-create-form input {
-  background: rgba(255,255,255,0.03);
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 14px;
-  color: var(--text);
+  color: var(--text-1);
   font-family: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  transition: border-color 140ms var(--spring);
 }
 .gate-pwd input:focus, .gate-create-form input:focus {
   outline: none;
   border-color: var(--accent);
 }
 .gate-go {
-  background: var(--accent, #6c63ff);
-  color: white;
-  border: none;
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
   border-radius: 8px;
   padding: 10px 14px;
+  font: inherit;
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
-  transition: filter 120ms;
+  transition: background 140ms var(--spring), border-color 140ms var(--spring);
 }
-.gate-go:hover:not(:disabled) { filter: brightness(1.1); }
+.gate-go:hover:not(:disabled) {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+}
 .gate-go:disabled { opacity: 0.5; cursor: not-allowed; }
 .gate-back {
   background: none;
@@ -332,13 +374,18 @@ onMounted(loadProfiles)
   color: var(--text-3);
   cursor: pointer;
   padding: 0;
+  font: inherit;
   font-size: 13px;
   text-align: left;
   width: max-content;
+  transition: color 120ms;
 }
-.gate-back:hover { color: var(--text); }
+.gate-back:hover { color: var(--text-1); }
+.gate-fallback { color: var(--accent); }
+.gate-fallback:hover { color: var(--accent-2); }
+
 .gate-error {
-  color: #e05c5c;
+  color: var(--error);
   font-size: 13px;
 }
 .gate-loading {

@@ -1,0 +1,6 @@
+───────────────────────────────────────────────  wf  ───────────────────────────────────────────────
+⏺ shell_exec  command="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\u2026"
+  ⎿ {
+      "stdout": "ok\n"
+    }  (1ms)
+────────────────────────────────────────────────────────────────────────────────────────────────────

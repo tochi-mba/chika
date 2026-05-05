@@ -17,31 +17,54 @@ const open = ref(false)
 
 <style scoped>
 .mem-entry {
-  background: #1a1a22;
-  border: 1px solid #2a2a35;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  margin: 3px 0;
+  margin: 6px 12px;
   overflow: hidden;
+  transition: border-color 140ms var(--spring);
 }
+.mem-entry:hover { border-color: var(--border-strong); }
+
 .header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 8px 12px;
   cursor: pointer;
   user-select: none;
+  background: var(--surface-2);
 }
-.header:hover { background: #1e1e28; }
-.key { flex: 1; font-family: monospace; font-size: 12px; color: #80d0a0; }
-.ttl { font-size: 10px; color: #888; padding: 1px 5px; background: #222; border-radius: 8px; }
-.toggle { font-size: 10px; color: #555; }
-.value {
-  padding: 6px 10px;
+.header:hover { background: color-mix(in srgb, var(--success) 5%, var(--surface-2)); }
+
+.key {
+  flex: 1;
+  font-family: var(--font-mono);
   font-size: 12px;
-  color: #c0c0d0;
+  color: var(--success);
+  font-weight: 500;
+}
+.ttl {
+  font-size: 10px;
+  color: var(--text-3);
+  padding: 1px 7px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.toggle { font-size: 10px; color: var(--text-3); }
+
+.value {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-2);
   white-space: pre-wrap;
   word-break: break-word;
-  border-top: 1px solid #2a2a35;
-  background: #13131a;
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+  line-height: 1.5;
+  font-family: var(--font-mono);
 }
 </style>

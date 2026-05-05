@@ -20,10 +20,13 @@
           <span class="tool-badge">{{ req.tool }}</span>
         </div>
 
-        <!-- Args (only for non-password types to avoid leaking context) -->
+        <!-- Args (skip for password types and plan_review — the plan
+             panel already displays the full plan above the modal). -->
         <div
           class="args-block"
-          v-if="req.args && Object.keys(req.args).length && !req.approval_type?.includes('password')"
+          v-if="req.args && Object.keys(req.args).length
+                && !req.approval_type?.includes('password')
+                && req.approval_type !== 'plan_review'"
         >
           <div class="args-label">Arguments</div>
           <pre class="args-pre">{{ JSON.stringify(req.args, null, 2) }}</pre>
@@ -67,10 +70,49 @@
           </p>
         </div>
 
+        <!-- plan_review — three-way action picker with optional
+             feedback / reason textarea. The textarea expands when
+             the user clicks "Edit" or "Deny" so they can attach a
+             message; "Approve" submits straight away. -->
+        <div class="plan-review-block" v-if="req.approval_type === 'plan_review'">
+          <textarea
+            v-if="planReviewMode[req.request_id]"
+            class="plan-review-text"
+            :ref="el => { if (el) planReviewInputs[req.request_id] = el }"
+            v-model="planReviewMessages[req.request_id]"
+            :placeholder="
+              planReviewMode[req.request_id] === 'edit'
+                ? 'What should change about the plan?'
+                : 'Why are you rejecting this plan?'
+            "
+            rows="3"
+            @keydown.ctrl.enter="submitPlanReview(req)"
+          ></textarea>
+          <div class="actions">
+            <button
+              class="btn deny"
+              :disabled="pendingIds.has(req.request_id)"
+              :class="{ 'btn--armed': planReviewMode[req.request_id] === 'deny' }"
+              @click="armPlanReview(req, 'deny')"
+            >{{ planReviewMode[req.request_id] === 'deny' ? '✕ Send rejection' : '✕ Deny' }}</button>
+            <button
+              class="btn approve-once"
+              :disabled="pendingIds.has(req.request_id)"
+              :class="{ 'btn--armed': planReviewMode[req.request_id] === 'edit' }"
+              @click="armPlanReview(req, 'edit')"
+            >{{ planReviewMode[req.request_id] === 'edit' ? '✎ Send feedback' : '✎ Edit' }}</button>
+            <button
+              class="btn approve"
+              :disabled="pendingIds.has(req.request_id)"
+              @click="approvePlanReview(req)"
+            >✓ Approve</button>
+          </div>
+        </div>
+
         <!-- Actions — workspace_scope shows three-way scope picker
              so the user controls how long the grant lives. Other
              approval types keep the existing two-button layout. -->
-        <div class="actions" v-if="req.approval_type === 'workspace_scope'">
+        <div class="actions" v-else-if="req.approval_type === 'workspace_scope'">
           <button
             class="btn deny"
             :disabled="pendingIds.has(req.request_id)"
@@ -127,6 +169,12 @@ const pwError   = reactive({})
 // Prevents double-click: set of request_ids with a pending resolve
 const pendingIds = ref(new Set())
 
+// plan_review state — per-request-id: which mode the textarea is for
+// ('edit' | 'deny' | undefined) + the user's message + the textarea ref.
+const planReviewMode     = reactive({})
+const planReviewMessages = reactive({})
+const planReviewInputs   = reactive({})
+
 // Auto-focus password input when a new password-type approval appears
 watch(
   () => props.approvals.length,
@@ -152,7 +200,63 @@ function titleFor(type) {
   if (type === 'verify_password') return 'Password Required'
   if (type === 'set_password')    return 'Set Password'
   if (type === 'workspace_scope') return 'Write outside workspace?'
+  if (type === 'plan_review')     return 'Approve Plan?'
   return 'Approval Required'
+}
+
+function armPlanReview(req, mode) {
+  // First click on Edit/Deny: open the textarea so the user can write
+  // a reason or feedback. Second click on the SAME button submits.
+  if (planReviewMode[req.request_id] === mode) {
+    submitPlanReview(req)
+    return
+  }
+  planReviewMode[req.request_id] = mode
+  planReviewMessages[req.request_id] = planReviewMessages[req.request_id] || ''
+  // Focus the textarea on the next tick so the user can start typing.
+  nextTick(() => {
+    const el = planReviewInputs[req.request_id]
+    if (el) el.focus()
+  })
+}
+
+function approvePlanReview(req) {
+  // Approve doesn't need a message — submit straight away.
+  if (pendingIds.value.has(req.request_id)) return
+  pendingIds.value = new Set([...pendingIds.value, req.request_id])
+  emit('approve', req.request_id, { action: 'approve' })
+  _cleanupPlanReview(req.request_id)
+}
+
+function submitPlanReview(req) {
+  if (pendingIds.value.has(req.request_id)) return
+  const mode = planReviewMode[req.request_id]
+  if (!mode) {
+    // No mode armed — treat as approve.
+    approvePlanReview(req)
+    return
+  }
+  const message = (planReviewMessages[req.request_id] || '').trim()
+  pendingIds.value = new Set([...pendingIds.value, req.request_id])
+  if (mode === 'edit') {
+    emit('approve', req.request_id, {
+      action:   'edit',
+      feedback: message,
+    })
+  } else {
+    emit('approve', req.request_id, {
+      action: 'deny',
+      reason: message,
+    })
+  }
+  _cleanupPlanReview(req.request_id)
+}
+
+function _cleanupPlanReview(rid) {
+  delete planReviewMode[rid]
+  delete planReviewMessages[rid]
+  delete planReviewInputs[rid]
+  pendingIds.value = new Set([...pendingIds.value].filter(id => id !== rid))
 }
 
 function handleWorkspace(req, scope) {
@@ -208,28 +312,33 @@ function handleApprove(req) {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
   gap: 16px;
   flex-direction: column;
+  padding: 24px;
+  backdrop-filter: blur(2px);
 }
 
 .modal {
-  background: #1a1a24;
-  border: 1px solid #6c63ff88;
-  border-radius: 14px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
   padding: 24px 28px;
   width: 460px;
-  max-width: 90vw;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.6), 0 0 0 1px #6c63ff33;
-  animation: pop 0.15s ease-out;
+  max-width: 100%;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+  animation: pop 160ms var(--spring);
+}
+:root.dark .modal {
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
 }
 
 @keyframes pop {
-  from { transform: scale(0.92); opacity: 0; }
+  from { transform: scale(0.94); opacity: 0; }
   to   { transform: scale(1);    opacity: 1; }
 }
 
@@ -237,50 +346,58 @@ function handleApprove(req) {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
-.icon  { font-size: 20px; }
-.title { font-size: 16px; font-weight: 700; color: #e8e8f0; }
+.icon  { font-size: 18px; }
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.015em;
+}
 
 .approval-msg {
-  font-size: 14px;
-  color: #c8c8d8;
-  margin: 0 0 14px;
-  line-height: 1.5;
+  font-size: 13.5px;
+  color: var(--text-2);
+  margin: 0 0 16px;
+  line-height: 1.55;
 }
 
 .tool-row { margin-bottom: 14px; }
 .tool-badge {
   display: inline-block;
-  background: #2a2a3d;
-  border: 1px solid #6c63ff55;
-  color: #a89fff;
-  font-family: monospace;
-  font-size: 13px;
-  padding: 4px 10px;
+  background: var(--accent-dim);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 9px;
   border-radius: 6px;
 }
 
 .args-label {
-  font-size: 11px;
+  font-size: 10.5px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #555;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+  font-weight: 600;
   margin-bottom: 6px;
 }
 .args-pre {
-  background: #111118;
-  border: 1px solid #2a2a35;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
-  font-family: monospace;
-  font-size: 12px;
-  color: #b8b8c8;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-2);
   max-height: 180px;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;
   margin: 0 0 18px;
+  line-height: 1.5;
 }
 
 /* ── Password block ── */
@@ -288,14 +405,14 @@ function handleApprove(req) {
 
 .pw-label {
   display: block;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: #888;
+  color: var(--text-3);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   margin-bottom: 8px;
 }
-.pw-hint { font-weight: 400; color: #555; text-transform: none; letter-spacing: 0; }
+.pw-hint { font-weight: 400; color: var(--text-3); text-transform: none; letter-spacing: 0; }
 
 .pw-input-wrap {
   display: flex;
@@ -304,90 +421,143 @@ function handleApprove(req) {
 }
 .pw-input {
   flex: 1;
-  background: #111118;
-  border: 1px solid #2a2a42;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 9px 12px;
-  color: #e8e8f0;
+  color: var(--text-1);
   font-size: 14px;
   font-family: inherit;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 140ms var(--spring);
 }
-.pw-input:focus { border-color: #6c63ff; }
-.pw-input::placeholder { color: #404058; }
+.pw-input:focus { border-color: var(--accent); }
+.pw-input::placeholder { color: var(--text-3); }
 
 .pw-toggle {
-  background: #1e1e2a;
-  border: 1px solid #2a2a3a;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
-  color: #888;
-  transition: background 0.15s;
+  color: var(--text-3);
+  transition: background 140ms, color 140ms;
 }
-.pw-toggle:hover { background: #2a2a38; }
+.pw-toggle:hover {
+  background: var(--surface-3, var(--surface-2));
+  color: var(--text-1);
+}
 
 .pw-error {
   margin: 6px 0 0;
   font-size: 12px;
-  color: #f85149;
+  color: var(--error);
 }
 
 /* ── Actions ── */
 .actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   justify-content: flex-end;
   margin-top: 4px;
 }
 .btn {
-  padding: 8px 20px;
+  padding: 8px 16px;
   border-radius: 8px;
-  border: none;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s, transform 0.1s;
+  transition: all 140ms var(--spring);
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.btn:active { transform: scale(0.97); }
-.btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+.btn:hover:not(:disabled) {
+  color: var(--text-1);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
 .btn.deny {
-  background: #2a2a35;
-  color: #cc4444;
-  border: 1px solid #cc444440;
+  background: transparent;
+  color: var(--text-3);
 }
-.btn.deny:hover { background: #3a2020; }
+.btn.deny:hover:not(:disabled) {
+  color: var(--error);
+  border-color: var(--error);
+  background: color-mix(in srgb, var(--error) 8%, transparent);
+}
 
 .btn.approve {
-  background: #6c63ff;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
   min-width: 100px;
   justify-content: center;
 }
-.btn.approve:hover:not(:disabled) { background: #7c72ff; }
+.btn.approve:hover:not(:disabled) {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  color: #fff;
+}
 
-/* Workspace-scope picker — middle button is a softer "allow once". */
 .btn.approve-once {
-  background: #2a2a35;
-  color: #6c63ff;
-  border: 1px solid #6c63ff60;
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--accent);
 }
 .btn.approve-once:hover:not(:disabled) {
-  background: rgba(108, 99, 255, 0.12);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* plan_review — stacked block: textarea (when armed) + 3-button row. */
+.plan-review-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+.plan-review-text {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 9px 11px;
+  resize: vertical;
+  min-height: 60px;
+  max-height: 160px;
+  transition: border-color 140ms var(--spring);
+}
+.plan-review-text:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.btn--armed {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 /* Spinner */
 .spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(255,255,255,0.3);
+  border: 2px solid rgba(255, 255, 255, 0.4);
   border-top-color: #fff;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;

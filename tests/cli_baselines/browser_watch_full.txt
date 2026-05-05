@@ -1,0 +1,1 @@
+  ⚠ watch fired: price_changed  .price  $99.99 → $79.99

@@ -6,7 +6,7 @@
               'pet-celebrate': state === 'celebrate',
               'pet-sad': state === 'sad',
               'pet-bubble-open': !!bubble }"
-    :style="{ '--pet-accent': active.accent || '#9d7fff' }"
+    :style="{ '--pet-accent': active.accent || 'var(--accent)' }"
     @click="$emit('open-settings', 'pet')"
     :title="`${active.name} — click to change`"
   >
@@ -152,8 +152,9 @@ onMounted(() => {
   display: grid;
   place-items: center;
   animation: pet-bob 3.5s ease-in-out infinite;
-  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.25));
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.12));
 }
+:root.dark .pet-body { filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3)); }
 
 .pet-emoji {
   font-size: 40px;
@@ -171,15 +172,15 @@ onMounted(() => {
   font-size: 9.5px;
   line-height: 10px;
   letter-spacing: 0;
-  color: var(--text-1, #ededf2);
+  color: var(--text-1);
   white-space: pre;
   user-select: none;
-  text-shadow: 0 0 6px rgba(108, 99, 255, 0.18);
-  transition: color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent);
+  transition: color 200ms var(--spring);
 }
-.pet-companion.pet-celebrate .pet-ascii { color: var(--green, #3dd68c); }
-.pet-companion.pet-sad       .pet-ascii { color: var(--red, #e05c5c); opacity: 0.85; }
-.pet-companion.pet-working   .pet-ascii { color: var(--pet-accent, #9d7fff); }
+.pet-companion.pet-celebrate .pet-ascii { color: var(--success); }
+.pet-companion.pet-sad       .pet-ascii { color: var(--error); opacity: 0.85; }
+.pet-companion.pet-working   .pet-ascii { color: var(--pet-accent, var(--accent)); }
 
 .pet-shadow {
   position: absolute;
@@ -188,21 +189,24 @@ onMounted(() => {
   width: 38px;
   height: 6px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.22);
   filter: blur(3px);
   transform: translateX(-50%);
   animation: pet-shadow 3.5s ease-in-out infinite;
 }
+:root.dark .pet-shadow { background: rgba(0, 0, 0, 0.45); }
 
 .pet-name {
-  font-size: 9.5px;
-  letter-spacing: 0.07em;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-3, #888);
-  background: var(--surface-1, #111);
-  padding: 2px 6px;
+  color: var(--text-3);
+  background: var(--surface-1);
+  padding: 3px 8px;
   border-radius: 999px;
-  border: 1px solid var(--border, rgba(255,255,255,0.07));
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
 }
 
 /* ── Speech bubble ───────────────────────────────────────────────────── */
@@ -211,19 +215,21 @@ onMounted(() => {
   bottom: 100%;
   right: -8px;
   margin-bottom: 8px;
-  background: var(--pet-accent, #9d7fff);
-  color: white;
-  padding: 7px 11px;
+  background: var(--pet-accent, var(--accent));
+  color: #fff;
+  padding: 8px 12px;
   border-radius: 12px;
-  font-size: 11.5px;
+  font-size: 12px;
   white-space: nowrap;
   max-width: 220px;
   text-overflow: ellipsis;
   overflow: hidden;
   font-weight: 500;
   letter-spacing: -0.01em;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
 }
+:root.dark .pet-bubble { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4); }
+
 .pet-bubble::after {
   content: '';
   position: absolute;
@@ -231,7 +237,7 @@ onMounted(() => {
   right: 24px;
   width: 10px;
   height: 10px;
-  background: var(--pet-accent, #9d7fff);
+  background: var(--pet-accent, var(--accent));
   transform: rotate(45deg);
   border-radius: 2px;
 }
@@ -279,7 +285,7 @@ onMounted(() => {
   position: absolute;
   inset: -6px;
   border-radius: 50%;
-  border: 2px solid var(--pet-accent, #9d7fff);
+  border: 2px solid var(--pet-accent, var(--accent));
   opacity: 0.55;
   animation: pet-glow 1.4s ease-in-out infinite;
 }

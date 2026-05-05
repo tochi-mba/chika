@@ -468,6 +468,14 @@ class ChikaEngine:
         # Reset per-turn capture so stale text from an earlier turn can't
         # accidentally trigger auto-continue on the next.
         self._last_followup_text = ""
+        # Circuit-breaker: count identical (error_code, target) pairs across
+        # this turn's workflows. Three repeats of the same denial/error
+        # pattern means the agent is stuck in a retry loop — halt and
+        # surface to the user instead of burning more approval prompts.
+        # Cleared per top-level user turn (auto-continue resets too via
+        # ``_auto_continue_depth = 0`` higher up the stack).
+        repeat_errors: dict[tuple[str, str], int] = {}
+        REPEAT_LIMIT = 3
         is_first_message = len(self._history) == 0
         profile = self._active_profile.name if self._active_profile else "unknown"
         _log.info("chat_start", profile=profile, message_preview=user_input[:120])
@@ -575,6 +583,52 @@ class ChikaEngine:
             self._last_result_content = "{}"
             async for event in self._run_workflow(tool_call):
                 yield event
+                # Track repeated identical errors so the agent can't burn
+                # the user's approval prompts in a loop. We pull the
+                # ``error`` and target identifier from each tool_result.
+                if event.get("type") == "tool_result" and event.get("error"):
+                    err = str(event.get("error") or "").strip()
+                    args = event.get("args") or {}
+                    target = (
+                        args.get("path")
+                        or args.get("url")
+                        or args.get("command")
+                        or args.get("selector")
+                        or ""
+                    )
+                    key = (err[:80], str(target)[:160])
+                    repeat_errors[key] = repeat_errors.get(key, 0) + 1
+                    if repeat_errors[key] >= REPEAT_LIMIT:
+                        msg = (
+                            f"Stopping: same error '{err}' on '{target}' "
+                            f"repeated {REPEAT_LIMIT} times. Either change "
+                            f"approach or ask the user — the retry loop is "
+                            f"not progressing."
+                        )
+                        _log.warn(
+                            "engine_circuit_breaker",
+                            error=err, target=str(target),
+                            count=repeat_errors[key], profile=profile,
+                        )
+                        yield {
+                            "type": "error",
+                            "message": msg,
+                            "error_code": "repeated_error_circuit_breaker",
+                        }
+                        # Force the agent to surface to the user with this
+                        # context — append as a tool result so the next
+                        # LLM turn sees it explicitly.
+                        self._last_result_content = json.dumps({
+                            "error": "repeated_error_circuit_breaker",
+                            "message": msg,
+                            "advice": (
+                                "Do NOT retry the same operation. Either "
+                                "pivot the approach (different path, "
+                                "different command, different selector) "
+                                "or stop and tell the user what you need."
+                            ),
+                        })
+                        break
 
             if self._provider == "ollama":
                 # Inject result as a user message (Ollama text-mode)

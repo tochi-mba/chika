@@ -1,23 +1,35 @@
-/* Chika Extension Popup — full chat UI */
-
+/* Chika Extension Popup — full chat UI
+ *
+ * Tokens mirror the v0 design system (matches the Vue frontend's dark
+ * tokens so every surface speaks one colour vocabulary). The popup is
+ * intentionally dark-only — see extension/e2e/theme.spec.js which pins
+ * the dark baseline.
+ */
 :root {
-  --bg:            #09090d;
-  --surface-1:     #111117;
-  --surface-2:     #18181f;
-  --surface-3:     #20202a;
-  --border:        rgba(255, 255, 255, 0.07);
-  --border-strong: rgba(255, 255, 255, 0.12);
+  --bg:            #0e0e14;
+  --surface-1:     #161620;
+  --surface-2:     #1f1f2c;
+  --surface-3:     #2a2a38;
+  --border:        rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
   --accent:        #6c63ff;
-  --accent-dim:    rgba(108, 99, 255, 0.12);
-  --accent-faint:  rgba(108, 99, 255, 0.06);
+  --accent-2:      #7c70ff;
+  --accent-dim:    rgba(108, 99, 255, 0.16);
+  --accent-faint:  rgba(108, 99, 255, 0.08);
   --text-1:        #ededf2;
-  --text-2:        #8888a2;
-  --text-3:        #4f4f6a;
-  --green:         #3dd68c;
-  --red:           #e05c5c;
-  --yellow:        #e0b35c;
-  --radius-sm:     5px;
-  --radius:        9px;
+  --text-2:        #a8a8b8;
+  --text-3:        #6b6b85;
+  --success:       #3dd68c;
+  --warn:          #e0b35c;
+  --error:         #e05c5c;
+  /* Legacy aliases — kept so older selectors keep rendering. */
+  --green:         var(--success);
+  --red:           var(--error);
+  --yellow:        var(--warn);
+  --radius-sm:     6px;
+  --radius:        10px;
+  --spring:        cubic-bezier(0.16, 1, 0.3, 1);
+  --font-mono:     'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -60,14 +72,25 @@ body {
 .brand {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
   flex-shrink: 0;
 }
 
 .brand-name {
   font-weight: 600;
-  font-size: 14px;
-  letter-spacing: -0.02em;
+  font-size: 13.5px;
+  letter-spacing: -0.015em;
   color: var(--text-1);
 }
 
@@ -122,16 +145,16 @@ body {
 
 .error-banner {
   padding: 8px 14px;
-  background: rgba(224, 92, 92, 0.09);
-  border-bottom: 1px solid rgba(224, 92, 92, 0.18);
-  color: #f09898;
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--error) 25%, transparent);
+  color: var(--error);
   font-size: 12px;
   display: flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
 }
-.error-banner a { color: #f09898; text-decoration: underline; }
+.error-banner a { color: var(--error); text-decoration: underline; }
 
 /* ── Setup / disconnected views ──────────────────────────────────────────────── */
 
@@ -185,7 +208,7 @@ body {
   transition: background 150ms;
   margin-top: 4px;
 }
-.btn-primary:hover { background: #7c74ff; }
+.btn-primary:hover { background: var(--accent-2); }
 
 .btn-retry {
   display: inline-flex;
@@ -296,7 +319,7 @@ body {
   background: var(--surface-3);
   padding: 1px 4px;
   border-radius: 3px;
-  color: #c8b9ff;
+  color: var(--accent);
 }
 
 .bubble-assistant pre {
@@ -534,7 +557,7 @@ body {
   background: var(--accent);
   color: #fff;
 }
-.btn-approve:hover { background: #7c74ff; }
+.btn-approve:hover { background: var(--accent-2); }
 
 /* ── Question card ───────────────────────────────────────────────────────────── */
 
@@ -679,7 +702,7 @@ body {
   cursor: default;
   background: var(--text-3);
 }
-.send-btn:not(:disabled):hover { background: #7c74ff; }
+.send-btn:not(:disabled):hover { background: var(--accent-2); }
 
 .stop-btn {
   flex-shrink: 0;
@@ -770,7 +793,7 @@ body {
   animation: ext-pet-bob 3.5s ease-in-out infinite;
 }
 .ext-pet-bubble {
-  background: var(--pet-accent, #9d7fff);
+  background: var(--pet-accent, var(--accent));
   color: white;
   font-size: 10.5px;
   padding: 3px 7px;

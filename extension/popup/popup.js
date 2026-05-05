@@ -1024,25 +1024,12 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 
   // Full state replacement — triggered by structural changes
-  // (streaming start/end, session link, approvals, errors)
+  // (streaming start/end, session link, approvals, errors). Routes
+  // through applyFullState so plan / shells / pet strips also update
+  // — earlier this handler skipped those, which meant a plan that
+  // arrived after initial load never rendered its strip.
   if (msg.type === 'state_update') {
-    const wasStreaming = state?.isStreaming
-    state = msg.state
-
-    setStatusDot(state.connected)
-    setSessionTitle(state.linkedTitle)
-
-    if (state.authError) { showAuthError(); return }
-    if (!state.connected) { showView('disconnected'); return }
-
-    showView('chat')
-
-    // Full re-render on structural changes
-    streamingText = state.currentMsg?.text || ''
-    renderMessages(state)
-    renderApprovals(state.pendingApprovals || [])
-    renderQuestions(state.pendingQuestions || [])
-    updateSendBtn()
+    applyFullState(msg.state)
     return
   }
 

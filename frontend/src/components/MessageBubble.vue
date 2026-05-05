@@ -9,6 +9,17 @@
   </div>
 
   <div v-else class="message" :class="message.role">
+    <div class="avatar" :class="message.role + '-avatar'" aria-hidden="true">
+      <svg
+        v-if="message.role === 'assistant'"
+        width="14" height="14" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor"
+        stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"
+      >
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+      </svg>
+      <span v-else class="avatar-letter">U</span>
+    </div>
     <div class="bubble" :class="message.role + '-bubble'">
 
       <!-- Inline tool activity timeline (above thinking + text) -->
@@ -183,18 +194,44 @@ const formattedText = computed(() => {
 </script>
 
 <style scoped>
-/* ── Message layout ──────────────────────────────────────────────────────── */
+/* ── Message layout — avatar + bubble row, mirroring the v0 design ────── */
 .message {
   display: flex;
-  padding: 3px 20px;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 6px 20px;
 }
-.message.user      { justify-content: flex-end; }
-.message.assistant { justify-content: flex-start; }
+.message.user      { flex-direction: row-reverse; }
+.message.assistant { flex-direction: row; }
+
+.avatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  margin-top: 2px;
+}
+.assistant-avatar {
+  background: var(--surface-2);
+  color: var(--accent);
+}
+.user-avatar {
+  background: var(--accent);
+  color: #fff;
+}
+.avatar-letter {
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: -0.01em;
+}
 
 /* ── Bubbles ─────────────────────────────────────────────────────────────── */
 .bubble {
-  max-width: 82%;
-  border-radius: var(--radius-lg, 14px);
+  max-width: 80%;
+  border-radius: 14px;
+  padding: 12px 16px;
   font-size: 14px;
   line-height: 1.65;
   word-wrap: break-word;
@@ -202,20 +239,13 @@ const formattedText = computed(() => {
 }
 
 .assistant-bubble {
-  background: var(--surface-1, #111117);
-  border: 1px solid var(--border, rgba(255,255,255,0.07));
-  border-bottom-left-radius: 4px;
-  padding: 12px 16px;
-  color: var(--text-1, #ededf2);
-  max-width: 86%;
+  background: var(--surface-2);
+  color: var(--text-1);
 }
 
 .user-bubble {
-  background: var(--accent, #6c63ff);
-  border-bottom-right-radius: 4px;
-  padding: 10px 15px;
+  background: var(--accent);
   color: #fff;
-  max-width: 72%;
 }
 
 /* ── Streaming cursor ─────────────────────────────────────────────────────── */
@@ -268,12 +298,12 @@ const formattedText = computed(() => {
 .prose :deep(strong) { font-weight: 600; }
 .prose :deep(em)     { font-style: italic; opacity: 0.9; }
 .prose :deep(a) {
-  color: #9d97ff;
+  color: var(--accent);
   text-decoration: none;
   transition: color 120ms;
 }
 .prose :deep(a:hover) {
-  color: #b8b3ff;
+  color: var(--accent-2);
   text-decoration: underline;
 }
 .prose :deep(hr) {
@@ -297,8 +327,8 @@ const formattedText = computed(() => {
   pointer-events: none;
 }
 .prose :deep(pre) {
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--border, rgba(255,255,255,0.07));
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm, 5px);
   padding: 12px 14px;
   margin: 10px 0;
@@ -311,26 +341,33 @@ const formattedText = computed(() => {
 }
 /* Inline code (not in pre) */
 .prose :deep(:not(pre) > code) {
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--border, rgba(255,255,255,0.07));
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 12.5px;
+  color: var(--accent);
 }
-/* User bubble overrides */
-.user-bubble .prose :deep(a) { color: rgba(255,255,255,0.85); }
+/* User bubble overrides — bubble already has dark accent bg, so code blocks
+   need a slightly darker tint and lighter borders to stay legible. */
+.user-bubble .prose :deep(a) {
+  color: rgba(255, 255, 255, 0.92);
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.4);
+}
 .user-bubble .prose :deep(code),
 .user-bubble .prose :deep(pre) {
-  background: rgba(0,0,0,0.25);
-  border-color: rgba(255,255,255,0.15);
+  background: rgba(0, 0, 0, 0.22);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.92);
 }
 
 /* ── Thinking panel ──────────────────────────────────────────────────────── */
 .thinking {
   margin-bottom: 10px;
   border-radius: var(--radius-sm, 5px);
-  background: rgba(0,0,0,0.2);
-  border: 1px solid var(--border, rgba(255,255,255,0.07));
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   font-size: 12px;
 }
 .thinking summary {
@@ -379,8 +416,16 @@ const formattedText = computed(() => {
   font-size: 12px;
   border: 1px solid;
 }
-.warning.high   { background: #1f1212; border-color: rgba(224,92,92,0.3); color: #f0b8b8; }
-.warning.medium { background: #1f1a12; border-color: rgba(224,179,92,0.3); color: #f0ddb8; }
+.warning.high {
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+  border-color: color-mix(in srgb, var(--error) 30%, transparent);
+  color: var(--error);
+}
+.warning.medium {
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+  color: var(--warn);
+}
 .warning-head {
   display: flex;
   align-items: center;

@@ -269,7 +269,13 @@ async def test_plan_gate_refuses_three_writes_without_plan(engine):
 
 
 @pytest.mark.asyncio
-async def test_plan_gate_passes_when_plan_set_is_in_workflow(engine):
+async def test_plan_gate_refuses_when_plan_set_mixed_with_writes(engine):
+    """The plan-approval gate runs AFTER a workflow finishes — so
+    if plan_set + write tools are in the same workflow, the user
+    sees write-approval modals BEFORE the plan. The runtime must
+    refuse this combination so the agent splits it into two turns:
+    plan first (gated for approval), then implementation.
+    """
     install(engine, StubLLM([
         StubLLM.workflow(wf_sequential(
             step("plan_set", {"tasks": ["a", "b"]}),
@@ -282,8 +288,11 @@ async def test_plan_gate_passes_when_plan_set_is_in_workflow(engine):
     events = await _drain(engine, "go")
     refusals = [e for e in events
                 if e["type"] == "tool_result" and e.get("error") == "plan_required"]
-    assert refusals == []
-    assert len(engine._files_written) == 3  # type: ignore[attr-defined]
+    # Refused: plan_set must be in its own workflow.
+    assert len(refusals) == 1
+    assert refusals[0]["result"]["reason"] == "plan_set_mixed_with_writes"
+    # No writes happened — the gate fired before the workflow ran.
+    assert engine._files_written == []  # type: ignore[attr-defined]
 
 
 # ── Plan nudge after writes ──────────────────────────────────────────────

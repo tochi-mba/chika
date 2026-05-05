@@ -37,15 +37,16 @@ from rich.text import Text
 
 @dataclass(frozen=True)
 class Theme:
-    """Colour tokens for the CLI. Mirrors the frontend palette."""
+    """Colour tokens for the CLI. Mirrors the v0 frontend palette so every
+    surface (Vue web app, extension popup, CLI) speaks the same vocabulary."""
 
-    accent:    str = "#9d7fff"      # purple — brand accent
+    accent:    str = "#6c63ff"      # canonical v0 accent (was #9d7fff)
     accent_2:  str = "#7c70ff"
     success:   str = "#3dd68c"
     error:     str = "#e05c5c"
     warn:      str = "#e0b35c"
-    muted:     str = "#6b6b85"
-    dim:       str = "#4f4f6a"
+    muted:     str = "#a8a8b8"      # v0 dark text-2 — was #6b6b85
+    dim:       str = "#6b6b85"      # v0 dark text-3 — was #4f4f6a
     text:      str = "#ededf2"
     thinking:  str = "italic #6b6b85"
 
@@ -889,9 +890,34 @@ class Renderer:
     def _on_retry_attempt(self, event: dict) -> None:
         a = event.get("attempt", 0)
         m = event.get("max", 0)
-        self._print_block(Text(
-            f"  {THEME.retry_glyph} retry {a}/{m}", style=THEME.warn,
-        ))
+        reason = event.get("reason") or ""
+        line = Text(f"  {THEME.retry_glyph} retry {a}/{m}", style=THEME.warn)
+        if reason:
+            line.append("  ")
+            line.append(_shorten(reason, 60), style=THEME.dim)
+        self._print_block(line)
+
+    def _on_condition_eval(self, event: dict) -> None:
+        """Show conditional branch decisions inline so the user sees
+        which path the workflow took (true/false or named branch).
+        """
+        result = event.get("result")
+        expr = event.get("expression") or event.get("step_id") or ""
+        if result is True:
+            glyph, style = "✓", THEME.success
+            label = "true"
+        elif result is False:
+            glyph, style = "✗", THEME.error
+            label = "false"
+        else:
+            glyph, style = "⑂", THEME.muted
+            label = str(result)
+        line = Text(f"  {glyph} ", style=style)
+        line.append(label, style=f"bold {style}")
+        if expr:
+            line.append("  ")
+            line.append(_shorten(str(expr), 60), style=THEME.dim)
+        self._print_block(line)
 
     def _on_compaction(self, event: dict) -> None:
         removed = event.get("removed", 0)
@@ -1003,6 +1029,37 @@ class Renderer:
         tool = event.get("tool", "?")
         msg = event.get("message", f"Approve {tool}?")
         self._print_block(Text(f"  ? {msg}", style=THEME.warn))
+
+    # ── Browser / extension events ────────────────────────────────────────
+
+    def _on_browser_watch_trigger(self, event: dict) -> None:
+        """A registered DOM watcher fired — surface what changed."""
+        name = event.get("event_name") or "watch"
+        data = event.get("data") or {}
+        sel  = data.get("selector") or ""
+        cur  = data.get("current")
+        prev = data.get("previous")
+        line = Text()
+        line.append(f"  {THEME.warn_glyph} watch fired: ", style=THEME.warn)
+        line.append(name, style=f"bold {THEME.text}")
+        if sel:
+            line.append("  ")
+            line.append(_shorten(sel, 60), style=THEME.dim)
+        if cur is not None or prev is not None:
+            line.append("  ")
+            if prev is not None:
+                line.append(_shorten(str(prev), 28), style=THEME.dim)
+                line.append(" → ", style=THEME.muted)
+            line.append(_shorten(str(cur), 28), style=THEME.text)
+        self._print_block(line)
+
+    def _on_extension_status(self, event: dict) -> None:
+        """Show when the Chrome extension pairs / unpairs."""
+        ok = bool(event.get("connected"))
+        glyph = "●" if ok else "○"
+        text = "extension paired" if ok else "extension disconnected"
+        style = THEME.accent if ok else THEME.dim
+        self._print_block(Text(f"  {glyph} {text}", style=style))
 
 
 # ── One-off renderers (used by slash commands) ─────────────────────────────

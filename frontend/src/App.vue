@@ -9,9 +9,11 @@
   <div class="app" v-show="profileUnlocked">
     <header class="header">
       <div class="brand">
-        <svg class="brand-logo" width="18" height="18" viewBox="0 0 24 24" fill="none">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="#6c63ff" stroke="#6c63ff" stroke-width="1.5" stroke-linejoin="round"/>
-        </svg>
+        <div class="brand-mark" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          </svg>
+        </div>
         <span class="brand-name">Chika</span>
       </div>
 
@@ -150,7 +152,7 @@
 
     <ApprovalModal
       :approvals="system.pendingApprovals"
-      @approve="(id, pwd) => approve(id, true, pwd)"
+      @approve="onApprove"
       @deny="id => approve(id, false, '')"
     />
 
@@ -223,22 +225,57 @@ const chats  = useChatsStore()
 const system = useSystemStore()
 const theme  = useThemeStore()
 
-// Apply/remove .light class on <html> so :root.light tokens take effect globally
+// Apply/remove .dark class on <html> so :root.dark tokens take effect
+// globally. Light is the BASE (no class) — matches the v0 design system
+// where light is the default and dark is opt-in via the .dark variant.
 watchEffect(() => {
-  document.documentElement.classList.toggle('light', !theme.isDark)
+  document.documentElement.classList.toggle('dark', theme.isDark)
 })
 
 const storedKey = localStorage.getItem('chika_api_key') || ''
 const { send, stop, reset, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat, patchSettings, connect } = useChika(storedKey)
+
+// Bridge ApprovalModal's emit signature to ``approve()``. The modal
+// emits a string (legacy password) OR an object (workspace ``{scope}``
+// or plan_review ``{action, feedback?, reason?}``). ``approve()``
+// detects both shapes — but only if we pass the object as its second
+// argument, NOT bury it inside ``password``. This was the bug behind
+// "Allow for session" silently being treated as a confirm + binary
+// approval; the scope field never made it onto the WS payload.
+function onApprove(id, payload) {
+  if (payload !== null && typeof payload === 'object') {
+    approve(id, payload)
+  } else {
+    approve(id, true, payload || '')
+  }
+}
 
 // ── Profile gate ──────────────────────────────────────────────────────────
 // We never default-load — the user must pick a profile (and pass its
 // password if set) before the chat surface mounts. localStorage caches
 // the choice for the rest of the browser session so refresh doesn't
 // re-prompt mid-task. Logging out (or clearing storage) re-opens the gate.
-const profileUnlocked = ref(
-  sessionStorage.getItem('chika_profile_unlocked') === '1',
-)
+function _shouldSkipProfileGate() {
+  // Three escape hatches, evaluated in order:
+  //   1. Persisted unlock from a previous gate sign-in (sessionStorage)
+  //   2. Test-only window flag set by Playwright's addInitScript
+  //   3. ``?skip_gate=1`` URL query param (no setup overhead, used by
+  //      Playwright tests as the most reliable bypass — addInitScript
+  //      timing was racing Vue's first ref-read on Chromium 130+).
+  try {
+    if (sessionStorage.getItem('chika_profile_unlocked') === '1') return true
+  } catch {/* SSR-safe */}
+  if (typeof window !== 'undefined' && window.__chikaProfileUnlocked === true) {
+    return true
+  }
+  try {
+    const qs = new URLSearchParams(window.location.search)
+    if (qs.get('skip_gate') === '1') return true
+  } catch {/* SSR-safe */}
+  return false
+}
+
+const profileUnlocked = ref(_shouldSkipProfileGate())
 function onProfileUnlocked(_profile) {
   sessionStorage.setItem('chika_profile_unlocked', '1')
   profileUnlocked.value = true
@@ -329,51 +366,63 @@ function openSettings(tab) {
 </script>
 
 <style>
-/* ── Design tokens — dark (default) ────────────────────────────────────── */
+/* ── Design tokens — light (default — matches OS prefers-color-scheme) ── */
+/*
+ * Tokens lifted verbatim from the v0 design system audit so every
+ * surface — Vue web app, extension popup, CLI Rich theme — speaks
+ * the same colour vocabulary. Light is the BASE; ``:root.dark``
+ * (and the App.vue watchEffect that toggles it) flips into dark
+ * mode. Aliases like ``--green``, ``--red``, ``--yellow`` and
+ * ``--accent-dim`` exist so prior components keep rendering — they
+ * resolve to the canonical v0 names.
+ */
 :root {
-  --bg:           #09090d;
-  --surface-0:    #050508;  /* terminal / always-dark areas */
-  --surface-1:    #111117;
-  --surface-2:    #18181f;
-  --surface-3:    #20202a;
-  --border:       rgba(255, 255, 255, 0.07);
-  --border-strong: rgba(255, 255, 255, 0.12);
-  --accent:       #6c63ff;
-  --accent-dim:   rgba(108, 99, 255, 0.15);
-  --text-1:       #ededf2;
-  --text-2:       #8888a2;
-  --text-3:       #4f4f6a;
-  --green:        #3dd68c;
-  --green-dim:    rgba(61, 214, 140, 0.12);
-  --red:          #e05c5c;
-  --red-dim:      rgba(224, 92, 92, 0.12);
-  --yellow:       #e0b35c;
-  --radius-sm:    5px;
-  --radius:       9px;
-  --radius-lg:    14px;
-  --ease:         cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-out:     cubic-bezier(0.0, 0, 0.2, 1);
-  --font-mono:    'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --bg:            #fafafb;
+  --surface-0:     #050508;        /* always-dark — terminals + code blocks */
+  --surface-1:     #ffffff;
+  --surface-2:     #f4f4f7;
+  --surface-3:     #e8e8ee;
+  --border:        rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --text-1:        #0e0e14;
+  --text-2:        #4a4a5c;
+  --text-3:        #8a8a9a;
+  --accent:        #6c63ff;
+  --accent-2:      #7c70ff;
+  --accent-dim:    rgba(108, 99, 255, 0.10);
+  --success:       #3dd68c;
+  --warn:          #e0b35c;
+  --error:         #e05c5c;
+  /* Legacy aliases — kept so older components don't need a sweep. */
+  --green:         var(--success);
+  --green-dim:     rgba(61, 214, 140, 0.10);
+  --red:           var(--error);
+  --red-dim:       rgba(224, 92, 92, 0.10);
+  --yellow:        var(--warn);
+
+  --radius-sm:     6px;
+  --radius:        10px;
+  --radius-lg:     14px;
+  --spring:        cubic-bezier(0.16, 1, 0.3, 1);
+  --ease:          var(--spring);
+  --ease-out:      cubic-bezier(0.0, 0, 0.2, 1);
+  --font-mono:     'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
 }
 
-/* ── Light mode overrides ───────────────────────────────────────────────── */
-:root.light {
-  --bg:            #f5f5f8;
-  /* surface-0 intentionally stays dark — used for terminals and code */
-  --surface-1:     #ffffff;
-  --surface-2:     #f0f0f5;
-  --surface-3:     #e7e7ed;
-  --border:        rgba(0, 0, 0, 0.08);
-  --border-strong: rgba(0, 0, 0, 0.15);
-  --accent-dim:    rgba(108, 99, 255, 0.09);
-  --text-1:        #111124;
-  --text-2:        #52526e;
-  --text-3:        #9898b2;
-  --green:         #1a9652;
-  --green-dim:     rgba(26, 150, 82, 0.1);
-  --red:           #c43434;
-  --red-dim:       rgba(196, 52, 52, 0.1);
-  --yellow:        #a07020;
+/* ── Dark mode (default for users with a dark OS preference) ─────────── */
+:root.dark {
+  --bg:            #0e0e14;
+  --surface-1:     #161620;
+  --surface-2:     #1f1f2c;
+  --surface-3:     #2a2a38;
+  --border:        rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text-1:        #ededf2;
+  --text-2:        #a8a8b8;
+  --text-3:        #6b6b85;
+  --accent-dim:    rgba(108, 99, 255, 0.16);
+  --green-dim:     rgba(61, 214, 140, 0.14);
+  --red-dim:       rgba(224, 92, 92, 0.14);
 }
 </style>
 
@@ -392,24 +441,37 @@ function openSettings(tab) {
   display: flex;
   align-items: center;
   padding: 0 16px;
-  height: 46px;
+  height: 52px;
   background: var(--surface-1);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  gap: 12px;
+  gap: 14px;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
   flex-shrink: 0;
 }
-.brand-logo { flex-shrink: 0; }
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  transition: background 160ms var(--spring);
+}
+.brand:hover .brand-mark {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
 .brand-name {
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.015em;
   color: var(--text-1);
 }
 
@@ -454,17 +516,17 @@ function openSettings(tab) {
 }
 
 .icon-btn {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   background: none;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   color: var(--text-2);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 150ms, background 150ms;
+  transition: color 150ms var(--spring), background 150ms var(--spring);
   padding: 0;
   flex-shrink: 0;
 }

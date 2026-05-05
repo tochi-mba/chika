@@ -1,0 +1,7 @@
+───────────────────────────────────────────────  wf  ───────────────────────────────────────────────
+⏺ memory_persist  name="user_role", description="User is a senior data scientist", type="user", body="User is a data scientist focused on observability."
+  ⎿ {
+      "saved": true,
+      "name": "user_role"
+    }  (8ms)
+────────────────────────────────────────────────────────────────────────────────────────────────────

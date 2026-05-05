@@ -2,7 +2,7 @@
   "auto_continue": "off",
   "autonomy": "supervised",
   "tool_permissions": {},
-  "pet_speech": "off",
-  "pet_speech_tokens": 40,
+  "pet_speech": "on",
+  "pet_speech_tokens": 200,
   "auto_continue_max": 10
 }

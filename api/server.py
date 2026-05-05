@@ -19,11 +19,22 @@ from pathlib import Path
 # uvicorn on Windows defaults to the Selector event loop, which does NOT
 # support subprocess creation. asyncio.create_subprocess_shell then raises
 # `NotImplementedError` on EVERY shell_exec call from a WebSocket handler.
+#
+# Both ``set_event_loop_policy`` and ``WindowsProactorEventLoopPolicy``
+# are deprecated in Python 3.14+ and slated for removal in 3.16. The
+# replacement is to pass a ``loop_factory`` to ``asyncio.Runner`` /
+# ``asyncio.run``, but uvicorn manages its own loop lifecycle and
+# doesn't expose a factory hook — so we still need the policy call
+# until uvicorn ships a forward-compat option. Silence the warning so
+# CI logs stay clean; revisit when we bump uvicorn or Python ≥ 3.16.
 if sys.platform == "win32":
-    try:
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    except Exception:
-        pass
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        except Exception:
+            pass
 
 from fastapi import FastAPI, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -286,6 +297,19 @@ async def websocket_endpoint(
                     "reason": response.get("reason") or "",
                 }
 
+            # plan_review approvals carry a structured action +
+            # feedback the engine's _request_plan_approval consumes.
+            if actual_type == "plan_review":
+                action = (response.get("action") or
+                          ("approve" if response.get("approved") else "deny")).lower()
+                if action not in ("approve", "edit", "deny"):
+                    action = "deny"
+                return {
+                    "action":   action,
+                    "feedback": response.get("feedback") or "",
+                    "reason":   response.get("reason") or "",
+                }
+
             if not response.get("approved", False):
                 return False
 
@@ -405,9 +429,15 @@ async def websocket_endpoint(
                             "password": str(msg.get("password", "")),
                             # Workspace-scope: carries the user's
                             # session/once/deny choice through to the
-                            # WorkspacePolicy. Other approval types
-                            # ignore this field.
+                            # WorkspacePolicy.
                             "scope":    str(msg.get("scope", "")),
+                            # plan_review: action + (feedback | reason).
+                            # Approval handler unpacks these into the
+                            # ``{action, feedback, reason}`` dict the
+                            # engine's _request_plan_approval expects.
+                            "action":   str(msg.get("action", "")),
+                            "feedback": str(msg.get("feedback", "")),
+                            "reason":   str(msg.get("reason", "")),
                         })
 
                 elif mtype == "user_question_response":

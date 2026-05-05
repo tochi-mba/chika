@@ -93,26 +93,28 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 <style scoped>
 .input-bar {
   flex-shrink: 0;
-  padding: 10px 16px 14px;
-  background: var(--bg, #09090d);
-  border-top: 1px solid var(--border, rgba(255,255,255,0.07));
+  padding: 12px 16px 16px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
 }
 
 .input-box {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  background: var(--surface-1, #111117);
-  border: 1.5px solid var(--border, rgba(255,255,255,0.07));
-  border-radius: var(--radius-lg, 14px);
-  padding: 9px 10px 9px 14px;
-  transition: border-color 180ms var(--ease, cubic-bezier(0.16, 1, 0.3, 1)),
-              box-shadow 180ms var(--ease, cubic-bezier(0.16, 1, 0.3, 1));
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 10px 10px 14px;
+  transition: border-color 180ms var(--spring),
+              box-shadow 180ms var(--spring);
 }
 
+.input-box:hover { border-color: var(--border-strong); }
+
 .input-box.focused {
-  border-color: var(--accent, #6c63ff);
-  box-shadow: 0 0 0 3px var(--accent-dim, rgba(108,99,255,0.15));
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
 .input-box.disabled {
@@ -146,53 +148,54 @@ textarea:disabled {
 .send-btn {
   width: 34px;
   height: 34px;
-  border-radius: var(--radius, 9px);
+  border-radius: 9px;
   border: none;
-  background: var(--accent, #6c63ff);
+  background: var(--accent);
   color: #fff;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 150ms, opacity 150ms, transform 100ms;
+  transition: background 150ms var(--spring), transform 100ms var(--spring);
 }
 
-.send-btn:not(:disabled):hover { background: #7c74ff; }
+.send-btn:not(:disabled):hover { background: var(--accent-2); }
 .send-btn:not(:disabled):active { transform: scale(0.93); }
 .send-btn:disabled {
-  background: var(--surface-3, #20202a);
-  color: var(--text-3, #4f4f6a);
+  background: var(--surface-2);
+  color: var(--text-3);
   cursor: not-allowed;
 }
 
 .stop-btn {
   width: 34px;
   height: 34px;
-  border-radius: var(--radius, 9px);
-  border: 1.5px solid var(--border, rgba(255,255,255,0.12));
-  background: var(--surface-2, #18181f);
-  color: var(--text-2, #a0a0b8);
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 150ms, color 150ms, transform 100ms;
+  transition: all 150ms var(--spring);
 }
 
 .stop-btn:hover {
-  background: var(--surface-3, #20202a);
-  color: var(--text-1, #ededf2);
+  border-color: var(--error);
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 8%, transparent);
 }
 
 .stop-btn:active { transform: scale(0.93); }
 
 .input-hint {
-  margin-top: 5px;
+  margin-top: 6px;
   padding-left: 4px;
   font-size: 11px;
-  color: var(--text-3, #4f4f6a);
+  color: var(--text-3);
   user-select: none;
 }
 </style>

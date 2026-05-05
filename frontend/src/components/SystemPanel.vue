@@ -138,8 +138,8 @@ function fmtTs(ts) {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--surface-1, #111117);
-  border-left: 1px solid var(--border, rgba(255,255,255,0.07));
+  background: var(--surface-1);
+  border-left: 1px solid var(--border);
   min-width: 0;
 }
 
@@ -147,7 +147,7 @@ function fmtTs(ts) {
 .panel-header {
   display: flex;
   align-items: stretch;
-  border-bottom: 1px solid var(--border, rgba(255,255,255,0.07));
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -162,28 +162,31 @@ function fmtTs(ts) {
 .tab {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 9px 11px;
+  gap: 6px;
+  padding: 11px 13px;
   font-size: 12px;
   font-family: inherit;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: var(--text-3, #4f4f6a);
+  margin-bottom: -1px;
+  color: var(--text-2);
   cursor: pointer;
   white-space: nowrap;
-  transition: color 150ms, border-color 150ms;
+  transition: color 150ms var(--spring), border-color 150ms var(--spring);
 }
-.tab:hover    { color: var(--text-2, #8888a2); }
-.tab.active   { color: var(--text-1, #ededf2); border-bottom-color: var(--accent, #6c63ff); }
+.tab:hover    { color: var(--text-1); }
+.tab.active   { color: var(--accent); border-bottom-color: var(--accent); }
 
 .tab-count {
   font-size: 10px;
-  padding: 1px 5px;
-  background: var(--surface-3, #20202a);
+  padding: 1px 6px;
+  background: var(--accent-dim);
   border-radius: 999px;
-  color: var(--text-2, #8888a2);
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }
 
 .collapse-btn {
@@ -191,8 +194,8 @@ function fmtTs(ts) {
   width: 38px;
   background: none;
   border: none;
-  border-left: 1px solid var(--border, rgba(255,255,255,0.07));
-  color: var(--text-3, #4f4f6a);
+  border-left: 1px solid var(--border);
+  color: var(--text-3);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -200,87 +203,92 @@ function fmtTs(ts) {
   transition: color 150ms, background 150ms;
 }
 .collapse-btn:hover {
-  color: var(--text-2, #8888a2);
-  background: var(--surface-2, #18181f);
+  color: var(--text-1);
+  background: var(--surface-2);
 }
 
 /* ── Panel body ──────────────────────────────────────────────────────────── */
 .panel-body {
   flex: 1;
   overflow-y: auto;
-  padding: 6px;
+  padding: 0;
 }
 
 .empty-hint {
   text-align: center;
-  color: var(--text-3, #4f4f6a);
-  font-size: 12px;
-  padding: 28px 16px;
+  color: var(--text-3);
+  font-size: 13px;
+  padding: 32px 16px;
 }
 
 /* ── Event rows ──────────────────────────────────────────────────────────── */
 .event-row {
   display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  padding: 3px 5px;
-  border-radius: var(--radius-sm, 5px);
-  font-size: 11px;
-  line-height: 1.45;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+  line-height: 1.4;
   cursor: default;
+  transition: background 120ms;
 }
-.event-row:hover { background: var(--surface-2, #18181f); }
+.event-row:last-child { border-bottom: none; }
+.event-row:hover { background: var(--surface-2); }
 
 .ev-type {
-  font-family: var(--font-mono, monospace);
-  color: var(--accent, #6c63ff);
+  font-family: var(--font-mono);
+  color: var(--accent);
   width: 116px;
   flex-shrink: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 11px;
 }
 .ev-preview {
   flex: 1;
-  color: var(--text-2, #8888a2);
+  color: var(--text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .ev-ts {
-  color: var(--text-3, #4f4f6a);
-  font-family: var(--font-mono, monospace);
+  color: var(--text-3);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  font-size: 11px;
   width: 78px;
   text-align: right;
   flex-shrink: 0;
 }
 
-/* Type-specific colours */
-.event-row.tool_call     .ev-type { color: #d0a060; }
-.event-row.tool_result   .ev-type { color: var(--green, #3dd68c); }
-.event-row.error         .ev-type { color: var(--red, #e05c5c); }
-.event-row.workflow_start .ev-type { color: #60a0ff; }
-.event-row.token         .ev-type { color: var(--text-3, #4f4f6a); }
-.event-row.variable_set  .ev-type { color: #c080d0; }
-.event-row.memory_update .ev-type { color: #80d0a0; }
-.event-row.shell_process_start .ev-type { color: var(--green, #3dd68c); }
-.event-row.shell_output        .ev-type { color: #668877; }
-.event-row.shell_process_done  .ev-type { color: var(--text-3, #4f4f6a); }
-.event-row.approval_required      .ev-type { color: var(--yellow, #e0b35c); }
-.event-row.browser_watch_trigger  .ev-type { color: var(--yellow, #e0b35c); }
-.event-row.extension_status       .ev-type { color: #9d7fff; }
+/* Type-specific colours — v0 palette only (success/warn/error/accent/text-3) */
+.event-row.tool_call     .ev-type { color: var(--warn); }
+.event-row.tool_result   .ev-type { color: var(--success); }
+.event-row.error         .ev-type { color: var(--error); }
+.event-row.workflow_start .ev-type { color: var(--accent); }
+.event-row.token         .ev-type { color: var(--text-3); }
+.event-row.variable_set  .ev-type { color: var(--accent-2); }
+.event-row.memory_update .ev-type { color: var(--success); }
+.event-row.shell_process_start .ev-type { color: var(--success); }
+.event-row.shell_output        .ev-type { color: var(--text-3); }
+.event-row.shell_process_done  .ev-type { color: var(--text-3); }
+.event-row.approval_required      .ev-type { color: var(--warn); }
+.event-row.browser_watch_trigger  .ev-type { color: var(--warn); }
+.event-row.extension_status       .ev-type { color: var(--accent-2); }
 
 /* ── Raw JSON ─────────────────────────────────────────────────────────────── */
-.raw-panel { background: rgba(0,0,0,0.2); }
+.raw-panel { background: var(--surface-2); padding: 0; }
 .raw-line {
-  font-family: var(--font-mono, monospace);
-  font-size: 10px;
-  color: var(--text-3, #4f4f6a);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
   white-space: pre-wrap;
   word-break: break-all;
-  border-bottom: 1px solid var(--border, rgba(255,255,255,0.07));
-  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+  padding: 6px 14px;
+  margin: 0;
 }
-.raw-line:hover { color: var(--text-2, #8888a2); }
+.raw-line:hover { color: var(--text-2); background: var(--surface-1); }
 </style>

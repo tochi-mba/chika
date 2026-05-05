@@ -1,22 +1,52 @@
 <template>
-  <div class="row" :class="{ live, 'is-skill-load': isSkillLoad, 'is-pending': isPending }">
+  <!-- v0 tool-block card for tool_call / tool_result -->
+  <div
+    v-if="isToolEvent"
+    class="tool-block"
+    :class="{
+      'is-pending': isPending,
+      'is-error': isErrorResult,
+      'is-success': isSuccessResult,
+      'is-skill-load': isSkillLoad,
+    }"
+  >
+    <div class="tool-head">
+      <div class="tool-head-left">
+        <span class="status-dot" :class="dotStateClass" />
+        <span class="tool-name">{{ toolName }}</span>
+        <span v-if="skillBadge" class="skill-badge">{{ skillBadge }}</span>
+      </div>
+      <div class="tool-head-right">
+        <span v-if="isPending" class="mini-spinner" aria-label="running" />
+        <span v-if="isPending && elapsedLabel" class="elapsed">{{ elapsedLabel }}</span>
+        <span v-else-if="resultSummary" class="result-summary">{{ resultSummary }}</span>
+      </div>
+    </div>
+
+    <div v-if="argPills.length" class="arg-pills">
+      <div v-for="p in argPills" :key="p.key" class="arg-pill">
+        <span class="arg-key">{{ p.key }}=</span>
+        <span class="arg-val">{{ p.value }}</span>
+      </div>
+    </div>
+
+    <details v-if="hasDetails" class="tool-details">
+      <summary class="tool-details-toggle">{{ detailsLabel }}</summary>
+      <pre class="tool-pre" :class="{ 'is-error-pre': isErrorResult }">{{ detailsContent }}</pre>
+    </details>
+  </div>
+
+  <!-- Lightweight inline row for non-tool events (workflow/step/loop/etc) -->
+  <div v-else class="row" :class="{ live }">
     <div class="row-icon">
-      <span v-if="isPending" class="spinner" aria-label="running" />
-      <span v-else-if="isSkillLoad" class="glyph skill-glyph">📚</span>
-      <span v-else-if="isDot" class="dot" :class="dotClass" />
-      <span v-else class="glyph">{{ glyph }}</span>
+      <span v-if="isDot" class="dot" :class="dotClass" />
+      <span v-else class="glyph" :class="glyphColorClass">{{ glyph }}</span>
     </div>
     <div class="row-body">
       <div class="row-head">
-        <span class="row-label" :class="{ bold: event.type === 'tool_call' || isSkillLoad }">{{ label }}</span>
+        <span class="row-label">{{ label }}</span>
         <span v-if="subtext" class="row-sub">{{ subtext }}</span>
-        <span v-if="skillBadge" class="skill-badge">{{ skillBadge }}</span>
-        <span v-if="isPending && elapsedLabel" class="elapsed">{{ elapsedLabel }}</span>
       </div>
-      <details v-if="hasDetails" class="row-details">
-        <summary class="row-details-toggle">{{ detailsLabel }}</summary>
-        <pre class="row-pre">{{ detailsContent }}</pre>
-      </details>
     </div>
   </div>
 </template>
@@ -29,15 +59,22 @@ const props = defineProps({
   live:  { type: Boolean, default: false },
 })
 
-// In-flight tool_call → render a spinner + elapsed-time badge.
-// chat.js marks tool_call events `pending: true` and flips them to false
-// when the matching tool_result lands (same step_id).
+const isToolEvent = computed(() =>
+  props.event.type === 'tool_call' || props.event.type === 'tool_result'
+)
+
 const isPending = computed(() =>
   props.event.type === 'tool_call' && props.event.pending === true
 )
 
-// Elapsed-time ticker — only runs while this row is pending so we don't
-// burn rAFs on completed rows.
+const isErrorResult = computed(() =>
+  props.event.type === 'tool_result' && !!props.event.error
+)
+
+const isSuccessResult = computed(() =>
+  props.event.type === 'tool_result' && !props.event.error
+)
+
 const _now = ref(Date.now())
 let _timer = null
 onMounted(() => {
@@ -55,14 +92,10 @@ const elapsedLabel = computed(() => {
   return `${m}m ${String(s).padStart(2, '0')}s`
 })
 
-// ── Icon logic ────────────────────────────────────────────────────────────────
-
 const isDot = computed(() =>
   props.event.type === 'step_start' || props.event.type === 'step_done'
 )
 
-// Surface skill_load events distinctly so the user can audit how often
-// the agent consults SKILL.md docs vs. winging it.
 const isSkillLoad = computed(() => {
   const e = props.event
   return (e.type === 'tool_call' && e.tool === 'skill_load')
@@ -76,13 +109,20 @@ const skillBadge = computed(() => {
   }
   if (e.type === 'tool_result' && e.tool === 'skill_load' && !e.error) {
     const r = e.result || {}
-    const condensed = r.condensed ? '  · condensed' : '  · verbatim'
+    const condensed = r.condensed ? 'condensed' : 'verbatim'
     const chars = typeof r.char_count === 'number'
-      ? `  · ${r.char_count.toLocaleString()} chars`
+      ? `${r.char_count.toLocaleString()} chars · `
       : ''
-    return `${r.skill || '?'}${chars}${condensed}`
+    return `${r.skill || '?'} · ${chars}${condensed}`
   }
   return null
+})
+
+const dotStateClass = computed(() => {
+  if (isPending.value) return 'dot-pending'
+  if (isErrorResult.value) return 'dot-error'
+  if (isSuccessResult.value) return 'dot-success'
+  return 'dot-neutral'
 })
 
 const dotClass = computed(() => ({
@@ -94,8 +134,6 @@ const glyph = computed(() => {
   switch (props.event.type) {
     case 'workflow_start':         return '◫'
     case 'workflow_done':          return '⚑'
-    case 'tool_call':              return '⚙'
-    case 'tool_result':            return props.event.error ? '✕' : '✓'
     case 'loop_iteration':         return '↺'
     case 'condition_eval':         return '⑂'
     case 'variable_set':           return '$'
@@ -105,13 +143,16 @@ const glyph = computed(() => {
 })
 
 const glyphColorClass = computed(() => {
-  if (props.event.type === 'tool_result') {
-    return props.event.error ? 'red' : 'green'
-  }
+  if (props.event.type === 'workflow_done') return 'is-success'
   return ''
 })
 
-// ── Label / subtext ───────────────────────────────────────────────────────────
+const toolName = computed(() => {
+  const e = props.event
+  if (e.type === 'tool_call')   return e.tool || e.step_id || 'tool'
+  if (e.type === 'tool_result') return e.tool || e.step_id || 'result'
+  return ''
+})
 
 const label = computed(() => {
   const e = props.event
@@ -120,10 +161,6 @@ const label = computed(() => {
     case 'workflow_done':          return 'workflow complete'
     case 'step_start':             return e.step_id || 'step'
     case 'step_done':              return e.step_id || 'step'
-    case 'tool_call':
-      return e.tool === 'skill_load' ? 'skill_load' : (e.tool || e.step_id || 'tool')
-    case 'tool_result':
-      return e.tool === 'skill_load' ? 'skill loaded' : (e.step_id || 'result')
     case 'loop_iteration':         return `iteration ${e.iteration ?? '?'}`
     case 'condition_eval':         return e.step_id || 'condition'
     case 'variable_set':           return `$${e.name || '?'}`
@@ -138,9 +175,6 @@ const subtext = computed(() => {
     case 'workflow_start':         return e.step_count ? `${e.step_count} steps` : null
     case 'step_start':             return e.step_type || null
     case 'step_done':              return e.step_type || null
-    case 'tool_result':            return e.error
-      ? truncate(e.error, 80)
-      : e.result != null ? truncate(JSON.stringify(e.result), 80) : null
     case 'loop_iteration':         return e.max != null ? `of ${e.max}` : null
     case 'condition_eval':         return e.result === true ? 'true' : e.result === false ? 'false' : null
     case 'variable_set':           return e.value != null ? truncate(JSON.stringify(e.value), 60) : null
@@ -151,16 +185,38 @@ const subtext = computed(() => {
   }
 })
 
-// ── Expandable details (args for tool_call, full result for tool_result) ──────
+const argPills = computed(() => {
+  const e = props.event
+  if (e.type !== 'tool_call' || !e.args) return []
+  const out = []
+  for (const [k, v] of Object.entries(e.args)) {
+    if (v == null) continue
+    let s
+    if (typeof v === 'string') s = v
+    else if (typeof v === 'number' || typeof v === 'boolean') s = String(v)
+    else { try { s = JSON.stringify(v) } catch { s = String(v) } }
+    out.push({ key: k, value: `"${truncate(s, 60)}"` })
+    if (out.length >= 4) break
+  }
+  return out
+})
+
+const resultSummary = computed(() => {
+  const e = props.event
+  if (e.type !== 'tool_result') return null
+  if (e.error) return truncate(e.error, 60)
+  if (e.result == null) return 'ok'
+  try { return truncate(JSON.stringify(e.result), 60) } catch { return 'ok' }
+})
 
 const hasDetails = computed(() => {
   const e = props.event
-  return (e.type === 'tool_call' && e.args != null) ||
+  return (e.type === 'tool_call' && e.args != null && Object.keys(e.args).length > 0) ||
          (e.type === 'tool_result' && (e.result != null || e.error != null))
 })
 
 const detailsLabel = computed(() => {
-  return props.event.type === 'tool_call' ? 'args' : 'result'
+  return props.event.type === 'tool_call' ? 'view args' : 'view result'
 })
 
 const detailsContent = computed(() => {
@@ -169,8 +225,6 @@ const detailsContent = computed(() => {
   if (e.type === 'tool_result') return e.error || fmtJson(e.result)
   return ''
 })
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function truncate(s, n) {
   if (!s) return ''
@@ -185,154 +239,92 @@ function fmtJson(v) {
 </script>
 
 <style scoped>
-.row {
+/* ── v0 tool-block card ─────────────────────────────────────────────── */
+.tool-block {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 4px 0;
-  transition: opacity 150ms;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 4px 0;
+  transition: border-color 160ms var(--spring);
+}
+.tool-block:hover { border-color: var(--border-strong); }
+.tool-block.is-error { border-color: color-mix(in srgb, var(--error) 35%, var(--border)); }
+.tool-block.is-skill-load {
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
 }
 
-/* Icon column */
-.row-icon {
-  width: 18px;
-  flex-shrink: 0;
+.tool-head {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding-top: 2px;
-}
-
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-3, #4f4f6a);
-  flex-shrink: 0;
-}
-.dot.dot-done {
-  background: var(--green, #3dd68c);
-}
-.dot.dot-live {
-  background: var(--accent, #6c63ff);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.35; }
-}
-
-.glyph {
-  font-size: 11px;
-  color: var(--text-3, #4f4f6a);
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-  line-height: 1;
-  user-select: none;
-}
-
-/* Color overrides per event type */
-.row[data-type="tool_result-ok"] .glyph   { color: var(--green, #3dd68c); }
-.row[data-type="tool_result-err"] .glyph  { color: var(--red, #e05c5c); }
-
-/* Body column */
-.row-body {
-  flex: 1;
+  justify-content: space-between;
+  gap: 8px;
   min-width: 0;
 }
-
-.row-head {
+.tool-head-left {
   display: flex;
-  align-items: baseline;
-  gap: 7px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.tool-head-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
-.row-label {
-  font-size: 12.5px;
-  color: var(--text-2, #8888a2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+  flex-shrink: 0;
 }
-.row-label.bold {
-  color: var(--text-1, #ededf2);
-  font-weight: 500;
+.status-dot.dot-pending {
+  background: var(--accent);
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+.status-dot.dot-success { background: var(--success); }
+.status-dot.dot-error   { background: var(--error); }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.85); }
+}
+
+.tool-name {
   font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
   font-size: 12px;
-}
-
-.row-sub {
-  font-size: 11px;
-  color: var(--text-3, #4f4f6a);
+  color: var(--accent);
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 200px;
+  letter-spacing: -0.01em;
 }
 
-/* Expandable args/result */
-.row-details {
-  margin-top: 4px;
-}
-
-.row-details-toggle {
-  list-style: none;
-  font-size: 11px;
-  color: var(--text-3, #4f4f6a);
-  cursor: pointer;
-  user-select: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 0;
-  transition: color 120ms;
-}
-.row-details-toggle::-webkit-details-marker { display: none; }
-.row-details-toggle::before {
-  content: '›';
-  display: inline-block;
-  font-size: 13px;
-  line-height: 1;
-  transition: transform 150ms var(--ease, cubic-bezier(0.16, 1, 0.3, 1));
-}
-details[open] .row-details-toggle::before {
-  transform: rotate(90deg);
-}
-.row-details-toggle:hover { color: var(--text-2, #8888a2); }
-
-.row-pre {
-  margin-top: 5px;
-  background: var(--surface-3, #20202a);
-  border: 1px solid var(--border, rgba(255,255,255,0.07));
-  border-radius: var(--radius-sm, 5px);
-  padding: 8px 10px;
+.skill-badge {
   font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-  font-size: 11px;
-  color: var(--text-2, #8888a2);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 180px;
-  overflow-y: auto;
-  line-height: 1.55;
+  font-size: 10.5px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
-/* Live row highlight */
-.row.live .row-label {
-  color: var(--text-1, #ededf2);
-}
-
-/* In-flight tool — animated spinner + elapsed-time badge so the user
-   sees what's running in the gap between tool_call and tool_result. */
-.row.is-pending .row-label {
-  color: var(--text-1, #ededf2);
-  font-weight: 600;
-}
-.spinner {
+.mini-spinner {
   display: inline-block;
   width: 11px;
   height: 11px;
-  border: 1.5px solid var(--accent, #6c63ff);
+  border: 1.5px solid var(--text-3);
   border-top-color: transparent;
   border-radius: 50%;
   animation: spinner-rotate 0.8s linear infinite;
@@ -341,43 +333,159 @@ details[open] .row-details-toggle::before {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+
 .elapsed {
-  font-size: 10.5px;
-  color: var(--accent, #6c63ff);
-  background: var(--accent-dim, rgba(108, 99, 255, 0.10));
-  padding: 1px 6px;
-  border-radius: 999px;
-  margin-left: 8px;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  letter-spacing: 0;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-3);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-/* skill_load — distinct so the user can audit how often the agent consults
-   SKILL.md docs vs. acting from prompt-only memory. */
-.row.is-skill-load {
-  background: var(--accent-dim, rgba(108, 99, 255, 0.08));
-  border-left: 2px solid var(--accent, #6c63ff);
+.result-summary {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.tool-block.is-error .result-summary { color: var(--error); }
+
+/* Argument pills */
+.arg-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.arg-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  background: var(--surface-2);
   border-radius: 4px;
-  padding: 2px 6px;
-  margin: 2px 0;
+  max-width: 100%;
 }
-.row.is-skill-load .row-label {
-  color: var(--accent, #6c63ff);
+.arg-key {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-3);
 }
-.glyph.skill-glyph {
-  font-size: 14px;
+.arg-val {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 360px;
+}
+
+/* Expandable details */
+.tool-details { margin-top: 2px; }
+
+.tool-details-toggle {
+  list-style: none;
+  font-size: 11px;
+  color: var(--text-3);
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 0;
+  transition: color 120ms;
+}
+.tool-details-toggle::-webkit-details-marker { display: none; }
+.tool-details-toggle::before {
+  content: '›';
+  display: inline-block;
+  font-size: 13px;
   line-height: 1;
+  transition: transform 150ms var(--spring);
 }
-.skill-badge {
-  font-size: 10.5px;
-  color: var(--accent, #6c63ff);
-  background: var(--accent-dim, rgba(108, 99, 255, 0.12));
-  padding: 1px 6px;
-  border-radius: 3px;
-  margin-left: 6px;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  letter-spacing: -0.01em;
+details[open] .tool-details-toggle::before { transform: rotate(90deg); }
+.tool-details-toggle:hover { color: var(--text-2); }
+
+.tool-pre {
+  margin-top: 6px;
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow-y: auto;
+  line-height: 1.55;
 }
+.tool-pre.is-error-pre {
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+  color: var(--error);
+}
+
+/* ── Inline row (non-tool events) ───────────────────────────────────── */
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 4px 0;
+  transition: opacity 150ms;
+}
+.row-icon {
+  width: 18px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 2px;
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  flex-shrink: 0;
+}
+.dot.dot-done { background: var(--success); }
+.dot.dot-live {
+  background: var(--accent);
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+.glyph {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  line-height: 1;
+  user-select: none;
+}
+.glyph.is-success { color: var(--success); }
+
+.row-body { flex: 1; min-width: 0; }
+.row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.row-label {
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.row.live .row-label { color: var(--text-1); }
 </style>

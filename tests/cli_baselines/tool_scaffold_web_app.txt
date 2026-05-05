@@ -1,0 +1,8 @@
+───────────────────────────────────────────────  wf  ───────────────────────────────────────────────
+⏺ scaffold_web_app  stack="vite-react-ts", name="demo", target_dir="./projects/demo", install=true
+  ⎿ {
+      "path": "./projects/demo",
+      "deps_installed": 124,
+      "stack": "vite-react-ts"
+    }  (18000ms)
+────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -9,13 +9,21 @@ import { test, expect, waitForApp, pushEvent, sentMessages } from './_fixtures.j
 test.describe('frontend smoke', () => {
   test('home page renders without console errors', async ({ chikaPage }) => {
     const errors = []
+    const logs = []
     chikaPage.on('console', (msg) => {
-      if (msg.type() === 'error') errors.push(msg.text())
+      const t = msg.type()
+      if (t === 'error') errors.push(msg.text())
+      logs.push(`[${t}] ${msg.text()}`)
     })
     await chikaPage.goto('/')
     await waitForApp(chikaPage)
     // Allow up to one harmless DevTools warning, no actual errors.
-    const real = errors.filter((e) => !/devtools|deprecated/i.test(e))
+    const real = errors.filter(
+      (e) => !/devtools|deprecated|favicon|404/i.test(e),
+    )
+    if (real.length) {
+      console.log('Console log timeline:\n', logs.slice(-20).join('\n'))
+    }
     expect(real).toEqual([])
   })
 

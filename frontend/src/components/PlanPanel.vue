@@ -3,26 +3,30 @@
     <header class="plan-head">
       <button class="plan-toggle" @click="collapsed = !collapsed"
               :aria-label="collapsed ? 'Expand plan' : 'Collapse plan'">
-        <span class="plan-glyph">{{ collapsed ? '▸' : '▾' }}</span>
-        <span class="plan-title">Plan</span>
-        <span class="plan-progress">{{ doneLeaves }}/{{ totalLeaves }}</span>
-        <div class="plan-bar" :title="`${pct}% complete`">
-          <div class="plan-bar-fill" :style="{ width: pct + '%' }"/>
+        <div class="plan-icon" aria-hidden="true">P</div>
+        <div class="plan-meta">
+          <span class="plan-title">Plan</span>
+          <span class="plan-subtitle">{{ doneLeaves }}/{{ totalLeaves }} tasks</span>
         </div>
+        <div class="plan-bar-wrap" :title="`${pct}% complete`">
+          <div class="plan-bar"><div class="plan-bar-fill" :style="{ width: pct + '%' }"/></div>
+          <span class="plan-pct">{{ pct }}%</span>
+        </div>
+        <span class="plan-chevron" :class="{ open: !collapsed }">▾</span>
       </button>
 
       <div v-if="!collapsed" class="plan-actions">
-        <button class="plan-btn plan-btn-accept" @click="$emit('accept')"
-                title="Tell the agent the plan is good — proceed">
-          Accept
+        <button class="plan-btn plan-btn-reject" @click="$emit('reject')"
+                title="Reject this plan and ask the agent to start over">
+          ✕ Reject
         </button>
         <button class="plan-btn plan-btn-edit" @click="editing = true"
                 title="Send feedback to the agent so it tweaks the plan">
-          Edit
+          ✎ Edit
         </button>
-        <button class="plan-btn plan-btn-reject" @click="$emit('reject')"
-                title="Reject this plan and ask the agent to start over">
-          Reject
+        <button class="plan-btn plan-btn-accept" @click="$emit('accept')"
+                title="Tell the agent the plan is good — proceed">
+          ✓ Approve
         </button>
       </div>
     </header>
@@ -124,25 +128,28 @@ function submitEdit() {
 </script>
 
 <style scoped>
+/*
+ * Plan panel — v0 design system port. Header: P-avatar + title +
+ * progress bar + actions. Body: GOAL / REQUIREMENTS / TASKS sections
+ * with caps-spaced labels, comfortable whitespace, hairline dividers.
+ */
 .plan-panel {
-  background: var(--surface-1, #14141d);
-  border: 1px solid var(--border, rgba(255,255,255,0.08));
-  border-radius: var(--radius, 9px);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 14px;
   margin: 8px 12px;
   overflow: hidden;
   font-size: 13px;
-  transition: border-color 200ms;
+  transition: border-color 200ms var(--spring);
 }
-.plan-panel:hover {
-  border-color: var(--border-strong, rgba(255,255,255,0.15));
-}
+.plan-panel:hover { border-color: var(--border-strong); }
 
 .plan-head {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
 }
 .plan-panel.collapsed .plan-head { border-bottom: none; }
 
@@ -153,74 +160,147 @@ function submitEdit() {
   color: inherit;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   padding: 0;
   cursor: pointer;
   flex: 1;
   text-align: left;
   min-width: 0;
 }
-.plan-glyph { color: var(--text-3, #888); font-size: 11px; }
-.plan-title { font-weight: 600; color: var(--text-1, #ededf2); }
-.plan-progress {
-  font-family: var(--font-mono, ui-monospace, monospace);
+
+.plan-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.02em;
+}
+
+.plan-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.plan-title {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text-1);
+  letter-spacing: -0.005em;
+}
+.plan-subtitle {
   font-size: 11px;
-  color: var(--text-3, #888);
+  color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
+
+.plan-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  margin-right: 4px;
+}
 .plan-bar {
-  flex: 1;
-  height: 4px;
-  background: var(--surface-2, #1c1c28);
+  width: 96px;
+  height: 6px;
+  background: var(--surface-2);
   border-radius: 999px;
   overflow: hidden;
-  max-width: 240px;
 }
 .plan-bar-fill {
   height: 100%;
-  background: var(--accent, #6c63ff);
-  transition: width 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  background: var(--success);
+  transition: width 280ms var(--spring);
   border-radius: 999px;
+}
+.plan-pct {
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  min-width: 32px;
+  text-align: right;
+}
+.plan-chevron {
+  font-size: 11px;
+  color: var(--text-3);
+  transition: transform 200ms var(--spring);
+}
+.plan-chevron.open { transform: rotate(180deg); }
+@media (max-width: 640px) {
+  .plan-bar-wrap { display: none; }
 }
 
 .plan-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
 }
 .plan-btn {
-  background: none;
-  border: 1px solid var(--border, rgba(255,255,255,0.08));
-  color: var(--text-2, #8888a2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
   font: inherit;
-  font-size: 11.5px;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm, 5px);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: all 120ms;
+  transition: all 140ms var(--spring);
+  white-space: nowrap;
 }
-.plan-btn:hover { color: var(--text-1, #ededf2); border-color: var(--border-strong); }
-.plan-btn-accept { color: var(--green, #3dd68c); border-color: var(--green, #3dd68c); }
-.plan-btn-accept:hover { background: var(--green-dim, rgba(61, 214, 140, 0.12)); }
-.plan-btn-accept:disabled { opacity: 0.4; cursor: not-allowed; }
-.plan-btn-edit { color: var(--accent, #6c63ff); border-color: var(--accent, #6c63ff); }
-.plan-btn-edit:hover { background: var(--accent-dim, rgba(108, 99, 255, 0.12)); }
-.plan-btn-reject { color: var(--red, #e05c5c); border-color: var(--red, #e05c5c); }
-.plan-btn-reject:hover { background: var(--red-dim, rgba(224, 92, 92, 0.12)); }
+.plan-btn:hover {
+  color: var(--text-1);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.plan-btn-accept {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.plan-btn-accept:hover {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  color: #fff;
+}
+.plan-btn-accept:disabled { opacity: 0.5; cursor: not-allowed; }
+.plan-btn-edit { color: var(--accent); border-color: var(--accent); background: transparent; }
+.plan-btn-edit:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.plan-btn-reject {
+  color: var(--text-3);
+  border-color: var(--border);
+  background: transparent;
+}
+.plan-btn-reject:hover {
+  color: var(--error);
+  border-color: var(--error);
+  background: var(--red-dim);
+}
 
 .plan-body {
-  padding: 12px 14px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
 }
 .plan-label {
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--text-3, #888);
+  letter-spacing: 0.1em;
+  color: var(--text-3);
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  text-transform: uppercase;
 }
 
 .plan-goal p {

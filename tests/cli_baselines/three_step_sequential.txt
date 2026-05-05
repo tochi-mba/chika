@@ -1,0 +1,16 @@
+───────────────────────────────────────────────  wf  ───────────────────────────────────────────────
+  [sequential] seq
+⏺ file_read  path="main.py"
+  ⎿ {
+      "content": "x = 1"
+    }  (1ms)
+⏺ file_replace  path="main.py", old="x = 1", new="x = 2"
+  ⎿ {
+      "replacements": 1
+    }  (1ms)
+⏺ shell_exec  command="python main.py"
+  ⎿ {
+      "stdout": "2\n",
+      "exit_code": 0
+    }  (14ms)
+────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -1,12 +1,7 @@
 <template>
   <aside class="sidebar">
     <div class="sidebar-header">
-      <div class="wordmark">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="#6c63ff" stroke="#6c63ff" stroke-width="1" stroke-linejoin="round"/>
-        </svg>
-        <span class="wordmark-text">Chika</span>
-      </div>
+      <span class="header-label">Chats</span>
       <button class="new-btn" @click="$emit('new-chat')" title="New chat">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         New chat
@@ -65,15 +60,15 @@ function timeAgo(ts) {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--surface-1, #111117);
-  border-right: 1px solid var(--border, rgba(255,255,255,0.07));
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
   overflow: hidden;
 }
 
 /* ── Header ─────────────────────────────────────────────────────────────── */
 .sidebar-header {
-  padding: 14px 12px 10px;
-  border-bottom: 1px solid var(--border, rgba(255,255,255,0.07));
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -81,58 +76,56 @@ function timeAgo(ts) {
   gap: 8px;
 }
 
-.wordmark {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.wordmark-text {
-  font-size: 14px;
+.header-label {
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--text-1, #ededf2);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
 }
 
 .new-btn {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 5px 9px;
-  background: none;
-  border: 1px solid var(--border, rgba(255,255,255,0.07));
-  border-radius: var(--radius-sm, 5px);
-  color: var(--text-3, #4f4f6a);
+  padding: 5px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-2);
+  font: inherit;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  font-family: inherit;
-  transition: color 150ms, border-color 150ms;
+  transition: all 140ms var(--spring);
   white-space: nowrap;
 }
 .new-btn:hover {
-  color: var(--accent, #6c63ff);
-  border-color: var(--accent, #6c63ff);
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
 }
 
 /* ── Chat list ──────────────────────────────────────────────────────────── */
 .chat-list {
   flex: 1;
   overflow-y: auto;
-  padding: 6px 6px;
+  padding: 8px;
 }
 
 .chat-item {
   position: relative;
-  padding: 7px 8px;
-  border-radius: var(--radius-sm, 5px);
+  padding: 9px 10px;
+  border-radius: 8px;
   cursor: pointer;
-  margin-bottom: 1px;
-  transition: background 120ms;
+  margin-bottom: 2px;
+  transition: background 120ms var(--spring);
   border-left: 2px solid transparent;
 }
-.chat-item:hover { background: var(--surface-2, #18181f); }
+.chat-item:hover { background: var(--surface-2); }
 .chat-item.active {
-  background: var(--accent-dim, rgba(108,99,255,0.15));
-  border-left-color: var(--accent, #6c63ff);
+  background: var(--accent-dim);
+  border-left-color: var(--accent);
 }
 
 .chat-item-row {
@@ -144,7 +137,7 @@ function timeAgo(ts) {
 
 .chat-item-title {
   font-size: 13px;
-  color: var(--text-2, #8888a2);
+  color: var(--text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -153,12 +146,15 @@ function timeAgo(ts) {
   padding-right: 18px;
   line-height: 1.4;
 }
-.chat-item.active .chat-item-title { color: var(--text-1, #ededf2); }
-.chat-item:hover:not(.active) .chat-item-title { color: var(--text-1, #ededf2); }
+.chat-item.active .chat-item-title {
+  color: var(--accent);
+  font-weight: 500;
+}
+.chat-item:hover:not(.active) .chat-item-title { color: var(--text-1); }
 
 .chat-item-time {
   font-size: 11px;
-  color: var(--text-3, #4f4f6a);
+  color: var(--text-3);
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
@@ -175,7 +171,7 @@ function timeAgo(ts) {
   justify-content: center;
   background: none;
   border: none;
-  color: var(--text-3, #4f4f6a);
+  color: var(--text-3);
   cursor: pointer;
   border-radius: 4px;
   opacity: 0;
@@ -183,8 +179,8 @@ function timeAgo(ts) {
 }
 .chat-item:hover .delete-btn { opacity: 1; }
 .delete-btn:hover {
-  color: var(--red, #e05c5c);
-  background: rgba(224, 92, 92, 0.1);
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
 }
 
 /* ── Empty / loading ────────────────────────────────────────────────────── */
@@ -193,7 +189,7 @@ function timeAgo(ts) {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  color: var(--text-3, #4f4f6a);
+  font-size: 13px;
+  color: var(--text-3);
 }
 </style>

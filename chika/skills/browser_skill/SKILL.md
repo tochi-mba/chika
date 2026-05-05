@@ -265,6 +265,67 @@ For known pages, navigate directly to the right URL first:
 `browser_screenshot` is slow and expensive. Only use it if the user asks to
 see the screen, or if text extraction has completely failed after 2 attempts.
 
+**Rule 11 — Verify the action actually succeeded before reporting success.**
+After ANY write action (`browser_navigate`, `browser_click`, `browser_fill_input`,
+`spotify_play`, etc.) read the page state and confirm the outcome matches the
+user's intent. Saying "playing" when the page reads "This video isn't available
+anymore" is a hallucination that destroys user trust.
+
+The verification step is non-optional. Specifically:
+
+- After `browser_navigate` to a content URL: read the page (`browser_get_text`
+  or `browser_get_page_var`) and check it doesn't contain a failure marker.
+- After `browser_click` on a "play" / "submit" / "buy" / "send" button: read
+  the resulting page state for the success signal you'd expect (player UI,
+  confirmation message, URL change).
+- After `browser_fill_input` followed by submit: check for a success message
+  or that the URL changed away from the form.
+
+**Failure markers to scan for after any navigation or click — if ANY of these
+appears in the page text, the action FAILED. Do not claim success.**
+
+```
+"This video isn't available"
+"Video unavailable"
+"This content isn't available"
+"This page isn't available"
+"Sorry, something went wrong"
+"This account has been suspended"
+"This tweet was deleted"
+"Page Not Found"
+"404"
+"Error 410"
+"This video is private"
+"Video has been removed"
+"Live stream has ended"
+"Service unavailable"
+"Access denied"
+"removed by"
+"unavailable in your country"
+"region locked"
+"age-restricted"  (may need sign-in confirmation, not pure failure)
+```
+
+**What to do when a failure marker is detected:**
+
+1. **DO NOT** tell the user "playing" / "done" / "success".
+2. Tell them clearly what failed: e.g. "That YouTube video has been removed —
+   it's not playable. Want me to find a different video on the same topic?"
+3. If you can recover (e.g. "removed by uploader" → search for re-upload),
+   pivot to that with a new workflow. Otherwise stop and ask.
+
+**Anti-pattern this rule exists to prevent:**
+
+User: "play this YouTube video"
+Agent: navigates → page says "This video isn't available anymore" → reads
+       the text → ignores the warning → replies "Playing. Video's running
+       on the YouTube tab now." ← LIE.
+
+The page state is the single source of truth for whether the action worked.
+Don't infer success from the absence of an error code — many failures are
+soft (the navigate "succeeded" because Chrome loaded a 200 page that says
+"unavailable"). Only the page text tells the truth.
+
 ---
 
 ## Examples — these show the pattern, not just YouTube
@@ -499,7 +560,12 @@ Obstacle detected → recovery action:
 ```
 Detection: after navigate, call browser_get_text with no selector. If text contains any of
 ["Before you continue", "Accept cookies", "Sign in to continue", "Please verify", "Access denied",
-"403 Forbidden", "404 Not Found", "Just a moment"], apply the matching recovery action.
+"403 Forbidden", "404 Not Found", "Just a moment", "This video isn't available",
+"Video unavailable", "This content isn't available", "Page Not Found", "removed by",
+"This tweet was deleted", "Service unavailable"], apply the matching recovery action.
+
+For "content unavailable" markers specifically: don't try to recover — tell the user
+the content is gone and offer to find an alternative. Retrying the same URL won't help.
 
 **Pattern 11 — Infinite scroll / load-more pages:**
 Many feeds (Twitter, LinkedIn, Google News, Instagram, etc.) load content on scroll.

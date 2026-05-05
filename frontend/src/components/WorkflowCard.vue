@@ -60,55 +60,75 @@ const stepDone = computed(() => {
 
 <style scoped>
 .wf-card {
-  background: #161620;
-  border: 1px solid #2a2a35;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
+  margin: 8px 12px;
 }
 .wf-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  background: #1a1a26;
-  border-bottom: 1px solid #2a2a35;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
 }
-.wf-icon { font-size: 12px; }
-.wf-name { flex: 1; font-size: 13px; font-weight: 500; color: #d0d0e8; }
+.wf-icon {
+  font-size: 12px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+.wf-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-1);
+  letter-spacing: -0.01em;
+}
 .wf-status {
   font-size: 10px;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: 999px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
-.wf-status.running { background: #1a2a3a; color: #60a0ff; }
-.wf-status.done    { background: #1a2a1a; color: #60d080; }
+.wf-status.running {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.wf-status.done {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
+}
 
-.steps { padding: 6px 8px; }
+.steps { padding: 8px 10px; }
 
 .loop-iter {
   font-size: 11px;
-  color: #888;
-  padding: 3px 8px;
-  font-family: monospace;
+  color: var(--text-3);
+  padding: 4px 8px;
+  font-family: var(--font-mono);
 }
 .cond {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 8px;
+  padding: 4px 8px;
   font-size: 11px;
 }
-.cond-icon { font-family: monospace; color: #80d0a0; }
-.cond-expr { color: #888; font-family: monospace; }
+.cond-icon { font-family: var(--font-mono); color: var(--success); }
+.cond-expr { color: var(--text-3); font-family: var(--font-mono); }
 
 .var-set {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 8px;
+  padding: 4px 8px;
   font-size: 11px;
 }
-.var-name { font-family: monospace; color: #a8a0ff; flex: 1; }
-.var-type { color: #888; }
-.var-size { color: #555; }
+.var-name { font-family: var(--font-mono); color: var(--accent); flex: 1; }
+.var-type { color: var(--text-2); }
+.var-size { color: var(--text-3); font-variant-numeric: tabular-nums; }
 </style>

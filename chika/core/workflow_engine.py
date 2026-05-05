@@ -315,20 +315,53 @@ class WorkflowEngine:
         payload. The caller emits a synthetic ``tool_result`` so the
         LLM re-plans with ``plan_set`` first.
 
-        Two trigger conditions, either is enough:
+        Three trigger conditions, any one is enough:
 
-        1. **Project-creation tool** (``scaffold_web_app`` + similar) —
+        1. **plan_set mixed with write tools in the same workflow** —
+           refuse so the user can approve/edit the plan BEFORE write
+           tools run. Otherwise the user sees scaffold_web_app's
+           approval modal before they've even seen the plan.
+        2. **Project-creation tool** (``scaffold_web_app`` + similar) —
            always blocks without a plan, regardless of step count.
            This catches the "build me a clone" pattern that previously
            sneaked under the threshold.
-        2. **3+ write-class tool calls** — multi-step real work that
+        3. **3+ write-class tool calls** — multi-step real work that
            deserves a checklist. Single edits + scaffolding + verify
            bundles still skip the gate.
         """
         tools: list[str] = []
         self._collect_tool_names(workflow, tools)
 
-        # Agent is touching the plan in this very workflow — let it run.
+        # First gate: plan_set in the same workflow as write tools is a
+        # UX bug — the user MUST approve the plan before writes start.
+        if "plan_set" in tools:
+            mixed_writes = sorted({t for t in tools if t in self._WRITE_TOOLS})
+            if mixed_writes:
+                return {
+                    "error":         "plan_required",
+                    "reason":        "plan_set_mixed_with_writes",
+                    "write_count":   len(mixed_writes),
+                    "writes_used":   mixed_writes,
+                    "creation_tools": [
+                        t for t in mixed_writes if t in self._ALWAYS_REQUIRE_PLAN
+                    ],
+                    "hint": (
+                        "Workflow contains `plan_set` AND write-class tools "
+                        f"({mixed_writes}). The plan-approval gate runs "
+                        "AFTER a workflow finishes, so packing them together "
+                        "makes the user see write-tool approval prompts "
+                        "BEFORE they've seen the plan. Split into TWO "
+                        "workflows:\n"
+                        "  1. First workflow: ONLY `plan_set` (no other "
+                        "tools). The runtime will pause for user approval.\n"
+                        "  2. Second workflow (after approval): the actual "
+                        "implementation work, no plan_set.\n"
+                        "Re-emit just the plan_set call now."
+                    ),
+                }
+
+        # Other plan_* tools (update/add/remove/etc.) can co-exist with
+        # writes — those are progress ticks, not initial plan creation.
         if any(t in self._PLAN_GATE_EXEMPT for t in tools):
             return None
 

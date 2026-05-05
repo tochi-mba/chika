@@ -97,16 +97,14 @@ def test_two_write_workflow_is_NOT_refused():
     assert plan_refusal == []
 
 
-def test_workflow_with_plan_set_step_is_NOT_refused():
-    """The agent can break out of the gate by including plan_set in the
-    SAME workflow as the first step."""
+def test_workflow_with_plan_set_mixed_with_writes_IS_refused():
+    """plan_set + write tools in the same workflow is refused so the
+    user gets to approve/edit the plan BEFORE write-tool approval
+    modals fire. The plan-approval gate runs AFTER a workflow finishes,
+    so packing them together inverts the UX. The agent must split into
+    two workflows: plan first (gated for approval), then writes.
+    """
     eng = _build_engine()
-    # Register plan_set as a noop tool for this test.
-    eng._tools.register(ToolDefinition(
-        name="plan_set", description="x",
-        parameters={"type": "object", "properties": {}},
-        handler=lambda **_kw: asyncio.sleep(0, result={"ok": True})
-    ))
 
     async def _async_noop(**_kw):
         return {"ok": True}
@@ -123,6 +121,37 @@ def test_workflow_with_plan_set_step_is_NOT_refused():
             {"tool": "file_write", "id": "s1", "args": {}},
             {"tool": "shell_exec", "id": "s2", "args": {}},
             {"tool": "live_server","id": "s3", "args": {}},
+        ],
+    }
+    events = _drain(eng, wf)
+    plan_refusal = [e for e in events
+                    if e.get("type") == "tool_result"
+                    and e.get("error") == "plan_required"]
+    assert len(plan_refusal) == 1
+    assert plan_refusal[0]["result"]["reason"] == "plan_set_mixed_with_writes"
+    # The original workflow never ran — the gate fired before execute().
+    assert "workflow_start" not in [e.get("type") for e in events]
+
+
+def test_workflow_with_plan_set_alone_is_NOT_refused():
+    """A workflow containing ONLY plan_set (no write tools) passes the
+    gate cleanly — that's the correct shape: plan first, then a
+    separate workflow for the writes after the user approves.
+    """
+    eng = _build_engine()
+
+    async def _async_noop(**_kw):
+        return {"ok": True}
+    eng._tools.register(ToolDefinition(
+        name="plan_set", description="x",
+        parameters={"type": "object", "properties": {}},
+        handler=_async_noop,
+    ))
+
+    wf = {
+        "type":  "sequential", "id": "wf",
+        "steps": [
+            {"tool": "plan_set", "id": "s0", "args": {"tasks": ["a"]}},
         ],
     }
     events = _drain(eng, wf)

@@ -10,6 +10,7 @@ test.describe('profile gate', () => {
     // Override fetch BEFORE mount so the gate sees specific profile data.
     await chikaPage.addInitScript(() => {
       sessionStorage.removeItem('chika_profile_unlocked')
+      window.__chikaProfileUnlocked = false
       // Patch fetch to provide deterministic /api/profiles + select responses.
       const originalFetch = window.fetch
       window.fetch = async (input, init) => {
@@ -47,7 +48,8 @@ test.describe('profile gate', () => {
         return originalFetch ? originalFetch(input, init) : new Response('null')
       }
     })
-    await chikaPage.goto('/')
+    // Bypass disabled — these tests need the gate visible.
+    await chikaPage.goto('/', { bypassGate: false })
   })
 
   test('gate is shown before the app surface', async ({ chikaPage }) => {

@@ -1,0 +1,6 @@
+───────────────────────────────────────────────  wf  ───────────────────────────────────────────────
+⏺ browser_get_dom  selector="main"
+  ⎿ {
+      "html": "<main><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></di
+    …  (30ms)
+────────────────────────────────────────────────────────────────────────────────────────────────────

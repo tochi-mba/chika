@@ -27,22 +27,29 @@ const icon = computed(() => ICONS[props.event.step_type] || '·')
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
+  padding: 5px 10px;
   border-radius: 6px;
   font-size: 12px;
-  background: #1a1a22;
+  background: var(--surface-2);
   margin: 2px 0;
 }
-.icon { width: 16px; text-align: center; color: #6c63ff; }
-.label { flex: 1; font-family: monospace; color: #c0c0d0; }
+.icon { width: 16px; text-align: center; color: var(--accent); font-family: var(--font-mono); }
+.label { flex: 1; font-family: var(--font-mono); color: var(--text-1); }
 .type-badge {
   font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 10px;
-  background: #252535;
-  color: #888;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  font-weight: 500;
 }
-.dur { color: #555; font-size: 11px; }
-.spinner { color: #6c63ff; animation: pulse 1s infinite; }
-@keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.3 } }
+.dur {
+  color: var(--text-3);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.spinner { color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
 </style>

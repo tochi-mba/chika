@@ -245,26 +245,41 @@ export function useChika(apiKey = '') {
   }
 
   function approve(request_id, approved, password = '') {
-    // Three call shapes:
-    //   approve(id, true)               legacy boolean confirm
-    //   approve(id, true, pwd)          password-gated approval
-    //   approve(id, {scope: 'session'}) workspace_scope picker
-    // The ApprovalModal calls approve(id, {scope: 'once' | 'session' | 'deny'})
-    // for workspace_scope events; everything else uses the legacy
-    // boolean shape. We normalise here so the backend always receives a
-    // consistent payload.
+    // Four call shapes:
+    //   approve(id, true)                 legacy boolean confirm
+    //   approve(id, true, pwd)            password-gated approval
+    //   approve(id, {scope: 'session'})   workspace_scope picker
+    //   approve(id, {action: 'edit',
+    //              feedback: 'change X'}) plan_review picker
+    // We normalise here so the backend always receives a consistent
+    // approval_response payload regardless of which modal fired it.
     system.resolveApproval(request_id)
-    if (approved && typeof approved === 'object' && 'scope' in approved) {
-      _wsSend({
-        type:       'approval_response',
-        request_id,
-        approved:   approved.scope !== 'deny',
-        scope:      approved.scope,
-        password:   '',
-      })
-    } else {
-      _wsSend({ type: 'approval_response', request_id, approved, password })
+    if (approved && typeof approved === 'object') {
+      if ('scope' in approved) {
+        _wsSend({
+          type:       'approval_response',
+          request_id,
+          approved:   approved.scope !== 'deny',
+          scope:      approved.scope,
+          password:   '',
+        })
+        return
+      }
+      if ('action' in approved) {
+        const action = approved.action
+        _wsSend({
+          type:       'approval_response',
+          request_id,
+          approved:   action !== 'deny',
+          action,
+          feedback:   approved.feedback || '',
+          reason:     approved.reason   || '',
+          password:   '',
+        })
+        return
+      }
     }
+    _wsSend({ type: 'approval_response', request_id, approved, password })
   }
 
   function answerQuestion(request_id, answer) {
