@@ -74,14 +74,30 @@ test.describe('theme toggle', () => {
     await chikaPage.goto('/')
     await waitForApp(chikaPage)
 
-    await setTheme(chikaPage, true)
+    // Drive theme via the pinia store's toggle action — App.vue's
+    // watchEffect mirrors store state onto the .dark class. A direct
+    // class manipulation gets overwritten on the next render tick.
+    await chikaPage.evaluate(() => {
+      const stores = window.__pinia__?._s
+      const theme = stores?.get('theme')
+      if (!theme) throw new Error('theme store missing')
+      if (!theme.isDark) theme.toggle()
+    })
+    await chikaPage.waitForTimeout(80)
     const darkBg = await chikaPage.evaluate(
       () => getComputedStyle(document.body).backgroundColor,
     )
-    await setTheme(chikaPage, false)
+
+    await chikaPage.evaluate(() => {
+      const stores = window.__pinia__?._s
+      const theme = stores?.get('theme')
+      if (theme.isDark) theme.toggle()
+    })
+    await chikaPage.waitForTimeout(80)
     const lightBg = await chikaPage.evaluate(
       () => getComputedStyle(document.body).backgroundColor,
     )
+
     expect(darkBg).not.toBe(lightBg)
   })
 })
