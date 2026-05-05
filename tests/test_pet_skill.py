@@ -68,7 +68,6 @@ def test_pet_play_bigger_than_pet_pet():
     fp = {"workspace": "", "pet_id": "cat"}
     vs, skill = _make_skill(fp)
     pet_pet = _tool(skill, "pet_pet")
-    pet_play = _tool(skill, "pet_play")
     a = asyncio.run(pet_pet())
     fp_b_vs = VariableStore()
     skill_b = build_pet_skill(

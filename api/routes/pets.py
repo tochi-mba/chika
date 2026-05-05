@@ -88,7 +88,8 @@ async def set_profile_pet(name: str, body: PetUpdate) -> dict:
     memory_changed: dict | None = None
     if profile and new_id and body.memory_action in ("carry", "clear"):
         from chika.skills.pet_skill import (
-            clear_pet_memory, copy_pet_memory,
+            clear_pet_memory,
+            copy_pet_memory,
         )
         ws = profile.workspace
         if body.memory_action == "carry" and old_id and old_id != new_id:

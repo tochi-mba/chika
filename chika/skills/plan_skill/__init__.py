@@ -1288,4 +1288,5 @@ def build_plan_skill(variable_store, engine_getter=None,
             ),
         ],
         workflow_examples="",
+        prompt_section=section,
     )

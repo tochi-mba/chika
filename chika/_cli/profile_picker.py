@@ -16,13 +16,12 @@ from __future__ import annotations
 
 import getpass
 import sys
-from typing import Iterable
+from collections.abc import Iterable
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-
 
 _MAX_ATTEMPTS = 3
 

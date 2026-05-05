@@ -55,12 +55,10 @@ from __future__ import annotations
 import random
 import time
 from pathlib import Path
-from typing import Any
 
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
 from chika.core.variable_store import VarType
-
 
 # ── Persistent pet memory (per profile, per pet) ──────────────────────
 

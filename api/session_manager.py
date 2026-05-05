@@ -48,7 +48,6 @@ from chika.tools.live_server_tool import LIVE_SERVER_TOOL
 from chika.tools.memory_tool import make_memory_tools
 from chika.tools.profile_tools import make_profile_tools, make_set_password_tool
 from chika.tools.python_run_tool import PYTHON_RUN_TOOL
-from chika.tools.shell_tool import ALL_SHELL_TOOLS
 from chika.tools.skill_doc_tool import SKILL_QUERY_TOOL, make_skill_doc_tool
 from chika.tools.variable_tools import make_variable_tools
 from chika.tools.wait_tool import WAIT_TOOL

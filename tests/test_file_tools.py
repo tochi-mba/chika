@@ -60,7 +60,7 @@ def test_write_accepts_text_and_body_aliases(tmp_path):
     assert a.read_text(encoding="utf-8") == "via text"
 
     b = tmp_path / "body.txt"
-    result_b = run(file_write(path=str(b), body="via body"))
+    run(file_write(path=str(b), body="via body"))
     assert b.read_text(encoding="utf-8") == "via body"
 
 
