@@ -30,7 +30,7 @@ async def web_search(query: str, max_results: int = 8) -> dict:
         try:
             from ddgs import DDGS
         except ImportError:
-            from duckduckgo_search import DDGS  # type: ignore[no-redef]
+            from duckduckgo_search import DDGS  # type: ignore[no-redef,assignment]
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
 

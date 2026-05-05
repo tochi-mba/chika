@@ -404,6 +404,7 @@ class ChikaEngine:
         # assert on the rendered terminal output without burning tokens.
         import os as _os
         self._stub_script_path = _os.environ.get("CHIKA_STUB_LLM_SCRIPT") or None
+        self._stub_runner: _StubScriptRunner | None
         if self._stub_script_path:
             self._client = None
             self._stub_runner = _StubScriptRunner(self._stub_script_path)

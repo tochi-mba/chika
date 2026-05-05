@@ -346,7 +346,8 @@ def _run_sync(cmd: str, cwd: Path, timeout: float = 120.0) -> tuple[int, str]:
                 )
         else:
             with __import__("contextlib").suppress(Exception):
-                _os.killpg(_os.getpgid(popen.pid), 9)
+                # POSIX-only — mypy on Windows doesn't see these attrs.
+                _os.killpg(_os.getpgid(popen.pid), 9)  # type: ignore[attr-defined]
         # Drain any partial output that may have made it into the pipe
         # before the process died. Use a short, hard timeout — if the
         # tree didn't die, we've at least guaranteed our return.
@@ -411,6 +412,7 @@ async def _scaffold_web_app(
 
     # ── 1. Built-in templates (instant) ──────────────────────────────
     if kind == "builtin":
+        assert spec is not None  # kind='builtin' implies spec was found
         project.mkdir(parents=True)
         template = spec["template"]
         if template == "vanilla":
@@ -445,6 +447,7 @@ async def _scaffold_web_app(
         }
 
     if kind == "vite":
+        assert spec is not None  # kind='vite' implies spec was found
         template = spec["vite_template"]
         cmd = (
             f"npm create vite@latest {safe_name} -- "
@@ -456,6 +459,7 @@ async def _scaffold_web_app(
             cmd = f"npm create vite@latest {safe_name} -- --template {template}"
             rc, log = await _run(cmd, parent)
     elif kind == "cmd":
+        assert spec is not None  # kind='cmd' implies spec was found
         cmd = spec["cmd_template"].format(name=safe_name)
         rc, log = await _run(cmd, parent)
     else:
