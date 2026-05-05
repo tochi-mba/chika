@@ -45,6 +45,74 @@ _WORKFLOW_TYPES = {
     "map", "fan_out", "retry", "pipeline", "sub_workflow",
 }
 
+
+# ── Auto-continue detection ──────────────────────────────────────────────
+#
+# The agent has a habit of ending a turn with "Next, I'll add the camera…"
+# and then waiting for the user to nudge it. ``_should_auto_continue``
+# matches those patterns at the END of an assistant reply. The engine
+# detects them after a turn completes and fires another turn with
+# user_input="continue" — capped by ``auto_continue_max`` in settings.
+#
+# Triggers only fire when:
+#   - the response is non-trivial (>= 20 chars after strip)
+#   - the LAST PARAGRAPH contains a "next I'll …" / "now I'll …" phrase
+#   - the response does NOT end with "?" (the agent is asking, not promising)
+
+_CONTINUATION_TRIGGERS = (
+    "next, i'll", "next, i will", "next i'll", "next i will",
+    "next:", "next up:", "next up,",
+    "now i'll", "now, i'll", "now i will", "now, i will",
+    "i'll now", "i will now",
+    "i'll next", "i'll continue", "i will continue",
+    "i'll add", "i'll build", "i'll implement", "i'll create",
+    "i'll wire", "i'll layer", "i'll set up", "i'll write",
+    "then i'll", "then i will",
+    "continuing with", "continuing by",
+    "i'll proceed", "moving on,", "moving on:",
+    "after that, i'll", "after that i'll",
+)
+
+
+def _normalise_text(text: str) -> str:
+    """Lowercase + replace fancy Unicode punctuation with ASCII equivalents.
+
+    LLMs routinely emit curly quotes (U+2019 right single, U+201D right
+    double, etc.) in markdown output — so a literal substring match for
+    ``"i'll"`` (with U+0027) misses ``"I’ll"`` (with U+2019). That bug
+    silently disabled auto-continue on every multi-step turn whose final
+    paragraph used Markdown-style typography. Normalising before matching
+    fixes both apostrophes and dashes (em / en / minus) at once.
+    """
+    return (
+        text.lower()
+        .replace("’", "'")  # right single quote
+        .replace("‘", "'")  # left single quote
+        .replace("“", '"')  # left double quote
+        .replace("”", '"')  # right double quote
+        .replace("—", "-")  # em dash
+        .replace("–", "-")  # en dash
+        .replace("−", "-")  # math minus
+    )
+
+
+def _should_auto_continue(text: str) -> bool:
+    """True if the assistant promised to do more work in the next turn."""
+    if not text:
+        return False
+    s = text.strip()
+    if len(s) < 20:
+        return False
+    # If ending in a question, the agent is asking — don't barge in.
+    # Strip both ASCII and Unicode quote chars before checking the tail.
+    if s.rstrip().rstrip("””\"'’").endswith("?"):
+        return False
+    # Only consider the last paragraph (continuation promises tend to be
+    # the closing line, not buried mid-response). Normalise Unicode
+    # punctuation before substring matching.
+    last_para = _normalise_text(s.split("\n\n")[-1])
+    return any(t in last_para for t in _CONTINUATION_TRIGGERS)
+
 # ── Ollama text-mode tool instructions ────────────────────────────────────────
 # Injected at the END of the system prompt for Ollama providers. Overrides the
 # "tool call" framing in _CORE, which Ollama models can't act on.
@@ -236,6 +304,71 @@ class LLMCaller:
         return await self._engine._llm_complete(prompt)
 
 
+class _StubScriptRunner:
+    """Deterministic LLM playback driver for CLI / WS subprocess tests.
+
+    The script is a JSON file shaped like::
+
+        {
+          "turns": [
+            {"text": "Sure thing."},
+            {"text": "", "workflow": {"type": "sequential", "steps": [...]}},
+            {"text": "Done."}
+          ],
+          "title": "Optional Test Chat",
+          "completions": ["fallback for _llm_complete"]
+        }
+
+    Each ``turn`` corresponds to one ``_stream_llm`` invocation. ``text``
+    is streamed as ``token`` events; ``workflow`` (if present) becomes a
+    ``_tool_call_raw`` event. ``completions`` is a queue of canned
+    responses for ``_llm_complete`` (title gen, condense, meta-tools).
+    Once exhausted, ``_llm_complete`` returns ``""``.
+    """
+
+    def __init__(self, script_path: str) -> None:
+        from pathlib import Path as _P
+        with _P(script_path).open(encoding="utf-8") as fh:
+            data = json.load(fh)
+        self._turns: list[dict] = list(data.get("turns") or [])
+        self._completions: list[str] = list(data.get("completions") or [])
+        self._title: str = str(data.get("title") or "Stub Chat")
+        self._cursor = 0
+        self._completion_cursor = 0
+
+    async def stream(self) -> AsyncGenerator[Event, None]:
+        if self._cursor >= len(self._turns):
+            yield {"type": "token", "text": (
+                "[stub: ran out of scripted turns — close out the chat]"
+            )}
+            return
+        turn = self._turns[self._cursor]
+        self._cursor += 1
+        text = str(turn.get("text") or "")
+        for word in (text.split(" ") if text else []):
+            yield {"type": "token", "text": word + " "}
+        wf = turn.get("workflow")
+        if wf is not None:
+            import uuid as _uuid
+            yield {
+                "type": "_tool_call_raw",
+                "data": {
+                    "id":   f"call_{_uuid.uuid4().hex[:12]}",
+                    "name": "workflow_orchestrator",
+                    "args": wf,
+                },
+            }
+
+    async def complete(self, prompt: str) -> str:
+        if "title" in prompt.lower() and "concise" in prompt.lower():
+            return self._title
+        if self._completion_cursor < len(self._completions):
+            out = self._completions[self._completion_cursor]
+            self._completion_cursor += 1
+            return out
+        return ""
+
+
 class ChikaEngine:
     def __init__(
         self,
@@ -264,10 +397,26 @@ class ChikaEngine:
         cfg = config.get_provider_config()
         self._provider = cfg.provider
         self._model = cfg.model
-        self._client = config.make_client()
+        # CHIKA_STUB_LLM_SCRIPT (test-only): path to a JSON file that scripts
+        # the LLM responses for a fully-deterministic e2e run. When set we
+        # skip the real client entirely — every _stream_llm / _llm_complete
+        # call is served from disk. Used by CLI subprocess tests so they can
+        # assert on the rendered terminal output without burning tokens.
+        import os as _os
+        self._stub_script_path = _os.environ.get("CHIKA_STUB_LLM_SCRIPT") or None
+        if self._stub_script_path:
+            self._client = None
+            self._stub_runner = _StubScriptRunner(self._stub_script_path)
+        else:
+            self._client = config.make_client()
+            self._stub_runner = None
 
         llm_caller = LLMCaller(self)
         self._workflow_engine = WorkflowEngine(tool_registry, variable_store, llm_caller)
+        # Wire the skill registry into the workflow engine so its skill-gate
+        # can reverse-lookup ``tool_name → skill_name`` and auto-load the
+        # SKILL.md before any of that skill's tools fire.
+        self._workflow_engine.set_skill_registry(skill_registry)
         self._compactor = Compactor(
             llm_caller,
             max_tokens=config.MAX_HISTORY_TOKENS,
@@ -279,6 +428,14 @@ class ChikaEngine:
         self._chat_busy: bool = False
         # Set by cancel() to interrupt the current streaming turn mid-flight.
         self._cancelled: bool = False
+        # Auto-continue depth — incremented when the engine recursively
+        # fires another turn because the assistant promised more work.
+        # Reset to 0 at the top of every chat() call.
+        self._auto_continue_depth: int = 0
+        # Captured by _force_followup so the auto-continue heuristic can
+        # run on text the model produced AFTER tool calls (when the main
+        # agentic loop ended without yielding any user-visible tokens).
+        self._last_followup_text: str = ""
 
     # ── Public ───────────────────────────────────────────────────────────────
 
@@ -297,6 +454,9 @@ class ChikaEngine:
             return
         self._cancelled = False
         self._chat_busy = True
+        # Reset auto-continue depth on every TOP-LEVEL call. Inner recursive
+        # calls increment the counter without resetting.
+        self._auto_continue_depth = 0
         try:
             async for event in self._chat_inner(user_input):
                 yield event
@@ -305,6 +465,9 @@ class ChikaEngine:
             self._cancelled = False
 
     async def _chat_inner(self, user_input: str) -> AsyncGenerator[Event, None]:
+        # Reset per-turn capture so stale text from an earlier turn can't
+        # accidentally trigger auto-continue on the next.
+        self._last_followup_text = ""
         is_first_message = len(self._history) == 0
         profile = self._active_profile.name if self._active_profile else "unknown"
         _log.info("chat_start", profile=profile, message_preview=user_input[:120])
@@ -447,6 +610,52 @@ class ChikaEngine:
         async for event in self._maybe_emit_title(title_task, user_input):
             yield event
 
+        # Auto-continue: when the agent ends with "next I'll …" / "now I'll
+        # …" we fire a synthetic continuation so it actually does the next
+        # thing. We check BOTH ``final_text`` (from the main agentic loop)
+        # AND ``self._last_followup_text`` (from ``_force_followup``) since
+        # the user-facing reply may come from either source.
+        check_text = (final_text.strip() or self._last_followup_text.strip())
+        if check_text and not self._cancelled:
+            try:
+                import api.settings_store as _settings
+                enabled = _settings.get("auto_continue", "on") == "on"
+                cap = int(_settings.get("auto_continue_max", 10))
+            except Exception:
+                enabled, cap = True, 10
+            matched = _should_auto_continue(check_text)
+            if enabled and self._auto_continue_depth < cap and matched:
+                self._auto_continue_depth += 1
+                yield {
+                    "type":          "auto_continue",
+                    "depth":         self._auto_continue_depth,
+                    "max":           cap,
+                    "trigger_tail":  check_text[-200:],
+                }
+                async for ev in self._chat_inner("continue"):
+                    yield ev
+                return  # nested call yields its own "done"
+            elif matched:
+                # The agent promised more work but the gate blocked us.
+                # Surface the reason so the user can act (raise the cap,
+                # toggle the setting, or just type "continue").
+                if not enabled:
+                    reason = "auto_continue is off — re-enable with /auto-continue on"
+                elif self._auto_continue_depth >= cap:
+                    reason = (
+                        f"hit auto-continue cap ({self._auto_continue_depth}/{cap}) — "
+                        "raise it with /auto-continue max <int> or just type continue"
+                    )
+                else:
+                    reason = "blocked"
+                yield {
+                    "type":         "auto_continue_blocked",
+                    "reason":       reason,
+                    "depth":        self._auto_continue_depth,
+                    "max":          cap,
+                    "trigger_tail": check_text[-160:],
+                }
+
         yield {"type": "done"}
 
 
@@ -489,17 +698,161 @@ class ChikaEngine:
         """
         workflow_result_parts: list[str] = []
         workflow_errors: list[str] = []
+        # Track tools used + whether plan was touched, so we can nudge the
+        # agent when it does real work without ticking the checklist.
+        tools_used: list[str] = []
+        plan_touched = False
+        # Set by plan_set / plan_edit when a goal- or requirements-class
+        # mutation lands. Triggers an automatic plan_reconcile pass after
+        # the workflow finishes so stale tasks don't drift behind a new
+        # goal. Cleared once the reconcile fires.
+        auto_reconcile_pending = False
+        # Most recent plan-set result + its plan payload. After the
+        # workflow finishes the engine asks the user to approve / edit
+        # / deny the plan before letting the agent continue. This is
+        # the user-facing gate: "I just made a plan, here it is, want
+        # to ship it?"
+        pending_plan_for_approval: dict | None = None
         async for event in self._workflow_engine.execute(tool_call["args"]):
             yield event
-            if event["type"] == "workflow_done":
+            etype = event["type"]
+            if etype == "tool_call":
+                t = event.get("tool", "")
+                tools_used.append(t)
+                if t in ("plan_update", "plan_remove", "plan_add", "plan_set"):
+                    plan_touched = True
+            elif etype == "tool_result":
+                tool = event.get("tool", "")
+                result = event.get("result")
+                # Auto-reconcile bookkeeping. plan_reconcile itself never
+                # re-triggers (would loop). plan_set always re-triggers
+                # because the tool can't tell whether the goal changed —
+                # plan_reconcile is a cheap no-op when the plan is
+                # already consistent. plan_edit signals through the
+                # ``_auto_reconcile`` field on its result dict.
+                if tool == "plan_reconcile":
+                    auto_reconcile_pending = False
+                elif tool == "plan_set" and not event.get("error"):
+                    auto_reconcile_pending = True
+                    # Capture the plan for the approval gate. plan_set
+                    # is the moment the user gets to approve / edit /
+                    # deny before the agent commits to executing it.
+                    if isinstance(result, dict) and isinstance(result.get("plan"), dict):
+                        pending_plan_for_approval = result["plan"]
+                elif isinstance(result, dict) and result.get("_auto_reconcile"):
+                    auto_reconcile_pending = True
+            if etype == "workflow_done":
                 workflow_result_parts.append(self._format_workflow_result(event))
-            elif event["type"] == "error":
+            elif etype == "error":
                 workflow_errors.append(event.get("message", ""))
-            elif event["type"] == "tool_result" and event.get("error"):
-                workflow_errors.append(
-                    f"{event.get('tool', 'tool')} failed: {event['error']}"
-                )
+            elif etype == "tool_result" and event.get("error"):
+                err = event["error"]
+                payload = event.get("result")
+                # Skill-gate refusals carry the full SKILL.md inline. We
+                # MUST surface the doc body to the LLM verbatim so it can
+                # re-plan on the next turn with the doc in context.
+                if err == "skill_doc_required" and isinstance(payload, dict):
+                    skill = payload.get("skill", "?")
+                    doc = payload.get("doc") or ""
+                    hint = payload.get("hint") or ""
+                    workflow_errors.append(
+                        f"{event.get('tool', 'tool')} REFUSED — skill_doc_required\n\n"
+                        f"{hint}\n\n"
+                        f"=== {skill} SKILL.md ({payload.get('char_count', len(doc))} chars) ===\n"
+                        f"{doc}\n=== end SKILL.md ===\n"
+                    )
+                elif err == "plan_required" and isinstance(payload, dict):
+                    # Special-case the plan-required gate so the LLM sees
+                    # the hint inline (rather than as a one-line "tool
+                    # failed: plan_required" that it'll ignore).
+                    workflow_errors.append(
+                        f"WORKFLOW REFUSED — plan_required\n\n"
+                        f"{payload.get('hint', '')}\n\n"
+                        f"writes_used: {payload.get('writes_used', [])}\n"
+                        f"write_count: {payload.get('write_count', 0)}\n\n"
+                        "Generate a NEW workflow now whose first step is "
+                        "`plan_set` with goal + requirements + tasks "
+                        "(use plan_skill SKILL.md for the template). "
+                        "Then re-emit the original workflow."
+                    )
+                else:
+                    workflow_errors.append(
+                        f"{event.get('tool', 'tool')} failed: {err}"
+                    )
         variables_content = "\n".join(workflow_result_parts) or "{}"
+
+        # Auto-reconcile: when goal / requirements changed, dispatch a
+        # plan_reconcile pass right now (before handing the result to the
+        # LLM) so the next system prompt already shows the synced plan.
+        # Skipped silently when the plan_reconcile tool isn't registered
+        # (e.g. tests that build a minimal engine).
+        if auto_reconcile_pending:
+            try:
+                rec_tool = self._tools.get("plan_reconcile")
+            except Exception:
+                rec_tool = None
+            if rec_tool is not None:
+                _log.info("plan_auto_reconcile",
+                          profile=self._active_profile.name if self._active_profile else "?")
+                try:
+                    rec_result = await self._tools.dispatch("plan_reconcile", {})
+                except Exception as exc:
+                    rec_result = {"error": f"{type(exc).__name__}: {exc}"}
+                # Surface a synthetic tool_call/tool_result pair so the
+                # frontend / CLI shows the reconcile happened.
+                yield {
+                    "type":      "tool_call",
+                    "step_id":   "plan_auto_reconcile",
+                    "tool":      "plan_reconcile",
+                    "args":      {"_auto": True},
+                }
+                yield {
+                    "type":      "tool_result",
+                    "step_id":   "plan_auto_reconcile",
+                    "tool":      "plan_reconcile",
+                    "result":    rec_result,
+                    "error":     rec_result.get("error") if isinstance(rec_result, dict) else None,
+                    "duration_ms": 0,
+                }
+
+        # Plan-approval gate. After the agent calls plan_set, ask the
+        # user whether to approve / edit / deny BEFORE the agent
+        # commits to executing the plan. The user response is fed
+        # back to the LLM as the tool result so the next turn either
+        # proceeds, revises the plan, or starts over.
+        approval_directive: dict | None = None
+        if pending_plan_for_approval is not None:
+            approval_directive = await self._request_plan_approval(
+                pending_plan_for_approval,
+            )
+            # Surface the approval outcome as a synthetic tool_result so
+            # the renderer / frontend show the user's decision in the
+            # conversation surface.
+            if approval_directive is not None:
+                yield {
+                    "type":      "tool_call",
+                    "step_id":   "plan_user_approval",
+                    "tool":      "plan_user_approval",
+                    "args":      {"_auto": True},
+                }
+                yield {
+                    "type":      "tool_result",
+                    "step_id":   "plan_user_approval",
+                    "tool":      "plan_user_approval",
+                    "result":    approval_directive,
+                    "error":     None,
+                    "duration_ms": 0,
+                }
+
+        # Plan-update nudge — when this workflow performed real work
+        # (file_write / file_replace / shell_exec / git_commit / etc.) AND
+        # there's an in_progress task in $plan AND the workflow didn't
+        # touch the plan tools at all, append a stern reminder so the LLM
+        # ticks the checklist on the very next turn. This is the runtime
+        # backstop for the "MANDATORY: tick the checklist" prompt rule —
+        # which the model has been ignoring on long sessions.
+        plan_nudge = self._build_plan_nudge(tools_used, plan_touched)
+
         if workflow_errors:
             self._last_result_content = (
                 "WORKFLOW ERRORS:\n"
@@ -509,6 +862,178 @@ class ChikaEngine:
             )
         else:
             self._last_result_content = variables_content
+
+        if plan_nudge:
+            self._last_result_content = plan_nudge + "\n\n" + self._last_result_content
+
+        # Append the user's plan-approval directive to the result
+        # content so the LLM's NEXT turn knows whether to proceed,
+        # revise, or restart. The directive is structured prose the
+        # LLM can react to.
+        if approval_directive is not None:
+            self._last_result_content = (
+                self._format_plan_approval_directive(approval_directive)
+                + "\n\n"
+                + self._last_result_content
+            )
+
+    async def _request_plan_approval(self, plan: dict) -> dict | None:
+        """Ask the user to approve / edit / deny a freshly-set plan.
+
+        Uses the workflow_engine's existing ``approval_handler`` channel
+        so the plan-review modal pops in the same surface as other
+        approvals (CLI prompt, frontend ApprovalModal, extension popup).
+
+        Returns ``{action: "approve"}`` / ``{action: "edit", feedback}``
+        / ``{action: "deny", reason}``. ``None`` when no approval channel
+        is wired (e.g. tests / CLI without a TTY) — in that case the
+        engine silently skips the gate so non-interactive flows work.
+        """
+        handler = getattr(self._workflow_engine, "approval_handler", None)
+        if handler is None:
+            return None
+        # Build a compact summary the modal can render verbatim.
+        summary_lines = []
+        goal = (plan.get("goal") or "").strip()
+        if goal:
+            summary_lines.append(f"GOAL: {goal}")
+        reqs = plan.get("requirements") or []
+        if reqs:
+            summary_lines.append("REQUIREMENTS:")
+            for r in reqs[:8]:
+                summary_lines.append(f"  - {r}")
+        tasks = plan.get("tasks") or []
+        if tasks:
+            summary_lines.append("TASKS:")
+
+            def _walk(items: list, depth: int = 0):
+                for t in items[:20]:
+                    if not isinstance(t, dict):
+                        continue
+                    indent = "  " * (depth + 1)
+                    summary_lines.append(
+                        f"{indent}- [{t.get('status', 'pending')}] "
+                        f"{(t.get('text') or '')[:120]}"
+                    )
+                    subs = t.get("subtasks") or []
+                    if subs:
+                        _walk(subs, depth + 1)
+            _walk(tasks)
+
+        summary = "\n".join(summary_lines) or "(empty plan)"
+        request_id = (
+            f"plan_review_{int(__import__('time').time() * 1000) & 0xFFFFFFFF:08x}"
+        )
+        try:
+            response = await handler(
+                request_id=request_id,
+                tool_name="plan_review",
+                args={"plan": plan, "summary": summary},
+                step_id="plan_review",
+                message=(
+                    "Chika just drafted this plan. Approve to let it run, "
+                    "edit to send feedback, or deny to start over.\n\n"
+                    + summary
+                ),
+                approval_type="plan_review",
+            )
+        except Exception:
+            return None
+        # The handler may return a bool (legacy) or a dict (new shape).
+        if isinstance(response, bool):
+            return {"action": "approve" if response else "deny",
+                    "reason": ""}
+        if isinstance(response, dict):
+            action = (response.get("action") or
+                      ("approve" if response.get("approved") else "deny")).lower()
+            if action not in ("approve", "edit", "deny"):
+                action = "deny"
+            return {
+                "action":   action,
+                "feedback": response.get("feedback") or "",
+                "reason":   response.get("reason") or "",
+            }
+        return {"action": "deny", "reason": "unexpected response shape"}
+
+    @staticmethod
+    def _format_plan_approval_directive(directive: dict) -> str:
+        """Render the user's plan-review verdict as a strong prompt note
+        the next LLM turn can act on."""
+        action = (directive.get("action") or "").lower()
+        if action == "approve":
+            return (
+                "🟢 PLAN APPROVAL — the user APPROVED the plan. "
+                "Proceed by executing the next in-progress task."
+            )
+        if action == "edit":
+            feedback = (directive.get("feedback") or "").strip() or "(no message)"
+            return (
+                "✏️ PLAN APPROVAL — the user wants EDITS to the plan "
+                "before proceeding. Their feedback:\n\n"
+                f"{feedback}\n\n"
+                "Apply the edits with `plan_edit` (preserve task ids and "
+                "any 'done' progress that's still valid). Do NOT execute "
+                "the rest of the plan until the user approves the revised "
+                "version."
+            )
+        # action == "deny" or unknown
+        reason = (directive.get("reason") or "").strip() or "(no reason given)"
+        return (
+            "🔴 PLAN APPROVAL — the user REJECTED the plan. Their reason:\n\n"
+            f"{reason}\n\n"
+            "Stop. Do NOT execute the plan. Re-read the user's original "
+            "request and the rejection reason, then propose a different "
+            "plan via `plan_set`. The user's feedback is the priority — "
+            "don't argue with it."
+        )
+
+    def _build_plan_nudge(self, tools_used: list[str],
+                          plan_touched: bool) -> str | None:
+        """If the workflow did real work but didn't tick the plan, return a
+        reminder string to prepend to the LLM-facing result. ``None`` =
+        no nudge needed."""
+        if plan_touched:
+            return None
+        # Was there real work? Limited to tools that genuinely change state.
+        WRITE_TOOLS = {
+            "file_write", "file_replace", "file_edit_lines", "file_append",
+            "shell_exec", "bg_shell_exec", "python_run", "live_server",
+            "git_commit", "git_push", "git_checkout", "git_pr_create",
+            "git_pr_merge", "scaffold_web_app",
+            "browser_navigate", "browser_click", "browser_fill_input",
+            "browser_open_tab", "browser_close_tab",
+            "memory_persist", "memory_forget",
+        }
+        did_real_work = any(t in WRITE_TOOLS for t in tools_used)
+        if not did_real_work:
+            return None
+        # Is there a current plan with an in_progress task?
+        try:
+            plan_var = self._vars.get("plan")
+        except Exception:
+            return None
+        if plan_var is None or not isinstance(plan_var.value, dict):
+            return None
+        tasks = plan_var.value.get("tasks") or []
+        if not isinstance(tasks, list):
+            return None
+        in_progress = [t for t in tasks
+                       if isinstance(t, dict)
+                       and t.get("status") == "in_progress"]
+        if not in_progress:
+            return None
+        first = in_progress[0]
+        used_str = ", ".join(t for t in tools_used if t in WRITE_TOOLS)
+        return (
+            "🚨 PLAN NUDGE — you ran write-class tools "
+            f"({used_str}) but did not call any plan_* tool in this workflow. "
+            f"Task `{first.get('id', '?')}` ('"
+            f"{(first.get('text') or '')[:80]}') is still in_progress. "
+            "**Your next workflow MUST start with `plan_update(task_id="
+            f"\"{first.get('id', '?')}\", status=\"done\")`** if that task "
+            "is now complete, or call `plan_update` with a different status "
+            "if not. The user is watching the checklist — keep it accurate."
+        )
 
     async def _force_followup(self) -> AsyncGenerator[Event, None]:
         """Yield a forced LLM reply when the model completed tool calls
@@ -540,6 +1065,11 @@ class ChikaEngine:
                 followup_text += event["text"]
         if followup_text:
             self._history.append({"role": "assistant", "content": followup_text})
+        # Expose the followup text so the outer ``_chat_inner`` can run its
+        # auto-continue heuristic on it. Without this the reply that lands
+        # AFTER tool calls never gets checked for "Next, I'll …" phrases
+        # because ``final_text`` in the caller stays empty.
+        self._last_followup_text = followup_text
 
     async def _maybe_emit_title(
         self,
@@ -697,17 +1227,41 @@ class ChikaEngine:
         return max(max_budget // 4, 1024)
 
     def _build_messages(self) -> list[dict]:
+        # Skill index — name + 1-line description + has_doc flag so the
+        # agent knows which skills exist and which can be loaded via
+        # ``skill_load``. Cheap (just an iteration of the registry).
+        try:
+            skill_index = self._skills.skill_index()
+        except Exception:
+            skill_index = None
+
+        # Skill-contributed prompt sections — every registered skill can
+        # add a small dynamic block (its current state, counters, etc.).
+        # The shell skill surfaces active shells, the pet skill surfaces
+        # companion mood + current frame, the plan skill surfaces the
+        # in-progress task. Errors per skill are swallowed inside
+        # prompt_sections so a buggy contributor can't break a turn.
+        try:
+            skill_sections = self._skills.prompt_sections()
+        except Exception:
+            skill_sections = []
+
         system_prompt = self._prompt.build(
             tool_list=self._tools.list_for_prompt(),
             variables=self._vars.list_summary(),
             memory=self._memory.render_for_prompt(),
             recent_tools=self._recent_tool_names(),
+            skill_index=skill_index,
+            skill_sections=skill_sections,
         )
         if self._provider == "ollama":
             system_prompt += _OLLAMA_TOOL_INSTRUCTIONS
         return [{"role": "system", "content": system_prompt}] + self._history
 
     async def _stream_llm(self, messages: list[dict]) -> AsyncGenerator[Event, None]:
+        if self._stub_runner is not None:
+            async for e in self._stub_runner.stream(): yield e
+            return
         if self._provider in ("azure", "openai", "ollama"):
             async for e in self._stream_openai(messages): yield e
         elif self._provider == "anthropic":
@@ -1135,6 +1689,8 @@ class ChikaEngine:
 
     async def _llm_complete(self, prompt: str) -> str:
         """Non-streaming single completion for meta-tools and compaction."""
+        if self._stub_runner is not None:
+            return await self._stub_runner.complete(prompt)
         if self._provider in ("azure", "openai", "ollama"):
             resp = await self._client.chat.completions.create(
                 model=self._model,

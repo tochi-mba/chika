@@ -13,6 +13,9 @@ class Profile:
     workspace: str    # absolute path to the profile's working directory
     memory_path: str  # absolute path to the profile's memory.md
     password_hash: str | None = field(default=None, repr=False)
+    # Pet companion — id of an entry in chika._cli.pets.PETS. ``None`` means
+    # the profile inherits the default pet. Each profile picks its own.
+    pet_id: str | None = None
 
 
 class ProfileManager:
@@ -81,6 +84,7 @@ class ProfileManager:
             workspace=str(workspace),
             memory_path=str(profile_dir / "memory.md"),
             password_hash=meta.get("password_hash"),
+            pet_id=meta.get("pet_id"),
         )
 
     def get(self, name: str) -> Profile | None:
@@ -145,3 +149,19 @@ class ProfileManager:
         if not stored:
             return True  # no password required
         return self._check_password(password, stored)
+
+    # ── Pet API ───────────────────────────────────────────────────────────────
+
+    def get_pet(self, name: str) -> str | None:
+        """Return the pet_id assigned to a profile, or None if not set."""
+        meta = self._load_meta(name)
+        return meta.get("pet_id")
+
+    def set_pet(self, name: str, pet_id: str | None) -> None:
+        """Persist the chosen pet for a profile. ``None`` clears it."""
+        meta = self._load_meta(name)
+        if pet_id:
+            meta["pet_id"] = pet_id
+        else:
+            meta.pop("pet_id", None)
+        self._save_meta(name, meta)

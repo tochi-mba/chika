@@ -141,27 +141,5 @@ def build_question_skill(workflow_engine) -> Skill:
                 handler=ask_user,
             ),
         ],
-        workflow_examples="""
-### Asking the user a question mid-plan
-
-```json
-{"tool": "ask_user", "args": {
-  "question": "Which authentication approach would you prefer?",
-  "header": "Auth method",
-  "options": [
-    {"label": "JWT tokens",    "description": "Stateless, easy to set up"},
-    {"label": "Session cookies", "description": "Simpler for server-rendered apps"},
-    {"label": "OAuth provider",  "description": "Delegate to Google/GitHub"}
-  ]
-}, "store_result_as": "$auth"}
-```
-
-Then branch on `$auth.choice`:
-```json
-{"type": "conditional",
- "condition": {"field": "$auth.choice", "operator": "equals", "value": "JWT tokens"},
- "if_true":  {"tool": "file_write", "args": {...}},
- "if_false": {"tool": "file_write", "args": {...}}}
-```
-""",
+        workflow_examples="",
     )

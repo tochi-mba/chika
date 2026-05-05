@@ -42,6 +42,42 @@ def test_write_returns_size(tmp_path):
     assert result["size_bytes"] == 5
 
 
+def test_write_accepts_contents_alias(tmp_path):
+    """LLMs frequently send ``contents=`` instead of ``content=``. The
+    tool must absorb that drift instead of crashing — same pattern as
+    plan_set / scaffold_web_app."""
+    p = tmp_path / "drift.txt"
+    result = run(file_write(path=str(p), contents="hello drift"))
+    assert "error" not in result
+    assert p.read_text(encoding="utf-8") == "hello drift"
+
+
+def test_write_accepts_text_and_body_aliases(tmp_path):
+    """Other common drift kwargs the LLM substitutes for ``content``."""
+    a = tmp_path / "text.txt"
+    result_a = run(file_write(path=str(a), text="via text"))
+    assert "error" not in result_a
+    assert a.read_text(encoding="utf-8") == "via text"
+
+    b = tmp_path / "body.txt"
+    result_b = run(file_write(path=str(b), body="via body"))
+    assert b.read_text(encoding="utf-8") == "via body"
+
+
+def test_write_accepts_file_path_alias(tmp_path):
+    """``file_path=`` instead of ``path=`` resolves correctly."""
+    p = tmp_path / "fp.txt"
+    result = run(file_write(file_path=str(p), content="ok"))
+    assert "error" not in result
+    assert p.read_text(encoding="utf-8") == "ok"
+
+
+def test_write_missing_path_returns_error(tmp_path):
+    result = run(file_write(content="anything"))
+    assert "error" in result
+    assert "path" in result["error"].lower()
+
+
 # ── file_read ─────────────────────────────────────────────────────────────────
 
 def test_read_returns_content(tmp_path):

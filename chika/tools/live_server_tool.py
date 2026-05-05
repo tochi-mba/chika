@@ -24,15 +24,39 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
+def _parse_port_from_command(cmd: str) -> int | None:
+    """Pull the port out of ``python -m http.server <port> --directory ...``.
+
+    The ProcessRegistry doesn't track per-process port (it only stores
+    pid + command + running + exit_code), so when ``_already_serving``
+    finds an existing instance we have to recover the port from the
+    spawn command. Returns None if the command doesn't match the
+    expected shape — caller falls back to a non-port URL.
+    """
+    if "http.server" not in cmd:
+        return None
+    try:
+        tail = cmd.split("http.server", 1)[1].lstrip()
+        first = tail.split()[0]
+        return int(first)
+    except (ValueError, IndexError):
+        return None
+
+
 def _already_serving(directory: str) -> dict | None:
-    """Return info if we already have a live server for this directory."""
+    """Return info if we already have a live server for this directory.
+
+    Adds a synthetic ``port`` key (parsed from the command) so callers
+    don't have to redo the parsing themselves and so the returned URL
+    is always valid.
+    """
     norm = os.path.normcase(os.path.abspath(directory))
     for info in ProcessRegistry.all():
         if not info["running"]:
             continue
         cmd = info.get("command", "")
         if "http.server" in cmd and norm in os.path.normcase(cmd):
-            return info
+            return {**info, "port": _parse_port_from_command(cmd)}
     return None
 
 
@@ -48,12 +72,31 @@ async def live_server(directory: str = "", port: int = 0, **kwargs) -> dict:
 
     existing = _already_serving(directory)
     if existing:
-        url = f"http://localhost:{existing.get('port', '?')}"
+        existing_port = existing.get("port")
+        if existing_port is None:
+            # Couldn't recover the port from the command string. Don't
+            # emit a broken "http://localhost:?" URL — return a clear
+            # error so the agent can decide whether to start a fresh
+            # server on a different port.
+            return {
+                "error":           "already_running_unknown_port",
+                "pid":             existing["pid"],
+                "directory":       directory,
+                "command":         existing.get("command", ""),
+                "hint": (
+                    "A live_server is already running for this directory "
+                    "but its port couldn't be parsed from the command. "
+                    "Pass an explicit ``port=`` to start a second server "
+                    "on a known port, or ``shell_kill`` the existing "
+                    "process and re-run."
+                ),
+            }
+        url = f"http://localhost:{existing_port}"
         webbrowser.open(url)
         return {
-            "url": url,
-            "pid": existing["pid"],
-            "port": existing.get("port"),
+            "url":             url,
+            "pid":             existing["pid"],
+            "port":            existing_port,
             "already_running": True,
         }
 

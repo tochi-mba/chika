@@ -1,13 +1,17 @@
 <template>
-  <div class="row" :class="{ live }">
+  <div class="row" :class="{ live, 'is-skill-load': isSkillLoad, 'is-pending': isPending }">
     <div class="row-icon">
-      <span v-if="isDot" class="dot" :class="dotClass" />
+      <span v-if="isPending" class="spinner" aria-label="running" />
+      <span v-else-if="isSkillLoad" class="glyph skill-glyph">📚</span>
+      <span v-else-if="isDot" class="dot" :class="dotClass" />
       <span v-else class="glyph">{{ glyph }}</span>
     </div>
     <div class="row-body">
       <div class="row-head">
-        <span class="row-label" :class="{ bold: event.type === 'tool_call' }">{{ label }}</span>
+        <span class="row-label" :class="{ bold: event.type === 'tool_call' || isSkillLoad }">{{ label }}</span>
         <span v-if="subtext" class="row-sub">{{ subtext }}</span>
+        <span v-if="skillBadge" class="skill-badge">{{ skillBadge }}</span>
+        <span v-if="isPending && elapsedLabel" class="elapsed">{{ elapsedLabel }}</span>
       </div>
       <details v-if="hasDetails" class="row-details">
         <summary class="row-details-toggle">{{ detailsLabel }}</summary>
@@ -18,11 +22,37 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 const props = defineProps({
   event: { type: Object, required: true },
   live:  { type: Boolean, default: false },
+})
+
+// In-flight tool_call → render a spinner + elapsed-time badge.
+// chat.js marks tool_call events `pending: true` and flips them to false
+// when the matching tool_result lands (same step_id).
+const isPending = computed(() =>
+  props.event.type === 'tool_call' && props.event.pending === true
+)
+
+// Elapsed-time ticker — only runs while this row is pending so we don't
+// burn rAFs on completed rows.
+const _now = ref(Date.now())
+let _timer = null
+onMounted(() => {
+  if (!isPending.value) return
+  _timer = setInterval(() => { _now.value = Date.now() }, 250)
+})
+onUnmounted(() => { if (_timer) clearInterval(_timer) })
+
+const elapsedLabel = computed(() => {
+  if (!isPending.value || !props.event._startedAt) return ''
+  const ms = _now.value - props.event._startedAt
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  const m = Math.floor(ms / 60_000)
+  const s = Math.floor((ms % 60_000) / 1000)
+  return `${m}m ${String(s).padStart(2, '0')}s`
 })
 
 // ── Icon logic ────────────────────────────────────────────────────────────────
@@ -30,6 +60,30 @@ const props = defineProps({
 const isDot = computed(() =>
   props.event.type === 'step_start' || props.event.type === 'step_done'
 )
+
+// Surface skill_load events distinctly so the user can audit how often
+// the agent consults SKILL.md docs vs. winging it.
+const isSkillLoad = computed(() => {
+  const e = props.event
+  return (e.type === 'tool_call' && e.tool === 'skill_load')
+      || (e.type === 'tool_result' && e.tool === 'skill_load')
+})
+
+const skillBadge = computed(() => {
+  const e = props.event
+  if (e.type === 'tool_call' && e.tool === 'skill_load') {
+    return `→ ${e.args?.skill || '?'}`
+  }
+  if (e.type === 'tool_result' && e.tool === 'skill_load' && !e.error) {
+    const r = e.result || {}
+    const condensed = r.condensed ? '  · condensed' : '  · verbatim'
+    const chars = typeof r.char_count === 'number'
+      ? `  · ${r.char_count.toLocaleString()} chars`
+      : ''
+    return `${r.skill || '?'}${chars}${condensed}`
+  }
+  return null
+})
 
 const dotClass = computed(() => ({
   'dot-live': props.live && props.event.type === 'step_start',
@@ -66,8 +120,10 @@ const label = computed(() => {
     case 'workflow_done':          return 'workflow complete'
     case 'step_start':             return e.step_id || 'step'
     case 'step_done':              return e.step_id || 'step'
-    case 'tool_call':              return e.tool || e.step_id || 'tool'
-    case 'tool_result':            return e.step_id || 'result'
+    case 'tool_call':
+      return e.tool === 'skill_load' ? 'skill_load' : (e.tool || e.step_id || 'tool')
+    case 'tool_result':
+      return e.tool === 'skill_load' ? 'skill loaded' : (e.step_id || 'result')
     case 'loop_iteration':         return `iteration ${e.iteration ?? '?'}`
     case 'condition_eval':         return e.step_id || 'condition'
     case 'variable_set':           return `$${e.name || '?'}`
@@ -264,5 +320,64 @@ details[open] .row-details-toggle::before {
 /* Live row highlight */
 .row.live .row-label {
   color: var(--text-1, #ededf2);
+}
+
+/* In-flight tool — animated spinner + elapsed-time badge so the user
+   sees what's running in the gap between tool_call and tool_result. */
+.row.is-pending .row-label {
+  color: var(--text-1, #ededf2);
+  font-weight: 600;
+}
+.spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--accent, #6c63ff);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spinner-rotate 0.8s linear infinite;
+}
+@keyframes spinner-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.elapsed {
+  font-size: 10.5px;
+  color: var(--accent, #6c63ff);
+  background: var(--accent-dim, rgba(108, 99, 255, 0.10));
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-left: 8px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* skill_load — distinct so the user can audit how often the agent consults
+   SKILL.md docs vs. acting from prompt-only memory. */
+.row.is-skill-load {
+  background: var(--accent-dim, rgba(108, 99, 255, 0.08));
+  border-left: 2px solid var(--accent, #6c63ff);
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin: 2px 0;
+}
+.row.is-skill-load .row-label {
+  color: var(--accent, #6c63ff);
+}
+.glyph.skill-glyph {
+  font-size: 14px;
+  line-height: 1;
+}
+.skill-badge {
+  font-size: 10.5px;
+  color: var(--accent, #6c63ff);
+  background: var(--accent-dim, rgba(108, 99, 255, 0.12));
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  letter-spacing: -0.01em;
 }
 </style>

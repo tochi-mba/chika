@@ -2,6 +2,13 @@
   <div class="shells-panel">
     <div v-if="!procs.length" class="empty-hint">No shell processes yet</div>
 
+    <div v-if="runningCount > 0" class="shells-toolbar">
+      <span class="shells-count">{{ runningCount }} running</span>
+      <button class="shells-killall" @click="killAll" :disabled="killing">
+        {{ killing ? 'Killing…' : 'Kill all' }}
+      </button>
+    </div>
+
     <div
       v-for="proc in procs"
       :key="proc.pid"
@@ -20,6 +27,13 @@
           {{ fmtDuration(proc.startedAt, proc.finishedAt) }}
         </span>
         <span class="running-pill" v-if="proc.running">running</span>
+        <button
+          v-if="proc.running"
+          class="kill-btn"
+          @click.stop="killOne(proc.pid)"
+          :disabled="killing"
+          title="Terminate this process"
+        >Kill</button>
         <span class="chevron">{{ expanded.has(proc.pid) ? '▾' : '▸' }}</span>
       </div>
 
@@ -108,6 +122,70 @@ watch(
   { deep: true }
 )
 
+// ── Kill controls ──────────────────────────────────────────────────────
+// Per-pid pending set so kills can run concurrently — a global
+// ``killing`` flag would freeze every other Kill button while one
+// request is in flight, which is bad UX when multiple processes are
+// hung. ``killingAll`` is a separate flag because kill-all is genuinely
+// one operation.
+const killingPids = ref(new Set())
+const killingAll  = ref(false)
+
+const killing = computed(() => killingAll.value || killingPids.value.size > 0)
+
+const runningCount = computed(
+  () => procs.value.filter(p => p.running).length,
+)
+
+function authHeaders() {
+  const key = localStorage.getItem('chika_api_key') || ''
+  const h = { 'Content-Type': 'application/json' }
+  if (key) h['Authorization'] = `Bearer ${key}`
+  return h
+}
+
+function _markKilling(pid) {
+  killingPids.value = new Set([...killingPids.value, pid])
+}
+function _unmarkKilling(pid) {
+  killingPids.value = new Set(
+    [...killingPids.value].filter(p => p !== pid),
+  )
+}
+
+async function killOne(pid) {
+  if (killingPids.value.has(pid)) return
+  _markKilling(pid)
+  try {
+    const res = await fetch(`/api/shells/${pid}/kill`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    // The shell_process_done event will arrive over the WS shortly.
+  } catch (err) {
+    console.error('[Chika] kill', pid, 'failed:', err)
+  } finally {
+    _unmarkKilling(pid)
+  }
+}
+
+async function killAll() {
+  if (killingAll.value) return
+  killingAll.value = true
+  try {
+    const res = await fetch('/api/shells/kill_all', {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  } catch (err) {
+    console.error('[Chika] killAll failed:', err)
+  } finally {
+    killingAll.value = false
+  }
+}
+
 function fmtDuration(start, end) {
   const ms = end - start
   if (ms < 1000) return `${ms}ms`
@@ -130,6 +208,52 @@ function fmtDuration(start, end) {
   font-size: 12px;
   padding: 24px;
 }
+
+.shells-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 0;
+  font-size: 11px;
+}
+.shells-count {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.shells-killall {
+  background: none;
+  border: 1px solid var(--red, #e05c5c);
+  color: var(--red, #e05c5c);
+  border-radius: 4px;
+  padding: 3px 9px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.shells-killall:hover:not(:disabled) {
+  background: var(--red, #e05c5c);
+  color: white;
+}
+.shells-killall:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.kill-btn {
+  background: none;
+  border: 1px solid var(--red, #e05c5c);
+  color: var(--red, #e05c5c);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  margin-left: auto;
+  transition: background 100ms, color 100ms;
+}
+.kill-btn:hover:not(:disabled) {
+  background: var(--red, #e05c5c);
+  color: white;
+}
+.kill-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .proc-card {
   border: 1px solid var(--border-strong);

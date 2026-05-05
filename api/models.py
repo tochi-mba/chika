@@ -139,3 +139,7 @@ class MemoryEntryInfo(BaseModel):
 class SettingsPatch(BaseModel):
     autonomy: str | None = None
     tool_permissions: dict[str, str] | None = None
+    pet_speech: str | None = None
+    pet_speech_tokens: int | None = None
+    auto_continue: str | None = None
+    auto_continue_max: int | None = None

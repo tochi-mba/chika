@@ -1,0 +1,198 @@
+/**
+ * Shared Playwright fixtures for the Chika frontend e2e suite.
+ *
+ * Provides:
+ *   - chikaPage: a Page with `window.WebSocket` replaced by a controllable
+ *     mock so tests can drive engine events directly without booting the
+ *     real backend. The mock buffers outbound user messages and exposes
+ *     `pushEvent(...)` to inject server events.
+ *
+ * Why mock WS instead of running the real backend? Speed (no Python
+ * boot), determinism (no real LLM, no race with FastAPI startup), and
+ * we already test the real WS pipeline in tests/test_ws_e2e.py. These
+ * Playwright tests are about the *frontend rendering correctness*.
+ */
+import { test as base, expect } from '@playwright/test'
+
+const wsMockInit = `
+  ;(() => {
+    // Default tests bypass the profile gate so existing scenarios still pass.
+    // Gate-specific tests clear this flag in their own beforeEach.
+    try { sessionStorage.setItem('chika_profile_unlocked', '1') } catch {}
+    const mock = {
+      sentMessages: [],
+      sockets: [],
+      pushEvent(payload) {
+        const sock = mock.sockets[mock.sockets.length - 1]
+        if (!sock) return
+        const ev = { data: typeof payload === 'string' ? payload : JSON.stringify(payload) }
+        sock.onmessage && sock.onmessage(ev)
+      },
+      lastSocket() { return mock.sockets[mock.sockets.length - 1] },
+    }
+
+    class MockWebSocket {
+      constructor(url) {
+        this.url = url
+        this.readyState = 0
+        this.OPEN = 1
+        this.CLOSED = 3
+        mock.sockets.push(this)
+        // Open on next tick so onopen handlers attach before fire.
+        setTimeout(() => {
+          this.readyState = 1
+          this.onopen && this.onopen({})
+          // Standard handshake events the frontend expects.
+          this.onmessage && this.onmessage({
+            data: JSON.stringify({
+              type: 'session_info',
+              session_id: 'e2e-test-session',
+              device_id:  'e2e-device',
+            }),
+          })
+          this.onmessage && this.onmessage({
+            data: JSON.stringify({
+              type:    'settings_info',
+              autonomy:'supervised',
+              categories: {},
+              tool_permissions: {},
+            }),
+          })
+        }, 0)
+      }
+      send(data) { mock.sentMessages.push(data) }
+      close() {
+        this.readyState = 3
+        this.onclose && this.onclose({})
+      }
+      addEventListener(name, fn) { this['on' + name] = fn }
+      removeEventListener() {}
+    }
+    MockWebSocket.OPEN   = 1
+    MockWebSocket.CLOSED = 3
+
+    window.__chikaMockWS = mock
+    window.WebSocket     = MockWebSocket
+
+    // Stub fetch for /api/* so settings/save/etc resolve quickly.
+    const originalFetch = window.fetch
+    window.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input.url
+      if (url.includes('/api/profiles')) {
+        return new Response(JSON.stringify({
+          profiles: [{ name: 'default', pet_id: 'cat' }],
+          active:   'default',
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/api/settings') || url.includes('/api/env')) {
+        return new Response(JSON.stringify({
+          autonomy: 'supervised',
+          tool_permissions: {},
+          categories: {},
+          pet_speech: 'off',
+          pet_speech_tokens: 40,
+          auto_continue: 'on',
+          auto_continue_max: 10,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/api/pets') && !url.includes('/profile/')) {
+        // Realistic pet catalogue with frames so PetCompanion can render
+        // the ASCII art the way it does in production. Single pet keeps
+        // visual snapshots stable.
+        return new Response(JSON.stringify({
+          default: 'cat',
+          pets: [{
+            id: 'cat',
+            name: 'Mochi the Cat',
+            description: 'A sleepy tabby. Blinks slowly while you think.',
+            accent: '#e0b35c',
+            emoji: '🐱',
+            personality: "aloof, ironic, thinks it's smarter than you",
+            preview: ' /\\_/\\\n( o.o )\n > ^ <',
+            frames: {
+              idle: [
+                '   /\\_/\\\n  ( o.o )\n   > ^ <\n  /     \\\n (___|___)',
+                '   /\\_/\\\n  ( -.- )\n   > ^ <\n  /     \\\n (___|___)',
+              ],
+              working: [
+                '   /\\_/\\\n  ( ^.^ )\n  /|> ^ <\n (_|_____)\n   \' \'',
+              ],
+              celebrate: [
+                ' *  /\\_/\\  *\n   ( ^o^ )\n    > w <\n   /     \\\n  (___|___)',
+              ],
+              sad: [
+                '   v\\_/v\n  ( T_T )\n   > _ <\n  /     \\\n (___|___)',
+              ],
+            },
+            quotes: {},
+          }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/api/profile/') && url.includes('/pet')) {
+        return new Response(JSON.stringify({
+          profile: 'default', pet_id: 'cat',
+          pet: { id: 'cat', name: 'Mochi the Cat',
+                 emoji: '🐱', accent: '#e0b35c' },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      // Unknown endpoint — let it pass through (will likely 404, which is fine for tests).
+      return originalFetch ? originalFetch(input, init) : new Response('null', { status: 200 })
+    }
+  })()
+`
+
+export const test = base.extend({
+  /**
+   * Use this fixture in tests that need a stubbed WS / fetch layer.
+   * Example:
+   *   test('renders chat', async ({ chikaPage }) => {
+   *     await chikaPage.goto('/')
+   *     await chikaPage.evaluate(() => window.__chikaMockWS.pushEvent({...}))
+   *   })
+   */
+  chikaPage: async ({ page }, use) => {
+    await page.addInitScript({ content: wsMockInit })
+    await use(page)
+  },
+})
+
+export { expect }
+
+
+/**
+ * Helper: wait until the Vue app has mounted by polling for a known DOM
+ * landmark. Vite SSR'd HTML renders an empty #app; mount happens after
+ * the JS bundle parses.
+ */
+export async function waitForApp(page, timeout = 5000) {
+  await page.waitForFunction(
+    () => !!document.querySelector('.app, #app > *'),
+    null,
+    { timeout },
+  )
+}
+
+
+/** Push one engine event into the mocked WS. */
+export async function pushEvent(page, event) {
+  await page.evaluate((ev) => window.__chikaMockWS.pushEvent(ev), event)
+}
+
+
+/** Push a sequence of engine events with a small tick between each. */
+export async function pushSequence(page, events, delayMs = 30) {
+  for (const ev of events) {
+    await pushEvent(page, ev)
+    if (delayMs > 0) await page.waitForTimeout(delayMs)
+  }
+}
+
+
+/** Read every WS message the frontend has sent (as decoded JSON where possible). */
+export async function sentMessages(page) {
+  return await page.evaluate(() => {
+    return (window.__chikaMockWS?.sentMessages || []).map((m) => {
+      try { return JSON.parse(m) } catch { return m }
+    })
+  })
+}

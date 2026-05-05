@@ -57,11 +57,81 @@
       <button class="btn-retry" id="retryBtn">Retry</button>
     </div>
 
+    <!-- Profile gate — every popup boot picks a profile before chatting. -->
+    <div class="profile-gate" id="profileGate" style="display:none">
+      <div class="profile-gate-head">
+        <p class="setup-text">Who's working today?</p>
+        <p class="setup-sub" id="profileGateSub">Pick a profile to load its memory + workspace.</p>
+      </div>
+      <ul class="profile-list" id="profileList"></ul>
+      <button class="profile-create-toggle" id="profileCreateToggle">+ New profile</button>
+
+      <!-- Password sub-view (shown when the picked profile is locked) -->
+      <div class="profile-pwd" id="profilePwd" style="display:none">
+        <button class="profile-back" id="profilePwdBack">← Back</button>
+        <label class="profile-label">
+          <span id="profilePwdName">Password</span>
+          <input type="password" id="profilePwdInput" autocomplete="current-password" placeholder="••••••" />
+        </label>
+        <div class="profile-error" id="profilePwdError" style="display:none"></div>
+        <button class="btn-primary" id="profilePwdSubmit">Continue</button>
+        <button class="profile-back profile-fallback" id="profilePwdFallback" style="display:none">
+          Locked out? Create a new profile instead →
+        </button>
+      </div>
+
+      <!-- Create sub-view -->
+      <div class="profile-create" id="profileCreate" style="display:none">
+        <button class="profile-back" id="profileCreateBack">← Back</button>
+        <label class="profile-label">
+          <span>Profile name</span>
+          <input type="text" id="profileNewName" placeholder="e.g. tochi" />
+        </label>
+        <label class="profile-label">
+          <span>Password (optional)</span>
+          <input type="password" id="profileNewPwd" autocomplete="new-password"
+                 placeholder="leave empty for no password" />
+        </label>
+        <div class="profile-error" id="profileCreateError" style="display:none"></div>
+        <button class="btn-primary" id="profileCreateSubmit">Create + use</button>
+      </div>
+    </div>
+
     <!-- Chat view -->
     <div class="chat-view" id="chatView" style="display:none">
 
+      <!-- Active shells strip — every running shell is visible with a kill button. -->
+      <div class="ext-shells" id="extShells" style="display:none">
+        <div class="ext-shells-head">
+          <span class="ext-shells-label">Active shells</span>
+          <span class="ext-shells-count" id="extShellsCount"></span>
+          <button class="ext-shells-killall" id="extShellsKillAll" title="Kill every running shell">Kill all</button>
+        </div>
+        <ul class="ext-shells-list" id="extShellsList"></ul>
+      </div>
+
+      <!-- Plan strip — visible when an active plan exists. -->
+      <div class="ext-plan" id="extPlan" style="display:none">
+        <div class="ext-plan-row">
+          <span class="ext-plan-glyph">⏷</span>
+          <span class="ext-plan-goal" id="extPlanGoal"></span>
+          <span class="ext-plan-progress" id="extPlanProgress"></span>
+        </div>
+        <div class="ext-plan-actions">
+          <button class="ext-plan-btn accept" id="extPlanAccept" title="Tell agent the plan is good">✓ accept</button>
+          <button class="ext-plan-btn edit"   id="extPlanEdit"   title="Send feedback to tweak the plan">✎ edit</button>
+          <button class="ext-plan-btn reject" id="extPlanReject" title="Reject and ask for a new plan">✕ reject</button>
+        </div>
+      </div>
+
       <div class="msg-list" id="msgList">
         <!-- Populated by popup.js -->
+      </div>
+
+      <!-- Pet companion (mirrors profile pet from server) -->
+      <div class="ext-pet" id="extPet" style="display:none" title="Your pet">
+        <span class="ext-pet-bubble" id="extPetBubble"></span>
+        <span class="ext-pet-emoji" id="extPetEmoji">🐾</span>
       </div>
 
       <div class="input-area">

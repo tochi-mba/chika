@@ -97,8 +97,136 @@ class WorkflowEngine:
         # Tracks which sub-workflow IDs are currently executing to detect circular references
         self._executing_workflow_ids: set[str] = set()
 
+        # ── Skill gate ─────────────────────────────────────────────────────
+        #
+        # Tracks which skills the agent has already pulled the SKILL.md for
+        # in this session. Before any tool belonging to a skill is dispatched,
+        # the gate runs ``skill_load`` automatically if the skill hasn't been
+        # loaded yet. This makes "always read SKILL.md before using a skill's
+        # tools" a runtime invariant rather than a prompt suggestion.
+        #
+        # Populated by ``set_skill_registry`` so we can reverse-lookup
+        # tool → skill at dispatch time.
+        self._loaded_skills: set[str] = set()
+        self._tool_to_skill: dict[str, str] = {}
+        # Tools that are exempt from the gate even if technically owned by
+        # a skill. ``skill_load`` and ``skill_query`` can never gate their
+        # own call sites — that would block the agent from reading the
+        # very docs it needs to satisfy the gate.
+        self._skill_gate_exempt: set[str] = {"skill_load", "skill_query"}
+
     def register_sub_workflow(self, workflow_id: str, steps: list[dict]) -> None:
         self._sub_workflows[workflow_id] = steps
+
+    def set_skill_registry(self, skill_registry: Any) -> None:
+        """Wire in the skill registry so the gate can reverse-lookup
+        ``tool_name → skill_name``. Called once after the registry is built.
+        """
+        index: dict[str, str] = {}
+        try:
+            skills = skill_registry._skills  # type: ignore[attr-defined]
+        except AttributeError:
+            return
+        for skill_name, skill in skills.items():
+            for tool in getattr(skill, "tools", []) or []:
+                index[tool.name] = skill_name
+        self._tool_to_skill = index
+
+    def mark_skill_loaded(self, skill_name: str) -> None:
+        """Record that ``skill_name``'s SKILL.md has been pulled this session."""
+        if skill_name:
+            self._loaded_skills.add(skill_name)
+
+    async def _check_skill_gate(self, tool_name: str) -> dict | None:
+        """Refuse-and-retry skill gate.
+
+        If ``tool_name`` belongs to a skill whose SKILL.md hasn't been
+        loaded this session, this method:
+
+        1. Loads the SKILL.md by dispatching ``skill_load`` directly (does
+           NOT yield events — the caller emits them).
+        2. Marks the skill loaded so the same skill never refuses twice.
+        3. Returns a dict telling the caller to REFUSE the original tool —
+           the agent re-plans on the next turn with the doc in context.
+
+        Returns ``None`` (= pass-through dispatch) when:
+        - The tool is in the exempt set (``skill_load`` itself).
+        - The tool doesn't belong to any skill.
+        - The skill has already been loaded this session.
+        - The ``skill_load`` tool isn't registered (defensive degrade).
+        - ``skill_load`` failed (e.g. no SKILL.md on disk) — we don't want
+          to soft-lock the user out of a skill that simply has no doc yet.
+        """
+        if tool_name in self._skill_gate_exempt:
+            return None
+        skill_name = self._tool_to_skill.get(tool_name)
+        if not skill_name or skill_name in self._loaded_skills:
+            return None
+
+        loader = self._tools.get("skill_load")
+        if loader is None:
+            # Engine without the loader registered — gate is a silent no-op.
+            self._loaded_skills.add(skill_name)
+            return None
+
+        sid = f"skill_gate_{skill_name}"
+        t0 = time.monotonic()
+        try:
+            load_result = await self._tools.dispatch(
+                "skill_load", {"skill": skill_name},
+            )
+        except Exception as exc:
+            load_result = {"error": f"{type(exc).__name__}: {exc}"}
+        duration = int((time.monotonic() - t0) * 1000)
+        err = load_result.get("error") if isinstance(load_result, dict) else None
+
+        # Mark loaded regardless — a failed load shouldn't re-trigger.
+        self._loaded_skills.add(skill_name)
+
+        # Loader events the caller should yield so the trace shows the
+        # auto-load happened (with the 📚 audit badge).
+        loader_events = [
+            {"type": "tool_call", "step_id": sid, "tool": "skill_load",
+             "args": {"skill": skill_name, "_auto": True}},
+            {"type": "tool_result", "step_id": sid, "tool": "skill_load",
+             "result": load_result, "error": err, "duration_ms": duration},
+        ]
+
+        # If the doc itself failed to load, don't lock the user out of the
+        # tool — degrade to pass-through (with the loader events visible).
+        if err:
+            return {
+                "skill_name":      skill_name,
+                "loader_events":   loader_events,
+                "refusal_payload": None,  # don't refuse the tool
+            }
+
+        doc = load_result.get("doc") if isinstance(load_result, dict) else ""
+        char_count = (
+            load_result.get("char_count") if isinstance(load_result, dict) else 0
+        )
+        return {
+            "skill_name":    skill_name,
+            "loader_events": loader_events,
+            "refusal_payload": {
+                "error":         "skill_doc_required",
+                "skill":         skill_name,
+                "tool_blocked":  tool_name,
+                "char_count":    char_count,
+                "doc":           doc,
+                "hint": (
+                    f"`{tool_name}` did NOT run. Reason: {skill_name!r}'s "
+                    "SKILL.md had not been loaded — the gate refuses skill "
+                    "tools on first use so you re-plan with the doc in "
+                    "context. The full SKILL.md is embedded above; the "
+                    "skill is now marked loaded for the rest of this "
+                    "session. **Generate a new workflow_orchestrator call "
+                    "now**, using the doc to pick the right tool, args, "
+                    "and order. Subsequent calls to this skill's tools "
+                    "will pass through normally."
+                ),
+            },
+        }
 
     def _profile(self) -> str:
         v = self._vars.get("profile.name")
@@ -134,31 +262,214 @@ class WorkflowEngine:
                 count += WorkflowEngine._count_file_writes(child)
         return count
 
+    # Tools that materially change the user's environment. A workflow that
+    # combines several of these without any plan_* call is real work that
+    # should have a checklist behind it.
+    _WRITE_TOOLS: frozenset[str] = frozenset({
+        "file_write", "file_replace", "file_edit_lines", "file_append",
+        "shell_exec", "bg_shell_exec", "python_run", "live_server",
+        "scaffold_web_app",
+        "git_commit", "git_push", "git_pull", "git_checkout",
+        "git_pr_create", "git_pr_merge",
+        "browser_navigate", "browser_click", "browser_fill_input",
+        "browser_open_tab",
+    })
+    # Tools whose presence anywhere in the workflow exempts it from the
+    # plan-required gate (the agent is *currently* planning, or breaking
+    # out of a stuck state).
+    _PLAN_GATE_EXEMPT: frozenset[str] = frozenset({
+        "plan_set", "plan_add", "plan_update", "plan_remove", "plan_edit",
+        "plan_get", "plan_reconcile", "plan_archive", "plan_history",
+    })
+
+    @staticmethod
+    def _collect_tool_names(node: Any, out: list[str]) -> None:
+        """Walk the workflow tree and accumulate every tool name."""
+        if not isinstance(node, dict):
+            return
+        if "tool" in node and "type" not in node:
+            out.append(node["tool"])
+        for key in ("steps", "branches"):
+            for child in node.get(key) or []:
+                WorkflowEngine._collect_tool_names(child, out)
+        for key in ("step", "if_true", "if_false", "then", "fan_in"):
+            child = node.get(key)
+            if isinstance(child, dict):
+                WorkflowEngine._collect_tool_names(child, out)
+
+    # ── Project-creation tools that ALWAYS require a plan ─────────────
+    # These tools materially start a new project (scaffolding, app
+    # bootstraps). The previous threshold-based gate let "scaffold +
+    # one or two edits" workflows skip planning entirely; the user
+    # consistently saw the agent build a Powder Toy clone with no
+    # checklist. Now, ANY workflow that includes one of these tools
+    # MUST have an active plan or include a plan_* tool itself.
+    _ALWAYS_REQUIRE_PLAN: frozenset[str] = frozenset({
+        "scaffold_web_app",
+    })
+
+    def _check_plan_required(self, workflow: dict) -> dict | None:
+        """Refuse-and-retry: when this workflow does multi-step real
+        work or contains a project-creation tool with no active plan
+        AND no plan_* tool in the workflow itself, return a refusal
+        payload. The caller emits a synthetic ``tool_result`` so the
+        LLM re-plans with ``plan_set`` first.
+
+        Two trigger conditions, either is enough:
+
+        1. **Project-creation tool** (``scaffold_web_app`` + similar) —
+           always blocks without a plan, regardless of step count.
+           This catches the "build me a clone" pattern that previously
+           sneaked under the threshold.
+        2. **3+ write-class tool calls** — multi-step real work that
+           deserves a checklist. Single edits + scaffolding + verify
+           bundles still skip the gate.
+        """
+        tools: list[str] = []
+        self._collect_tool_names(workflow, tools)
+
+        # Agent is touching the plan in this very workflow — let it run.
+        if any(t in self._PLAN_GATE_EXEMPT for t in tools):
+            return None
+
+        write_count = sum(1 for t in tools if t in self._WRITE_TOOLS)
+        creation_tools = [t for t in tools if t in self._ALWAYS_REQUIRE_PLAN]
+
+        # Skip when nothing crosses the threshold AND nothing is a
+        # project-creation tool.
+        if write_count < 3 and not creation_tools:
+            return None
+
+        # Is there already an active plan?
+        try:
+            plan_var = self._vars.get("plan")
+        except Exception:
+            plan_var = None
+        if plan_var is not None and isinstance(plan_var.value, dict) \
+                and (plan_var.value.get("tasks") or []):
+            return None
+
+        if creation_tools:
+            reason = (
+                f"This workflow runs {creation_tools[0]} (a "
+                "project-creation tool) and there's no active plan. "
+                "Project creation always requires a plan first — "
+                "call `plan_set` with goal + requirements + tasks "
+                "(see plan_skill SKILL.md), then re-emit. Use "
+                "`plan_set` as the FIRST step of this workflow if "
+                "you want to plan + scaffold in one round-trip."
+            )
+        else:
+            reason = (
+                f"This workflow has {write_count} write-class tool calls "
+                f"({sorted({t for t in tools if t in self._WRITE_TOOLS})}) "
+                "and there's no active plan. The runtime requires a plan "
+                "before multi-step real work — call `plan_set` FIRST with "
+                "a verbose plan (goal, requirements, tasks with subtasks) "
+                "and THEN re-emit your workflow. The plan_skill SKILL.md "
+                "has the canonical template. Single-step or read-only "
+                "workflows are exempt from this gate."
+            )
+
+        return {
+            "error":            "plan_required",
+            "write_count":      write_count,
+            "creation_tools":   creation_tools,
+            "writes_used":      sorted({t for t in tools if t in self._WRITE_TOOLS}),
+            "hint":             reason,
+        }
+
     async def execute(self, workflow: dict) -> AsyncGenerator[Event, None]:
-        """Top-level entry: execute a workflow dict and stream events."""
-        from config import MAX_WORKFLOW_STEPS
+        """Top-level entry: execute a workflow dict and stream events.
+
+        Workflow size guidelines (``MAX_WORKFLOW_STEPS``, ``MAX_FILE_WRITES_PER_WF``)
+        are now SOFT limits — if the agent overshoots we emit a
+        ``validation_warning`` and keep executing instead of aborting. The
+        agent has prompt-side rules to keep workflows small; the runtime's
+        job is to actually run the work. A hard ceiling at 10× the soft
+        limit still aborts genuinely runaway / accidentally recursive
+        workflows so we don't DOS the engine.
+        """
+        from config import MAX_FILE_WRITES_PER_WF, MAX_WORKFLOW_STEPS
         step_count = self._count_steps(workflow)
-        if step_count > MAX_WORKFLOW_STEPS:
+        fw_count = self._count_file_writes(workflow)
+
+        # Hard safety ceilings — only triggered for genuinely runaway specs.
+        hard_step_cap = max(MAX_WORKFLOW_STEPS * 10, 80)
+        hard_fw_cap = max(MAX_FILE_WRITES_PER_WF * 10, 30)
+        if step_count > hard_step_cap:
             yield {"type": "error", "message": (
-                f"Workflow has {step_count} steps (limit is {MAX_WORKFLOW_STEPS}). "
-                "Break it into smaller workflows across multiple turns. "
-                "Use plan_set to outline the full task, then execute one "
-                "piece per workflow (e.g. write 1 file, verify, then next)."
+                f"Workflow has {step_count} steps — exceeds the hard safety "
+                f"cap of {hard_step_cap}. Refusing to execute. Split the "
+                "work across multiple workflows."
+            )}
+            return
+        if fw_count > hard_fw_cap:
+            yield {"type": "error", "message": (
+                f"Workflow has {fw_count} file_write calls — exceeds the "
+                f"hard safety cap of {hard_fw_cap}. Refusing to execute. "
+                "Use file_replace / file_append for edits, or split across "
+                "workflows."
             )}
             return
 
-        from config import MAX_FILE_WRITES_PER_WF
-        fw_count = self._count_file_writes(workflow)
+        # Soft limits — warn the agent next turn but DO NOT block execution.
+        if step_count > MAX_WORKFLOW_STEPS:
+            yield {
+                "type":     "validation_warning",
+                "severity": "low",
+                "reason":   "workflow_oversize",
+                "message": (
+                    f"Workflow has {step_count} steps (soft target is "
+                    f"{MAX_WORKFLOW_STEPS}). Executing anyway, but next "
+                    "time keep workflows small — use plan_set to outline "
+                    "the full job and execute one piece per turn."
+                ),
+                "step_count":    step_count,
+                "soft_limit":    MAX_WORKFLOW_STEPS,
+            }
         if fw_count > MAX_FILE_WRITES_PER_WF:
-            yield {"type": "error", "message": (
-                f"Workflow has {fw_count} file_write calls (limit is {MAX_FILE_WRITES_PER_WF} per workflow). "
-                "Split additional new files into separate workflows across turns. "
-                "file_replace and file_append are not limited."
-            )}
-            return
+            yield {
+                "type":     "validation_warning",
+                "severity": "low",
+                "reason":   "workflow_oversize_writes",
+                "message": (
+                    f"Workflow has {fw_count} file_write calls (soft target "
+                    f"is {MAX_FILE_WRITES_PER_WF}). Executing anyway. Use "
+                    "file_replace / file_append for edits to existing files."
+                ),
+                "file_writes":  fw_count,
+                "soft_limit":   MAX_FILE_WRITES_PER_WF,
+            }
 
         wf_id = workflow.get("id", "workflow")
         wf_name = workflow.get("name", wf_id)
+
+        # ── Plan-required gate ──────────────────────────────────────────
+        # Refuse multi-step write workflows that don't have an active plan
+        # AND don't include a plan_* tool. Forces the agent to call
+        # plan_set first so there's a checklist for the user to track.
+        plan_refusal = self._check_plan_required(workflow)
+        if plan_refusal is not None:
+            sid = "plan_gate"
+            _log.info("plan_required_refusal",
+                      workflow_id=wf_id,
+                      write_count=plan_refusal["write_count"],
+                      profile=self._profile())
+            yield {"type": "tool_call", "step_id": sid,
+                   "tool":   "plan_gate",
+                   "args":   {"_auto": True,
+                              "writes_used": plan_refusal["writes_used"]}}
+            yield {
+                "type":         "tool_result",
+                "step_id":      sid,
+                "tool":         "plan_gate",
+                "result":       plan_refusal,
+                "error":        "plan_required",
+                "duration_ms":  0,
+            }
+            return
+
         _log.info("workflow_start", workflow_id=wf_id, name=wf_name, profile=self._profile())
         yield {"type": "workflow_start", "workflow_id": wf_id, "name": wf_name}
 
@@ -580,6 +891,44 @@ class WorkflowEngine:
 
         # Resolve $variable references in args
         resolved_args = self._vars.resolve(raw_args)
+
+        # ── Skill gate ───────────────────────────────────────────────────
+        # Refuse-and-retry: if this tool belongs to a skill whose SKILL.md
+        # hasn't been loaded yet, we DO NOT dispatch the tool. We surface
+        # the doc and a structured ``skill_doc_required`` error so the
+        # agent re-plans on the next turn with the SKILL.md in context.
+        gate = await self._check_skill_gate(tool_name)
+        if gate is not None:
+            for ev in gate["loader_events"]:
+                yield ev
+            payload = gate["refusal_payload"]
+            if payload is not None:
+                # Synthetic tool_call/tool_result for the REFUSED tool.
+                yield {"type": "tool_call", "step_id": sid,
+                       "tool": tool_name, "args": resolved_args}
+                yield {
+                    "type":         "tool_result",
+                    "step_id":      sid,
+                    "tool":         tool_name,
+                    "result":       payload,
+                    "error":        "skill_doc_required",
+                    "duration_ms":  0,
+                }
+                # Sequential will abort on this error event the same way
+                # any tool failure does — no need for a separate "error"
+                # event. The outer engine reads the payload's `doc` and
+                # feeds it back to the LLM for the retry turn.
+                return
+            # If the loader itself failed (no SKILL.md on disk), fall
+            # through and dispatch the original tool — better UX than
+            # locking the user out of an undocumented skill.
+
+        # Track explicit skill_load calls too — when the agent ITSELF loads
+        # a skill, mark it loaded so the gate doesn't re-fire later.
+        if tool_name == "skill_load":
+            requested = resolved_args.get("skill") if isinstance(resolved_args, dict) else None
+            if requested:
+                self.mark_skill_loaded(requested)
 
         # Check if tool requires user approval before running
         tool_def = self._tools.get(tool_name)

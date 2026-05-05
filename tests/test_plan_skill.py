@@ -13,7 +13,9 @@ def _run(coro):
 
 def _tools():
     store = VariableStore()
-    plan_set, plan_update, plan_get = _make_plan_tools(store)
+    # _make_plan_tools now returns 5 callables (plan_add + plan_remove
+    # were added). Tests in this file only need the original three.
+    plan_set, plan_update, plan_get, *_ = _make_plan_tools(store)
     return store, plan_set, plan_update, plan_get
 
 
@@ -95,8 +97,10 @@ def test_plan_get_returns_current_plan():
     assert r["plan"]["tasks"][0]["text"] == "A"
 
 
-def test_plan_skill_wires_three_tools():
+def test_plan_skill_wires_all_tools():
     store = VariableStore()
     skill = build_plan_skill(store)
     tool_names = {t.name for t in skill.tools}
-    assert tool_names == {"plan_set", "plan_update", "plan_get"}
+    assert tool_names == {"plan_set", "plan_update", "plan_get",
+                          "plan_add", "plan_remove", "plan_edit",
+                          "plan_reconcile", "plan_archive", "plan_history"}

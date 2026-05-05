@@ -1,4 +1,8 @@
 {
+  "auto_continue": "off",
   "autonomy": "supervised",
-  "tool_permissions": {}
+  "tool_permissions": {},
+  "pet_speech": "off",
+  "pet_speech_tokens": 40,
+  "auto_continue_max": 10
 }

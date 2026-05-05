@@ -1,6 +1,48 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
+// Pet state machine — driven by engine events.
+// states: 'idle' | 'thinking' | 'working' | 'celebrate' | 'sad' | 'sleeping'
+// Each non-idle state carries a `bubble` (one-shot speech) + `since` ts.
+const TOOL_BUBBLES = {
+  shell_exec:        { kind: 'working', text: 'running a command…' },
+  bg_shell_exec:     { kind: 'working', text: 'spawning a process…' },
+  file_read:         { kind: 'working', text: 'reading…' },
+  file_write:        { kind: 'working', text: 'writing…' },
+  file_edit_lines:   { kind: 'working', text: 'editing…' },
+  file_replace:      { kind: 'working', text: 'replacing text…' },
+  web_search:        { kind: 'working', text: 'searching the web…' },
+  web_fetch:         { kind: 'working', text: 'fetching a page…' },
+  verify_url:        { kind: 'working', text: 'checking a link…' },
+  git_status:        { kind: 'working', text: 'looking at git…' },
+  git_commit:        { kind: 'working', text: 'committing…' },
+  git_push:          { kind: 'working', text: 'pushing…' },
+  memory_persist:    { kind: 'working', text: 'remembering…' },
+  memory_recall:     { kind: 'working', text: 'recalling…' },
+  browser_navigate:  { kind: 'working', text: 'navigating…' },
+  browser_screenshot:{ kind: 'working', text: 'snapping a shot…' },
+  browser_click:     { kind: 'working', text: 'clicking…' },
+}
+
+function derivePetState(prev, event) {
+  const t = event.type
+  if (t === 'thinking')        return { ...prev, state: 'thinking', bubble: null,                    tickedAt: Date.now() }
+  if (t === 'workflow_start')  return { ...prev, state: 'working',  bubble: 'getting to work…',      tickedAt: Date.now() }
+  if (t === 'tool_call') {
+    const reaction = TOOL_BUBBLES[event.tool]
+    return { ...prev, state: 'working', bubble: reaction?.text || `using ${event.tool}…`, tickedAt: Date.now() }
+  }
+  if (t === 'tool_result' && event.error)  return { ...prev, state: 'sad',       bubble: 'oops, that failed', tickedAt: Date.now() }
+  if (t === 'workflow_done')               return { ...prev, state: 'celebrate', bubble: 'done!',            tickedAt: Date.now() }
+  if (t === 'error')                       return { ...prev, state: 'sad',       bubble: 'something broke',  tickedAt: Date.now() }
+  if (t === 'cancelled')                   return { ...prev, state: 'sad',       bubble: 'stopped.',          tickedAt: Date.now() }
+  if (t === 'done') {
+    // After a successful turn settle back to idle within 2s
+    return { ...prev, state: prev.state === 'sad' ? 'sad' : 'idle', bubble: null, tickedAt: Date.now() }
+  }
+  return prev
+}
+
 export const useSystemStore = defineStore('system', () => {
   // Raw event feed (all events in order)
   const events = ref([])
@@ -31,8 +73,17 @@ export const useSystemStore = defineStore('system', () => {
   // Chrome extension connection state
   const extensionConnected = ref(false)
 
-  // Active profile
-  const profile = ref({ name: 'default', workspace: '' })
+  // Active profile + pet
+  const profile = ref({ name: 'default', workspace: '', pet_id: null })
+  // The pet currently animated for this profile.  Initially the
+  // server/profile pet_id; "state" is 'idle' | 'working' | 'celebrate' | 'sad'.
+  const petState = ref({ id: null, state: 'idle', tickedAt: 0 })
+
+  // Audit log of every SKILL.md the agent has loaded this session.
+  // Each entry: { skill, char_count, condensed, at }
+  // The system panel renders a count so the user can SEE whether the agent
+  // is actually consulting skill docs or working from prompt-only memory.
+  const skillLoads = ref([])
 
   // Autonomy mode: "supervised" | "autonomous"
   const autonomy = ref('supervised')
@@ -71,6 +122,11 @@ export const useSystemStore = defineStore('system', () => {
     events.value.push({ ...event, _ts: Date.now() })
     if (events.value.length > 500) events.value.shift()
 
+    // Pet state piggybacks on engine events. Done before the switch so it
+    // reacts to ALL events that imply work happening, even ones that have
+    // no other store-level effect (token, thinking, step_start).
+    petState.value = derivePetState(petState.value, event)
+
     // Derive state from specific event types
     switch (event.type) {
       case 'workflow_start':
@@ -80,13 +136,6 @@ export const useSystemStore = defineStore('system', () => {
           steps: [],
           status: 'running',
           startedAt: Date.now(),
-        }
-        break
-
-      case 'workflow_done':
-        if (activeWorkflow.value) {
-          activeWorkflow.value.status = 'done'
-          activeWorkflow.value.finishedAt = Date.now()
         }
         break
 
@@ -143,6 +192,44 @@ export const useSystemStore = defineStore('system', () => {
         pendingApprovals.value = pendingApprovals.value.filter(
           a => a.step_id !== event.step_id
         )
+        // Plan-tool results carry the full plan payload — surface it on
+        // variables.plan.value so PlanPanel can render the full structure
+        // (not just the truncated 120-char value_preview from variable_set).
+        if (
+          event.tool && event.tool.startsWith('plan_')
+          && event.result && typeof event.result === 'object'
+          && event.result.plan
+        ) {
+          variables.value['plan'] = {
+            ...(variables.value['plan'] || {}),
+            name: 'plan',
+            var_type: 'json',
+            value: event.result.plan,
+            updatedAt: Date.now(),
+          }
+        }
+        break
+
+      case 'workflow_done':
+        // Pull every variable produced by the workflow so PlanPanel and any
+        // other variable-driven UI gets the FULL value (variable_set only
+        // carries a truncated preview). The engine emits this as a flat
+        // {name: value} dict in event.variables.
+        if (event.variables && typeof event.variables === 'object') {
+          for (const [name, value] of Object.entries(event.variables)) {
+            const prev = variables.value[name] || {}
+            variables.value[name] = {
+              ...prev,
+              name,
+              value,
+              updatedAt: Date.now(),
+            }
+          }
+        }
+        if (activeWorkflow.value) {
+          activeWorkflow.value.status = 'done'
+          activeWorkflow.value.finishedAt = Date.now()
+        }
         break
 
       case 'done':
@@ -158,7 +245,20 @@ export const useSystemStore = defineStore('system', () => {
         break
 
       case 'profile_info':
-        profile.value = { name: event.name, workspace: event.workspace }
+        profile.value = {
+          name:      event.name,
+          workspace: event.workspace,
+          pet_id:    event.pet_id ?? null,
+        }
+        petState.value = { id: event.pet_id ?? null, state: 'idle', tickedAt: Date.now() }
+        break
+
+      case 'pet_changed':
+        // Server-broadcast pet swap. Apply only if it's the active profile.
+        if (event.profile === profile.value.name) {
+          profile.value = { ...profile.value, pet_id: event.pet_id }
+          petState.value = { id: event.pet_id, state: 'celebrate', tickedAt: Date.now() }
+        }
         break
 
       case 'shell_process_start':
@@ -244,7 +344,7 @@ export const useSystemStore = defineStore('system', () => {
 
   return {
     events, activeWorkflow, variables, memory, shellProcesses,
-    connected, sessionId, connectionError, profile,
+    connected, sessionId, connectionError, profile, petState,
     extensionConnected,
     pendingApprovals, pendingQuestions,
     autonomy, toolPermissions, permissionCategories,

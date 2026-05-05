@@ -60,6 +60,27 @@ class ProcessRegistry:
         cls._procs.pop(pid, None)
 
 
+async def _wait_for_early_exit(managed: ManagedProcess, *, grace_seconds: float) -> None:
+    """Poll a freshly-spawned background process for up to ``grace_seconds``.
+
+    Returns as soon as the process exits OR the grace window elapses. Lets a
+    background spawn surface ``ImportError`` / missing-binary / bad-path
+    crashes in the very first tool result instead of pretending success.
+    """
+    deadline = grace_seconds
+    step = 0.05
+    elapsed = 0.0
+    while elapsed < deadline:
+        if not managed.running:
+            return
+        await asyncio.sleep(step)
+        elapsed += step
+        # Back off the polling rate after the first ~250ms so we're not
+        # pegging the event loop for a healthy long-running GUI.
+        if elapsed > 0.25:
+            step = 0.15
+
+
 # ── Background reader ─────────────────────────────────────────────────────────
 
 async def _read_stream_into_buf(stream: asyncio.StreamReader | None, buf: list[str]) -> None:
@@ -261,11 +282,32 @@ async def _shell_exec_threaded(
         fake_proc.returncode = rc
     asyncio.create_task(_watch_exit()).add_done_callback(_log_task_exception)
 
+    # Same grace window as the asyncio path — surface fast crashes.
+    await _wait_for_early_exit(managed, grace_seconds=1.5)
+    if not managed.running:
+        return {
+            "stdout":       "\n".join(managed.stdout_buf[-200:]),
+            "stderr":       "\n".join(managed.stderr_buf[-200:]),
+            "exit_code":    managed.exit_code if managed.exit_code is not None else -1,
+            "timed_out":    False,
+            "pid":          popen.pid,
+            "stdout_lines": managed.stdout_buf[-200:],
+            "status":       "exited_early",
+            "message":      (
+                f"Process pid={popen.pid} exited within the grace window "
+                f"(code={managed.exit_code}). Likely a crash on startup — "
+                f"check stderr."
+            ),
+        }
     return {
-        "stdout": "", "stderr": "", "exit_code": -1,
-        "timed_out": False, "pid": popen.pid, "stdout_lines": [],
-        "status": "running",
-        "message": f"Process started with pid={popen.pid}. Use shell_get_output({popen.pid}) to read output.",
+        "stdout":       "\n".join(managed.stdout_buf[-50:]),
+        "stderr":       "\n".join(managed.stderr_buf[-50:]),
+        "exit_code":    -1,
+        "timed_out":    False,
+        "pid":          popen.pid,
+        "stdout_lines": managed.stdout_buf[-50:],
+        "status":       "running",
+        "message":      f"Process started with pid={popen.pid}. Use shell_get_output({popen.pid}) to read output.",
     }
 
 
@@ -345,11 +387,36 @@ async def shell_exec(
             managed.exit_code = proc.returncode
 
         asyncio.create_task(_watch_exit()).add_done_callback(_log_task_exception)
+
+        # Brief grace period: many "background" GUI commands actually crash
+        # within the first second (ImportError, missing binary, bad path).
+        # Polling here surfaces those errors in the FIRST tool result so the
+        # agent doesn't optimistically declare success on a doomed pid.
+        await _wait_for_early_exit(managed, grace_seconds=1.5)
+        if not managed.running:
+            return {
+                "stdout":       "\n".join(managed.stdout_buf[-200:]),
+                "stderr":       "\n".join(managed.stderr_buf[-200:]),
+                "exit_code":    managed.exit_code if managed.exit_code is not None else -1,
+                "timed_out":    False,
+                "pid":          proc.pid,
+                "stdout_lines": managed.stdout_buf[-200:],
+                "status":       "exited_early",
+                "message":      (
+                    f"Process pid={proc.pid} exited within the grace window "
+                    f"(code={managed.exit_code}). Likely a crash on startup — "
+                    f"check stderr."
+                ),
+            }
         return {
-            "stdout": "", "stderr": "", "exit_code": -1,
-            "timed_out": False, "pid": proc.pid, "stdout_lines": [],
-            "status": "running",
-            "message": f"Process started with pid={proc.pid}. Use shell_get_output({proc.pid}) to read output.",
+            "stdout":       "\n".join(managed.stdout_buf[-50:]),
+            "stderr":       "\n".join(managed.stderr_buf[-50:]),
+            "exit_code":    -1,
+            "timed_out":    False,
+            "pid":          proc.pid,
+            "stdout_lines": managed.stdout_buf[-50:],
+            "status":       "running",
+            "message":      f"Process started with pid={proc.pid}. Use shell_get_output({proc.pid}) to read output.",
         }
 
     try:

@@ -100,43 +100,5 @@ WEB_SKILL = Skill(
             handler=web_search,
         ),
     ],
-    workflow_examples="""
-### Web Research Workflows
-
-**Search and summarise:**
-```json
-{"type": "sequential", "steps": [
-  {"tool": "web_search", "args": {"query": "$search_query"}, "store_result_as": "$results"},
-  {"tool": "llm_summarise",
-   "args": {"prompt": "Summarise key findings.", "context": {"results": "$results"}},
-   "store_result_as": "$summary"}
-]}
-```
-
-**Fetch a page — save to temp file — read in sections:**
-```json
-{"type": "sequential", "steps": [
-  {"tool": "web_fetch", "args": {"url": "$url", "save_path": "$chika.tmp/chika_page.html"}, "store_result_as": "$fetch"},
-  {"tool": "file_read", "args": {"path": "$chika.tmp/chika_page.html", "start_line": 1, "end_line": 80}, "store_result_as": "$top"},
-  {"tool": "llm_transform", "args": {"prompt": "What line range contains the answer? total_lines is in the result.", "context": "$top", "schema": {"start": "integer", "end": "integer"}}, "store_result_as": "$range"},
-  {"tool": "file_read", "args": {"path": "$chika.tmp/chika_page.html", "start_line": "$range.start", "end_line": "$range.end"}, "store_result_as": "$section"}
-]}
-```
-
-**Search → get URL → fetch → read:**
-```json
-{"type": "sequential", "steps": [
-  {"tool": "web_search", "args": {"query": "site query here"}, "store_result_as": "$results"},
-  {"tool": "llm_transform", "args": {"prompt": "Extract the best URL.", "context": "$results", "schema": {"url": "string"}}, "store_result_as": "$page"},
-  {"tool": "web_fetch", "args": {"url": "$page.url", "save_path": "$chika.tmp/chika_page.html"}, "store_result_as": "$fetch"},
-  {"tool": "file_read", "args": {"path": "$chika.tmp/chika_page.html", "start_line": 1, "end_line": 80}, "store_result_as": "$preview"}
-]}
-```
-
-**Verify a URL before using it:**
-```json
-{"tool": "web_head", "args": {"url": "$some_url"}, "store_result_as": "$check"}
-```
-Then check `$check.ok` (true = 200), `$check.is_image` (true = image), `$check.is_html` (true = webpage).
-""",
+    workflow_examples="",
 )

@@ -46,10 +46,13 @@ from api.routes import profiles as profiles_routes
 from api.routes import sessions as sessions_routes
 from api.routes import registry as registry_routes
 from api.routes import config as config_routes
+from api.routes import env as env_routes
+from api.routes import pets as pets_routes
 from api.routes import settings as settings_routes
 from api.routes import spotify as spotify_routes
 from api.routes import chat_history as chat_history_routes
 from api.routes import docs as docs_routes
+from api.routes import shells as shells_routes
 from api.routes import static as static_routes
 
 app = FastAPI(title="Chika v2", version="2.0.0")
@@ -86,10 +89,13 @@ app.include_router(profiles_routes.router)
 app.include_router(sessions_routes.router)
 app.include_router(registry_routes.router)
 app.include_router(config_routes.router)
+app.include_router(env_routes.router)
+app.include_router(pets_routes.router)
 app.include_router(settings_routes.router)
 app.include_router(spotify_routes.router)
 app.include_router(chat_history_routes.router)
 app.include_router(docs_routes.router)
+app.include_router(shells_routes.router)
 # Static mount happens AFTER WebSocket handlers so Starlette's routing table
 # has the specific /ws/* paths registered before the catch-all StaticFiles "/".
 
@@ -160,6 +166,7 @@ async def websocket_endpoint(
             "type":      "profile_info",
             "name":      p.name if p else "default",
             "workspace": p.workspace if p else "",
+            "pet_id":    (p.pet_id if p else None),
         })
 
     # ── Extension session linking ─────────────────────────────────────────────
@@ -266,6 +273,19 @@ async def websocket_endpoint(
                 })
                 response: dict = await fut
 
+            # Workspace-scope approvals carry a tri-state choice
+            # ('session' / 'once' / 'deny') the WorkspacePolicy uses
+            # to decide how long the grant survives. Return the dict
+            # shape the policy expects rather than the legacy bool.
+            if actual_type == "workspace_scope":
+                scope = (response.get("scope") or "deny").lower()
+                if scope not in ("session", "once", "deny"):
+                    scope = "deny"
+                return {
+                    "scope":  scope,
+                    "reason": response.get("reason") or "",
+                }
+
             if not response.get("approved", False):
                 return False
 
@@ -302,6 +322,24 @@ async def websocket_endpoint(
             _approval_futures.pop(request_id, None)
 
     engine._workflow_engine.approval_handler = approval_handler
+
+    # Wire the workspace-scope policy onto the file-write tools so writes
+    # outside the active profile's workspace trigger the same approval
+    # channel (with the tri-state session/once/deny picker rendered by
+    # ApprovalModal). The policy lives per session so grants don't bleed
+    # across users.
+    try:
+        from chika.core.workspace_policy import WorkspacePolicy
+        from chika.tools import file_tools as _ft
+        if engine._active_profile:
+            _policy = WorkspacePolicy(
+                workspace=str(engine._active_profile.workspace),
+            )
+            _ft.configure_workspace_policy(_policy, approval_handler)
+    except Exception:
+        # Policy wiring is best-effort — never block a session because
+        # the workspace path is weird or the policy module fails to load.
+        pass
 
     # ── ask_user question handler ─────────────────────────────────────────────
     _question_futures: dict[str, asyncio.Future] = {}
@@ -365,6 +403,11 @@ async def websocket_endpoint(
                         fut.set_result({
                             "approved": bool(msg.get("approved", False)),
                             "password": str(msg.get("password", "")),
+                            # Workspace-scope: carries the user's
+                            # session/once/deny choice through to the
+                            # WorkspacePolicy. Other approval types
+                            # ignore this field.
+                            "scope":    str(msg.get("scope", "")),
                         })
 
                 elif mtype == "user_question_response":

@@ -33,6 +33,26 @@ _SETTINGS_PATH = Path("data/settings.json")
 
 _VALID_AUTONOMY = {"supervised", "autonomous"}
 _VALID_PERMISSION = {"ask", "skip"}
+_VALID_PET_SPEECH = {"on", "off"}
+_VALID_AUTO_CONTINUE = {"on", "off"}
+
+# Defaults for the pet companion. Each profile picks its own pet (handled by
+# ProfileManager); these settings control whether the pet says LLM-generated
+# quips and how many tokens each quip is allowed.
+_PET_DEFAULTS = {
+    "pet_speech":        "off",
+    "pet_speech_tokens": 40,
+}
+
+# Auto-continuation: when the assistant's reply ends with a "next I'll …"
+# style promise (and isn't asking a question), the engine fires another
+# turn with the synthetic prompt "continue" so the agent actually does the
+# next thing instead of stopping mid-thought. Hard-capped to prevent
+# runaway loops.
+_AUTO_CONTINUE_DEFAULTS = {
+    "auto_continue":     "on",
+    "auto_continue_max": 10,   # bumped from 5 — most multi-step plans need ≥7
+}
 
 # ── Category definitions ──────────────────────────────────────────────────────
 
@@ -53,6 +73,7 @@ TOOL_CATEGORY_MAP: dict[str, str] = {
     "shell_exec":           "shell",
     "bg_shell_exec":        "shell",
     "shell_kill":           "shell",
+    "python_run":           "shell",
     # File writes
     "file_write":           "file_write",
     "file_append":          "file_write",
@@ -123,6 +144,14 @@ def init(defaults: dict) -> None:
     if "tool_permissions" not in _settings:
         _settings["tool_permissions"] = {}
         changed = True
+    for k, v in _PET_DEFAULTS.items():
+        if k not in _settings:
+            _settings[k] = v
+            changed = True
+    for k, v in _AUTO_CONTINUE_DEFAULTS.items():
+        if k not in _settings:
+            _settings[k] = v
+            changed = True
     if changed:
         _save()
 
@@ -176,6 +205,34 @@ def update(patch: dict) -> dict:
             if perm not in _VALID_PERMISSION:
                 raise ValueError(f"Invalid permission {perm!r} for {cat!r}. Use 'ask' or 'skip'.")
         _settings.setdefault("tool_permissions", {}).update(perms)
+
+    if "pet_speech" in patch:
+        val = patch["pet_speech"]
+        if val not in _VALID_PET_SPEECH:
+            raise ValueError(
+                f"Invalid pet_speech value: {val!r}. Use 'on' or 'off'."
+            )
+        _settings["pet_speech"] = val
+
+    if "pet_speech_tokens" in patch:
+        val = patch["pet_speech_tokens"]
+        if not isinstance(val, int) or val < 8 or val > 200:
+            raise ValueError("pet_speech_tokens must be an int in [8, 200]")
+        _settings["pet_speech_tokens"] = val
+
+    if "auto_continue" in patch:
+        val = patch["auto_continue"]
+        if val not in _VALID_AUTO_CONTINUE:
+            raise ValueError(
+                f"Invalid auto_continue: {val!r}. Use 'on' or 'off'."
+            )
+        _settings["auto_continue"] = val
+
+    if "auto_continue_max" in patch:
+        val = patch["auto_continue_max"]
+        if not isinstance(val, int) or val < 1 or val > 50:
+            raise ValueError("auto_continue_max must be an int in [1, 50]")
+        _settings["auto_continue_max"] = val
 
     _save()
     return dict(_settings)

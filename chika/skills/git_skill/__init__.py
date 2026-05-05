@@ -217,43 +217,7 @@ GIT_SKILL = Skill(
             handler=git_pr_merge,
         ),
     ],
-    workflow_examples="""
-### Git Workflows
-
-**Check what changed and summarise:**
-```json
-{"type": "sequential", "steps": [
-  {"tool": "git_status", "store_result_as": "$status"},
-  {"tool": "git_diff",   "store_result_as": "$diff"},
-  {"tool": "llm_summarise",
-   "args": {"prompt": "Describe these changes clearly.", "context": {"status": "$status", "diff": "$diff"}},
-   "store_result_as": "$summary"}
-]}
-```
-
-**Full self-update workflow (edit UI → branch → commit → push → PR → merge → rebuild):**
-```json
-{"type": "sequential", "steps": [
-  {"tool": "git_checkout", "args": {"branch": "chika/ui-update", "create": true, "working_directory": "$profile.workspace"},
-   "description": "Create a feature branch for the UI change"},
-  {"tool": "git_commit",
-   "args": {"message": "feat: update UI styles", "working_directory": "$profile.workspace"},
-   "description": "Commit the UI changes"},
-  {"tool": "git_push",
-   "args": {"working_directory": "$profile.workspace"},
-   "description": "Push branch to GitHub"},
-  {"tool": "git_pr_create",
-   "args": {"title": "Update UI styles", "body": "Automated UI change by Chika", "working_directory": "$profile.workspace"},
-   "description": "Open a Pull Request"},
-  {"tool": "git_pr_merge",
-   "args": {"method": "squash", "working_directory": "$profile.workspace"},
-   "description": "Merge the PR into main"},
-  {"tool": "shell_exec",
-   "args": {"command": "git pull origin main && cd frontend && npm install && npm run build", "working_directory": "$profile.workspace"},
-   "description": "Pull merged changes and rebuild the frontend"}
-]}
-```
-""",
+    workflow_examples="",
     memory_seeds={
         "git_conventions": "Use conventional commits: feat/fix/chore/docs/refactor/test",
     },

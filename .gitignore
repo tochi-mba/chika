@@ -25,13 +25,13 @@ env/
 .env.*.local
 *.env
 
-# Chika runtime data
+# Chika runtime data — everything under data/ except the intentionally-
+# tracked seed files is generated state and gets ignored. Pattern: ignore
+# the whole tree, then re-include the seeds with `!`.
 memory_*.md
 memory.md
-data/devices/
-data/sessions/
-data/test_traces/
-data/profiles/
+data/*
+!data/settings.json
 profiles/
 chika_cc_full.txt
 top_files.py
@@ -42,6 +42,23 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 *.local
+
+# Playwright artefacts (regenerated every run). Visual baselines under
+# *-snapshots/ stay tracked so screenshot regressions are caught.
+frontend/test-results/
+frontend/playwright-report/
+extension/test-results/
+extension/playwright-report/
+playwright/.cache/
+
+# Variable-resolution leak: when an unresolved $variable reaches
+# scaffold tools the path becomes the literal string "$app.path".
+$app.path/
+
+# Ad-hoc pytest / debug logs left at repo root
+pytest_*.txt
+pytest_*.log
+pytest_inline.log
 
 # IDE
 .vscode/

@@ -1,23 +1,11 @@
-"""
-CLI entry point — called by the `chika` console script installed via pip.
+"""Plain-text CLI fallback used when ``rich`` isn't installed.
 
-The root chika.py exists for `python chika.py` convenience; this module
-is the canonical implementation so that `chika/__init__.py` can re-export
-`cli` without import-cycle issues.
+Mirrors the original Chika v2 CLI behaviour bit-for-bit so existing scripts
+that pipe stdin/stdout into ``chika`` keep working.
 """
 from __future__ import annotations
 
-import asyncio
 import json
-import os
-import sys
-
-
-def _ensure_root_on_path() -> None:
-    """Add the project root to sys.path so api.* imports resolve."""
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if root not in sys.path:
-        sys.path.insert(0, root)
 
 
 def _fmt_event(event: dict) -> str | None:
@@ -51,9 +39,8 @@ def _fmt_event(event: dict) -> str | None:
     return None
 
 
-async def _chat_loop() -> None:
-    _ensure_root_on_path()
-    from api.session_manager import session_manager  # noqa: PLC0415
+async def run_plain() -> None:
+    from api.session_manager import session_manager
 
     engine = session_manager.get_or_create("cli")
     print("Chika v2 — type to chat, Ctrl+C to quit\n")
@@ -88,9 +75,3 @@ async def _chat_loop() -> None:
             continue
 
         print()
-
-
-def cli() -> None:
-    """Entry point for the `chika` console script installed via pip."""
-    _ensure_root_on_path()
-    asyncio.run(_chat_loop())

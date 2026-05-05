@@ -40,6 +40,8 @@ jobs:
         env:
           CHIKA_PROVIDER: anthropic
           ANTHROPIC_API_KEY: test-key
+        # The conftest auto-skips @pytest.mark.live_llm by default. CI never
+        # calls a real LLM — see the live-llm workflow for the manual job.
         run: |
           pytest tests/ -v --tb=short \
             --cov=chika --cov=api \
@@ -77,3 +79,75 @@ jobs:
         # Starlette's TestClient WebSocket support requires threading primitives
         # that behave differently on Windows — skip those tests in the Windows job.
         run: pytest tests/ -v --tb=short -k "not test_websocket"
+
+  frontend-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci || npm install
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Run Vitest unit tests
+        working-directory: frontend
+        run: npm run test:unit
+
+      - name: Run Playwright e2e
+        working-directory: frontend
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+  extension-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install extension deps
+        working-directory: extension
+        run: npm ci || npm install
+
+      - name: Install Playwright browsers
+        working-directory: extension
+        run: npx playwright install --with-deps chromium
+
+      - name: Run extension Playwright e2e
+        working-directory: extension
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-playwright-report
+          path: extension/playwright-report
+          retention-days: 7

@@ -225,37 +225,5 @@ def build_verify_skill(variable_store) -> Skill:
                 handler=fact_check,
             ),
         ],
-        workflow_examples="""
-### Grounding & Verification
-
-**Verify a URL before opening or citing it:**
-```json
-{"type": "sequential", "steps": [
-  {"tool": "verify_url", "args": {"url": "$candidate.url"}, "store_result_as": "$check"},
-  {"type": "conditional",
-   "condition": {"field": "$check.reachable", "operator": "equals", "value": true},
-   "if_true": {"tool": "app_open", "args": {"target": "$candidate.url"}},
-   "if_false": {"tool": "web_search", "args": {"query": "$retry_query"}}
-  }
-]}
-```
-
-**Fact-check a claim before stating it:**
-```json
-{"type": "sequential", "steps": [
-  {"tool": "fact_check",
-   "args": {"claim": "The most popular dessert at Legends is Loaded Waffles"},
-   "store_result_as": "$check"},
-  {"type": "conditional",
-   "condition": {"field": "$check.supported", "operator": "equals", "value": true},
-   "if_true": {"tool": "llm_summarise",
-               "args": {"prompt": "Draft a reply citing these supporting facts.",
-                        "context": "$check.matches"}},
-   "if_false": {"tool": "web_search",
-                "args": {"query": "Legends Dessert and Burger Bar popular dessert"},
-                "store_result_as": "$results"}
-  }
-]}
-```
-""",
+        workflow_examples="",
     )

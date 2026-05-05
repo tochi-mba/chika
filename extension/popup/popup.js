@@ -86,6 +86,19 @@ async function init() {
     disconnectedSub.textContent = `Connecting to ${settings.serverUrl}…`
   }
 
+  // Profile gate: require an explicit pick on every popup open unless the
+  // user already authenticated this session. We persist the unlocked flag
+  // in chrome.storage.session so it lives only for the browser session.
+  const sessionFlag = await chrome.storage.session.get('chika_profile_unlocked')
+  if (!sessionFlag.chika_profile_unlocked) {
+    await showProfileGate(settings)
+    return
+  }
+
+  proceedToChat()
+}
+
+function proceedToChat() {
   chrome.runtime.sendMessage({ type: 'request_chat_state' }, (response) => {
     if (chrome.runtime.lastError) {
       showView('disconnected')
@@ -101,6 +114,177 @@ async function init() {
       startDisconnectPolling()
     }
   })
+}
+
+// ── Profile gate ─────────────────────────────────────────────────────────
+
+async function showProfileGate(settings) {
+  showView('profileGate')
+
+  const listEl     = document.getElementById('profileList')
+  const subEl      = document.getElementById('profileGateSub')
+  const createBtn  = document.getElementById('profileCreateToggle')
+  const pwdView    = document.getElementById('profilePwd')
+  const createView = document.getElementById('profileCreate')
+  const pwdInput   = document.getElementById('profilePwdInput')
+  const pwdError   = document.getElementById('profilePwdError')
+  const pwdBack    = document.getElementById('profilePwdBack')
+  const pwdSubmit  = document.getElementById('profilePwdSubmit')
+  const pwdName    = document.getElementById('profilePwdName')
+  const pwdFallback = document.getElementById('profilePwdFallback')
+  const newName    = document.getElementById('profileNewName')
+  const newPwd     = document.getElementById('profileNewPwd')
+  const createSubmit = document.getElementById('profileCreateSubmit')
+  const createBack = document.getElementById('profileCreateBack')
+  const createError = document.getElementById('profileCreateError')
+
+  let profiles = []
+  let chosen   = null
+
+  function authHeaders() {
+    const h = { 'Content-Type': 'application/json' }
+    if (settings.apiKey) h['Authorization'] = `Bearer ${settings.apiKey}`
+    return h
+  }
+
+  function buildUrl(path) {
+    return `${settings.serverUrl.replace(/\/$/, '')}${path}`
+  }
+
+  async function fetchProfiles() {
+    listEl.innerHTML = ''
+    subEl.textContent = 'Loading profiles…'
+    try {
+      const res = await fetch(buildUrl('/api/profiles'), {
+        headers: authHeaders(),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      profiles = data.profiles || []
+      subEl.textContent = 'Pick a profile to load its memory + workspace.'
+      profiles.forEach(renderProfileRow)
+    } catch (err) {
+      subEl.textContent = `Couldn't load profiles: ${err.message}`
+    }
+  }
+
+  function renderProfileRow(p) {
+    const li = document.createElement('li')
+    li.className = 'profile-item'
+    const btn = document.createElement('button')
+    btn.className = 'profile-pick'
+    btn.innerHTML = `
+      <span class="profile-name"></span>
+      <span class="profile-badge"></span>
+      <span class="profile-arrow">→</span>`
+    btn.querySelector('.profile-name').textContent = p.name
+    btn.querySelector('.profile-badge').textContent = p.has_password ? '🔒' : ''
+    btn.addEventListener('click', () => pickProfile(p))
+    li.appendChild(btn)
+    listEl.appendChild(li)
+  }
+
+  function pickProfile(p) {
+    chosen = p
+    if (!p.has_password) {
+      submitSelect('')
+      return
+    }
+    pwdName.textContent = `Password for ${p.name}`
+    pwdError.style.display = 'none'
+    pwdFallback.style.display = 'none'
+    pwdInput.value = ''
+    listEl.style.display = 'none'
+    createBtn.style.display = 'none'
+    pwdView.style.display = ''
+    setTimeout(() => pwdInput.focus(), 0)
+  }
+
+  function backToPickList() {
+    chosen = null
+    listEl.style.display = ''
+    createBtn.style.display = ''
+    pwdView.style.display = 'none'
+    createView.style.display = 'none'
+  }
+
+  async function submitSelect(pwd) {
+    if (!chosen) return
+    pwdError.style.display = 'none'
+    try {
+      const res = await fetch(buildUrl('/api/profiles/select'), {
+        method:  'POST',
+        headers: authHeaders(),
+        body:    JSON.stringify({
+          session_id: 'extension',
+          name:       chosen.name,
+          password:   pwd,
+        }),
+      })
+      if (res.status === 401) {
+        pwdError.textContent = 'Wrong password.'
+        pwdError.style.display = ''
+        pwdFallback.style.display = ''
+        return
+      }
+      if (!res.ok) {
+        pwdError.textContent = `Failed (${res.status})`
+        pwdError.style.display = ''
+        return
+      }
+      await chrome.storage.session.set({ chika_profile_unlocked: '1' })
+      proceedToChat()
+    } catch (err) {
+      pwdError.textContent = `Network error: ${err.message}`
+      pwdError.style.display = ''
+    }
+  }
+
+  async function submitCreate() {
+    createError.style.display = 'none'
+    const name = newName.value.trim()
+    if (!name) {
+      createError.textContent = 'Name required.'
+      createError.style.display = ''
+      return
+    }
+    try {
+      const res = await fetch(buildUrl('/api/profiles/create'), {
+        method:  'POST',
+        headers: authHeaders(),
+        body:    JSON.stringify({ name, password: newPwd.value || null }),
+      })
+      if (!res.ok) {
+        createError.textContent = `Failed (${res.status})`
+        createError.style.display = ''
+        return
+      }
+      const data = await res.json()
+      chosen = { name: data.name, has_password: data.has_password }
+      await submitSelect(newPwd.value || '')
+    } catch (err) {
+      createError.textContent = `Network error: ${err.message}`
+      createError.style.display = ''
+    }
+  }
+
+  pwdBack.onclick    = backToPickList
+  createBack.onclick = backToPickList
+  pwdSubmit.onclick  = () => submitSelect(pwdInput.value)
+  pwdInput.onkeydown = (e) => { if (e.key === 'Enter') submitSelect(pwdInput.value) }
+  pwdFallback.onclick = () => {
+    backToPickList()
+    createBtn.click()
+  }
+  createBtn.onclick = () => {
+    listEl.style.display = 'none'
+    createBtn.style.display = 'none'
+    createView.style.display = ''
+    setTimeout(() => newName.focus(), 0)
+  }
+  createSubmit.onclick = submitCreate
+
+  await fetchProfiles()
 }
 
 // ── Full state application (initial load or structural change) ────────────────
@@ -127,6 +311,224 @@ function applyFullState(s) {
   renderApprovals(s.pendingApprovals || [])
   renderQuestions(s.pendingQuestions || [])
   updateSendBtn()
+
+  // Refresh the pet companion — fire-and-forget; won't block anything.
+  refreshPet(s).catch(() => {})
+
+  // Plan strip — shows the agent's active plan + accept/edit/reject buttons.
+  // Plan lives in s.variables.plan.value (set by the engine's $plan).
+  const planVar = s?.variables?.plan
+  let plan = null
+  if (planVar) {
+    const raw = planVar.value ?? planVar.value_preview ?? null
+    if (typeof raw === 'string') {
+      try { plan = JSON.parse(raw) } catch { plan = null }
+    } else if (raw && typeof raw === 'object') {
+      plan = raw
+    }
+  }
+  renderPlanStrip(plan)
+
+  // Active shells strip — surface running PIDs with kill buttons.
+  renderShellsStrip(s?.shellProcesses || s?.shells || {})
+}
+
+// ── Active shells strip ──────────────────────────────────────────────────
+
+const extShells       = document.getElementById('extShells')
+const extShellsList   = document.getElementById('extShellsList')
+const extShellsCount  = document.getElementById('extShellsCount')
+const extShellsKillAll = document.getElementById('extShellsKillAll')
+
+function renderShellsStrip(processes) {
+  if (!extShells || !extShellsList) return
+  // ``processes`` may arrive as an object (pid → entry) or an array.
+  const list = Array.isArray(processes)
+    ? processes
+    : Object.values(processes || {})
+  const running = list.filter(p => p && p.running)
+  if (running.length === 0) {
+    extShells.style.display = 'none'
+    extShellsList.innerHTML = ''
+    return
+  }
+  extShells.style.display = ''
+  extShellsCount.textContent = `${running.length} running`
+  extShellsList.innerHTML = ''
+  for (const proc of running) {
+    const li = document.createElement('li')
+    li.className = 'ext-shell-row'
+    const pid = proc.pid
+    const cmd = (proc.command || '').replace(/\s+/g, ' ').slice(0, 80)
+    li.innerHTML = `
+      <span class="ext-shell-pid"></span>
+      <span class="ext-shell-cmd"></span>
+      <button class="ext-shell-kill" type="button" title="Kill this process">Kill</button>`
+    li.querySelector('.ext-shell-pid').textContent = `pid ${pid}`
+    li.querySelector('.ext-shell-cmd').textContent = cmd
+    li.querySelector('.ext-shell-kill').addEventListener('click', () => killOneShell(pid))
+    extShellsList.appendChild(li)
+  }
+}
+
+if (extShellsKillAll) extShellsKillAll.addEventListener('click', killAllShells)
+
+async function _shellsRequest(path, opts) {
+  const settings = await getSettings()
+  const headers = { 'Content-Type': 'application/json' }
+  if (settings.apiKey) headers['Authorization'] = `Bearer ${settings.apiKey}`
+  return fetch(`${settings.serverUrl.replace(/\/$/, '')}${path}`, {
+    method: 'POST', headers, ...(opts || {}),
+  })
+}
+
+async function killOneShell(pid) {
+  try {
+    const res = await _shellsRequest(`/api/shells/${pid}/kill`)
+    if (!res.ok) console.error('[Chika] kill', pid, 'failed:', res.status)
+  } catch (err) { console.error('[Chika] kill', pid, 'failed:', err) }
+}
+
+async function killAllShells() {
+  try {
+    const res = await _shellsRequest('/api/shells/kill_all')
+    if (!res.ok) console.error('[Chika] kill_all failed:', res.status)
+  } catch (err) { console.error('[Chika] kill_all failed:', err) }
+}
+
+// ── Elapsed-time tickers for in-flight tool rows ──────────────────────────
+// Keeps a small Map of pid → interval id so we can stop the ticker when the
+// matching tool_result lands. Without these, the user sees a static row and
+// has no idea whether a long npm-create / web-fetch / scrape is making
+// progress or stuck.
+
+const _elapsedTickers = new Map()
+
+function _fmtElapsed(ms) {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  const m = Math.floor(ms / 60_000)
+  const s = Math.floor((ms % 60_000) / 1000).toString().padStart(2, '0')
+  return `${m}m ${s}s`
+}
+
+function _startElapsedTicker(row) {
+  if (!row || !row.dataset.startedAt) return
+  const startedAt = parseInt(row.dataset.startedAt, 10)
+  const elapsedEl = row.querySelector('.tool-elapsed')
+  if (!elapsedEl) return
+  const id = setInterval(() => {
+    if (!row.isConnected) {
+      _stopElapsedTicker(row)
+      return
+    }
+    elapsedEl.textContent = _fmtElapsed(Date.now() - startedAt)
+  }, 250)
+  _elapsedTickers.set(row, id)
+}
+
+function _stopElapsedTicker(row) {
+  const id = _elapsedTickers.get(row)
+  if (id) {
+    clearInterval(id)
+    _elapsedTickers.delete(row)
+  }
+}
+
+// ── Plan strip ─────────────────────────────────────────────────────────────
+//
+// Shows the active plan's goal + done/total task count and three buttons:
+// accept / edit / reject. Each sends a structured message to the agent;
+// the agent uses plan_edit() (or plan_set() for reject) on the backend to
+// react. Plan data arrives as variable_set events for `$plan`.
+
+const extPlan         = document.getElementById('extPlan')
+const extPlanGoal     = document.getElementById('extPlanGoal')
+const extPlanProgress = document.getElementById('extPlanProgress')
+const extPlanAccept   = document.getElementById('extPlanAccept')
+const extPlanEdit     = document.getElementById('extPlanEdit')
+const extPlanReject   = document.getElementById('extPlanReject')
+
+function _planLeaves(tasks) {
+  const out = []
+  for (const t of tasks ?? []) {
+    if (t?.subtasks?.length) out.push(..._planLeaves(t.subtasks))
+    else if (t) out.push(t)
+  }
+  return out
+}
+
+function renderPlanStrip(plan) {
+  if (!extPlan) return
+  if (!plan || !(plan.tasks?.length)) {
+    extPlan.style.display = 'none'
+    return
+  }
+  extPlan.style.display = ''
+  extPlanGoal.textContent = (plan.goal || '').slice(0, 90) || '(no goal)'
+  const leaves = _planLeaves(plan.tasks)
+  const done = leaves.filter(t => t.status === 'done').length
+  extPlanProgress.textContent = `${done}/${leaves.length || plan.tasks.length}`
+}
+
+function _sendPlanMessage(text) {
+  if (!text) return
+  chrome.runtime.sendMessage(
+    { type: 'send_chat_message', text, includeTabText: false },
+    () => {},
+  )
+}
+
+extPlanAccept?.addEventListener('click', () =>
+  _sendPlanMessage('Plan looks good. Proceed.'),
+)
+extPlanReject?.addEventListener('click', () =>
+  _sendPlanMessage("I don't like this plan — drop it and propose a different one."),
+)
+extPlanEdit?.addEventListener('click', () => {
+  // Inline prompt — keeps the popup self-contained.
+  const fb = window.prompt('What should change about the plan?')
+  if (fb && fb.trim()) {
+    _sendPlanMessage(`[plan-edit feedback] ${fb.trim()}`)
+  }
+})
+
+// ── Pet companion ──────────────────────────────────────────────────────────
+
+const extPetEl     = document.getElementById('extPet')
+const extPetEmoji  = document.getElementById('extPetEmoji')
+const extPetBubble = document.getElementById('extPetBubble')
+let _petFetchAt    = 0  // throttle: at most once per 5s
+
+async function refreshPet(s) {
+  const now = Date.now()
+  if (now - _petFetchAt < 5000) return
+  _petFetchAt = now
+  if (!extPetEl) return
+  const settings = await getSettings()
+  const baseUrl = (settings.serverUrl || '').replace(/\/$/, '')
+  if (!baseUrl) return
+  const profile = s?.linkedProfile || 'default'
+  const headers = settings.apiKey ? { 'Authorization': `Bearer ${settings.apiKey}` } : {}
+  try {
+    const res = await fetch(`${baseUrl}/api/profile/${encodeURIComponent(profile)}/pet`, { headers })
+    if (!res.ok) return
+    const d = await res.json()
+    if (!d.pet) return
+    extPetEmoji.textContent = d.pet.emoji || '🐾'
+    extPetEl.title = `${d.pet.name} — set in Chika settings`
+    extPetEl.style.display = ''
+    extPetEl.style.setProperty('--pet-accent', d.pet.accent || '#9d7fff')
+  } catch {/* silent */}
+}
+
+function showPetBubble(text, ms = 4000) {
+  if (!extPetBubble || !text) return
+  extPetBubble.textContent = text
+  extPetBubble.classList.add('visible')
+  clearTimeout(showPetBubble._t)
+  showPetBubble._t = setTimeout(() => {
+    extPetBubble.classList.remove('visible')
+  }, ms)
 }
 
 // ── Views ─────────────────────────────────────────────────────────────────────
@@ -136,6 +538,8 @@ function showView(view) {
   disconnectedView.style.display  = view === 'disconnected'  ? '' : 'none'
   chatView.style.display          = view === 'chat'          ? '' : 'none'
   authErrorBanner.style.display   = view === 'authError'     ? '' : 'none'
+  const gate = document.getElementById('profileGate')
+  if (gate) gate.style.display = view === 'profileGate' ? '' : 'none'
 }
 
 function showAuthError() {
@@ -697,10 +1101,14 @@ chrome.runtime.onMessage.addListener((msg) => {
       const row = document.createElement('div')
       row.className = 'tool-row running'
       row.dataset.toolKey = key
+      row.dataset.startedAt = String(Date.now())
       row.innerHTML =
         `<span class="tool-icon">◌</span>` +
-        `<span class="tool-name">${escHtml(toolLabel(ev.tool))}</span>`
+        `<span class="tool-name">${escHtml(toolLabel(ev.tool))}</span>` +
+        `<span class="tool-elapsed">0.0s</span>`
       toolEvents.appendChild(row)
+      _startElapsedTicker(row)
+      showPetBubble(`using ${toolLabel(ev.tool)}…`)
 
     } else if (ev.kind === 'result') {
       // Find and update the matching call row
@@ -709,6 +1117,15 @@ chrome.runtime.onMessage.addListener((msg) => {
         const isError = !!ev.error
         callRow.className = 'tool-row ' + (isError ? 'error' : 'done')
         callRow.querySelector('.tool-icon').textContent = isError ? '✗' : '✓'
+        // Stop the elapsed ticker and freeze the final duration.
+        _stopElapsedTicker(callRow)
+        const elapsedEl = callRow.querySelector('.tool-elapsed')
+        if (elapsedEl) {
+          const startedAt = parseInt(callRow.dataset.startedAt || '0', 10)
+          if (startedAt) {
+            elapsedEl.textContent = _fmtElapsed(Date.now() - startedAt)
+          }
+        }
         return
       }
       // No matching call row — add a standalone result row

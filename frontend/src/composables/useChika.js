@@ -245,8 +245,26 @@ export function useChika(apiKey = '') {
   }
 
   function approve(request_id, approved, password = '') {
+    // Three call shapes:
+    //   approve(id, true)               legacy boolean confirm
+    //   approve(id, true, pwd)          password-gated approval
+    //   approve(id, {scope: 'session'}) workspace_scope picker
+    // The ApprovalModal calls approve(id, {scope: 'once' | 'session' | 'deny'})
+    // for workspace_scope events; everything else uses the legacy
+    // boolean shape. We normalise here so the backend always receives a
+    // consistent payload.
     system.resolveApproval(request_id)
-    _wsSend({ type: 'approval_response', request_id, approved, password })
+    if (approved && typeof approved === 'object' && 'scope' in approved) {
+      _wsSend({
+        type:       'approval_response',
+        request_id,
+        approved:   approved.scope !== 'deny',
+        scope:      approved.scope,
+        password:   '',
+      })
+    } else {
+      _wsSend({ type: 'approval_response', request_id, approved, password })
+    }
   }
 
   function answerQuestion(request_id, answer) {

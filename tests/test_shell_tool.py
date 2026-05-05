@@ -101,12 +101,23 @@ def test_short_command_does_not_timeout():
 # ── Fire and forget ───────────────────────────────────────────────────────────
 
 def test_fire_and_forget_returns_immediately():
+    # Background mode now waits a short grace window (~1.5s) so fast crashes
+    # surface in the first tool result. For a long-running command the call
+    # still returns well before the command completes and reports
+    # status: "running" with exit_code: -1 (i.e. unknown / still alive).
+    import time as _t
     if IS_WINDOWS:
-        result = run(shell_exec("ping -n 5 127.0.0.1", wait_for_completion=False))
+        cmd = "ping -n 10 127.0.0.1"  # ~10s on Windows
     else:
-        result = run(shell_exec("sleep 5", wait_for_completion=False))
+        cmd = "sleep 10"
+    started = _t.monotonic()
+    result = run(shell_exec(cmd, wait_for_completion=False))
+    elapsed = _t.monotonic() - started
     assert result["pid"] is not None
-    assert result["stdout"] == ""
+    # Grace window is ~1.5s; allow generous slack for slow CI but it must
+    # be far less than the command's own runtime.
+    assert elapsed < 4.0, f"shell_exec returned in {elapsed:.2f}s — should have returned during grace window"
+    assert result["status"] == "running"
     assert result["exit_code"] == -1
 
 

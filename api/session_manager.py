@@ -34,17 +34,22 @@ import config
 from chika.core.profile_manager import ProfileManager
 from chika.skills.browser_skill import BROWSER_SKILL
 from chika.skills.git_skill import GIT_SKILL
+from chika.skills.pet_skill import build_pet_skill
 from chika.skills.plan_skill import build_plan_skill
+from chika.skills.shell_skill import build_shell_skill
 from chika.skills.question_skill import build_question_skill
 from chika.skills.spotify_skill import SPOTIFY_SKILL
 from chika.skills.verify_skill import build_verify_skill
+from chika.skills.web_app_skill import WEB_APP_SKILL
 from chika.skills.web_skill import WEB_SKILL
 from chika.tools.apps_tool import APP_OPEN_TOOL
 from chika.tools.file_tools import FILE_TOOLS
 from chika.tools.live_server_tool import LIVE_SERVER_TOOL
 from chika.tools.memory_tool import make_memory_tools
 from chika.tools.profile_tools import make_profile_tools, make_set_password_tool
+from chika.tools.python_run_tool import PYTHON_RUN_TOOL
 from chika.tools.shell_tool import ALL_SHELL_TOOLS
+from chika.tools.skill_doc_tool import SKILL_QUERY_TOOL, make_skill_doc_tool
 from chika.tools.variable_tools import make_variable_tools
 from chika.tools.wait_tool import WAIT_TOOL
 from chika.tools.web_fetch_tool import WEB_FETCH_TOOLS
@@ -129,12 +134,16 @@ class SessionManager:
         prompt_builder = PromptBuilder()
         skill_registry = SkillRegistry(tool_registry, memory_manager, prompt_builder)
 
+        # Shell tools live behind a Skill so the dynamic "active shells"
+        # block contributes from the skill's own prompt_section instead
+        # of being hard-coded in PromptBuilder. Registering the skill
+        # handles tool registration too.
+        skill_registry.register(build_shell_skill())
         # Register built-in tools
-        for t in ALL_SHELL_TOOLS:
-            tool_registry.register(t)
         tool_registry.register(APP_OPEN_TOOL)
         tool_registry.register(LIVE_SERVER_TOOL)
         tool_registry.register(WAIT_TOOL)
+        tool_registry.register(PYTHON_RUN_TOOL)
         for t in FILE_TOOLS:
             tool_registry.register(t)
         for t in WEB_FETCH_TOOLS:
@@ -149,13 +158,44 @@ class SessionManager:
         # Register skills
         skill_registry.register(GIT_SKILL)
         skill_registry.register(WEB_SKILL)
+        skill_registry.register(WEB_APP_SKILL)
         skill_registry.register(SPOTIFY_SKILL)
         skill_registry.register(BROWSER_SKILL)
         # verify_skill is session-scoped because fact_check needs a live reference
         # to this session's variable store (the $facts ledger lives there)
         skill_registry.register(build_verify_skill(variable_store))
-        # plan_skill is session-scoped too — stores the live plan in $plan
-        skill_registry.register(build_plan_skill(variable_store))
+        # plan_skill is session-scoped too — stores the live plan in $plan.
+        # plan_reconcile needs the engine for LLM access; late-bind via a
+        # getter that resolves the engine after the engine is constructed.
+        _engine_holder = {"engine": None}
+        skill_registry.register(
+            build_plan_skill(
+                variable_store,
+                engine_getter=lambda: _engine_holder["engine"],
+                memory_getter=lambda: (
+                    _engine_holder["engine"]._memory
+                    if _engine_holder["engine"] else None
+                ),
+            ),
+        )
+        # pet_skill is session-scoped — its mood lives in $pet_mood, its
+        # active companion is the profile's ``pet_id``. Late-bound to the
+        # engine's profile so /pet switches flow through automatically.
+        skill_registry.register(
+            build_pet_skill(
+                variable_store,
+                profile_getter=lambda: (
+                    _engine_holder["engine"]._active_profile.pet_id
+                    if _engine_holder["engine"] and _engine_holder["engine"]._active_profile
+                    else None
+                ),
+                workspace_getter=lambda: (
+                    _engine_holder["engine"]._active_profile.workspace
+                    if _engine_holder["engine"] and _engine_holder["engine"]._active_profile
+                    else ""
+                ),
+            ),
+        )
         # question_skill's ask_user tool looks up engine.question_handler at
         # call time — server.py sets that per-WebSocket. In CLI/test mode it
         # stays None and the tool returns a structured error instead of hanging.
@@ -170,15 +210,35 @@ class SessionManager:
         )
         engine.session_id = session_id
         engine._chat_store = self._chat_store
+        # Patch the late-bound engine reference into the closure shared
+        # with build_plan_skill / build_pet_skill above. Now their
+        # getters resolve to this concrete engine instance and any
+        # tool that needs LLM access (plan_reconcile) or live profile
+        # state (pet_skill prompt section) wires up cleanly.
+        _engine_holder["engine"] = engine
 
         # Register memory tools now — they look up engine._memory dynamically
         # so a profile switch correctly redirects writes to the new profile's
         # memory file.
         for t in make_memory_tools(engine):
             tool_registry.register(t)
+        # skill_load — pulls a skill's SKILL.md into context, optionally
+        # condensing via a second LLM call when the doc is too long.
+        tool_registry.register(make_skill_doc_tool(engine))
+        # skill_query — focused BM25 retrieval over chunked SKILL.md so
+        # the agent can ask targeted questions without paying for the
+        # full doc each time.
+        tool_registry.register(SKILL_QUERY_TOOL)
         # Register question_skill now that the engine exists — ask_user reads
         # engine._workflow_engine.question_handler at call time.
         skill_registry.register(build_question_skill(engine._workflow_engine))
+
+        # All skills are registered now. Refresh the workflow engine's
+        # skill-gate index so it can map every skill tool back to its skill
+        # for the auto-load gate. (The engine's own constructor wired this
+        # earlier but only knew about the skills registered before the
+        # engine was built.)
+        engine._workflow_engine.set_skill_registry(skill_registry)
 
         # Wire up active profile (profile tools need engine reference, so registered after)
         engine._active_profile = default_profile

@@ -20,6 +20,94 @@ def _safe_path(path: str) -> tuple[Path, str | None]:
     return Path(path).resolve(), None
 
 
+# ── Workspace-scope hook ──────────────────────────────────────────────
+#
+# When a ChikaEngine is wired into a session, ``api.session_manager`` injects
+# a ``WorkspacePolicy`` + the matching ``approval_handler`` here so the
+# write-class file tools can ask the user before touching paths outside
+# the active profile's workspace. Both default to None — when unset,
+# writes proceed unchecked (matching legacy behaviour and CLI without
+# an attached approval channel).
+#
+# We use ``contextvars.ContextVar`` so concurrent FastAPI sessions don't
+# stomp on each other's policies — each WS connection task gets its own
+# Context, and ``configure_workspace_policy`` only mutates that task's
+# view. Module-level globals would collide as soon as two clients
+# attached at once.
+import contextvars as _cv
+
+_WORKSPACE_POLICY: _cv.ContextVar = _cv.ContextVar(
+    "chika_workspace_policy", default=None,
+)
+_WORKSPACE_APPROVAL_HANDLER: _cv.ContextVar = _cv.ContextVar(
+    "chika_workspace_approval_handler", default=None,
+)
+
+# Module-level shims kept for the existing test fixture / older code
+# paths that read these names directly. Reading them resolves the
+# context-var, writing them updates the var so the legacy interface
+# still functions in single-tenant test setups.
+
+
+class _PolicyShim:
+    """Descriptor-ish shim so legacy ``WORKSPACE_POLICY`` reads work."""
+    def __get__(self, _obj, _objtype=None):
+        return _WORKSPACE_POLICY.get()
+    def __set__(self, _obj, value):
+        _WORKSPACE_POLICY.set(value)
+
+
+# A direct attribute so reads / writes work the same way ``WORKSPACE_POLICY = ...``
+# did before. The ContextVar above is the source of truth.
+def __getattr__(name):  # PEP 562 module __getattr__
+    if name == "WORKSPACE_POLICY":
+        return _WORKSPACE_POLICY.get()
+    if name == "WORKSPACE_APPROVAL_HANDLER":
+        return _WORKSPACE_APPROVAL_HANDLER.get()
+    raise AttributeError(f"module 'file_tools' has no attribute {name!r}")
+
+
+def configure_workspace_policy(policy, approval_handler) -> None:
+    """Attach a WorkspacePolicy + approval handler to the file-write tools.
+
+    Called by api.session_manager after a per-session ChikaEngine is built
+    and its WS approval channel is open. Idempotent — re-calling with
+    new instances replaces the values for the calling task's Context.
+    """
+    _WORKSPACE_POLICY.set(policy)
+    _WORKSPACE_APPROVAL_HANDLER.set(approval_handler)
+
+
+async def _gate_write(path: str | Path, action: str) -> dict | None:
+    """If the active workspace policy refuses ``action`` on ``path``,
+    return a structured error dict. Otherwise return None to let the
+    caller proceed.
+    """
+    policy = _WORKSPACE_POLICY.get()
+    if policy is None:
+        return None
+    decision = await policy.check(
+        path,
+        action=action,
+        approval_handler=_WORKSPACE_APPROVAL_HANDLER.get(),
+    )
+    if decision.allowed:
+        return None
+    return {
+        "error":     "denied_by_workspace_policy",
+        "scope":     decision.scope,
+        "reason":    decision.reason,
+        "path":      str(path),
+        "workspace": getattr(policy, "workspace", None),
+        "hint": (
+            "The user denied this write because it falls outside the "
+            "active profile's workspace. Either keep work inside the "
+            "workspace, ask the user to re-approve with session scope, "
+            "or pause and explain what you need."
+        ),
+    }
+
+
 async def file_read(
     path: str,
     as_bytes: bool = False,
@@ -94,6 +182,9 @@ async def file_edit_lines(path: str, start_line: int, end_line: int, new_content
         return {"error": err}
     if not p.exists():
         return {"error": f"File not found: {path}"}
+    gate = await _gate_write(p, "edit")
+    if gate is not None:
+        return gate
     original = p.read_text(errors="replace")
     lines = original.splitlines(keepends=True)
     new_lines = new_content.splitlines(keepends=True)
@@ -109,15 +200,70 @@ async def file_edit_lines(path: str, start_line: int, end_line: int, new_content
     }
 
 
-async def file_write(path: str, content: str) -> dict:
+async def file_write(path: str = "", content: str | None = None, **_extra) -> dict:
+    """Write a file. Tolerates LLM kwarg-drift on the content parameter.
+
+    Common drift patterns the LLM produces — all resolve to ``content``:
+      - ``contents=`` (plural)
+      - ``text=`` / ``body=`` / ``data=`` / ``source=``
+      - ``file_path=`` instead of ``path=``
+    """
+    if not path:
+        path = _extra.get("file_path") or _extra.get("filepath") or ""
+    if content is None:
+        for alias in ("contents", "text", "body", "data", "source"):
+            v = _extra.get(alias)
+            if v is not None:
+                content = v
+                break
+    if not path:
+        return {"error": "Missing required argument: path"}
     if not isinstance(content, str):
         return {"error": f"content must be a string, got {type(content).__name__} ({str(content)[:120]}). Use $variable.field to extract a specific field from a JSON result."}
     p, err = _safe_path(path)
     if err:
         return {"error": err}
+    gate = await _gate_write(p, "write")
+    if gate is not None:
+        return gate
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return {"path": path, "size_bytes": p.stat().st_size}
+
+
+def _suggest_anchor_lines(text: str, old_string: str, top_k: int = 3) -> list[dict]:
+    """When ``file_replace`` can't find ``old_string`` verbatim, find the
+    lines in ``text`` that look most like the FIRST line of the search
+    string and return them with their line numbers + the surrounding
+    context. The LLM uses this to course-correct without guessing.
+
+    Heuristic: the first non-empty stripped line of ``old_string`` is
+    the anchor. Lines containing it as a substring (case-sensitive) are
+    surfaced first; if none match, we fall back to a fuzzy contains
+    on the first 12 stripped chars so trailing whitespace differences
+    don't hide an obvious match.
+    """
+    anchor_lines = [ln for ln in old_string.splitlines() if ln.strip()]
+    if not anchor_lines:
+        return []
+    anchor = anchor_lines[0].strip()
+    if len(anchor) < 4:
+        return []  # too short to be useful as an anchor
+    file_lines = text.splitlines()
+    matches: list[tuple[int, int, str]] = []  # (score, line_no, text)
+
+    short = anchor[:12]
+    for i, line in enumerate(file_lines, start=1):
+        if anchor in line:
+            matches.append((100, i, line.rstrip()))
+        elif short and short in line:
+            matches.append((50, i, line.rstrip()))
+
+    matches.sort(key=lambda x: -x[0])
+    return [
+        {"line_no": ln, "text": txt[:160]}
+        for _score, ln, txt in matches[:top_k]
+    ]
 
 
 async def file_replace(path: str, old_string: str, new_string: str) -> dict:
@@ -131,12 +277,66 @@ async def file_replace(path: str, old_string: str, new_string: str) -> dict:
         return {"error": err}
     if not p.exists():
         return {"error": f"File not found: {path}"}
+    gate = await _gate_write(p, "replace")
+    if gate is not None:
+        return gate
     text = p.read_text(errors="replace")
     count = text.count(old_string)
     if count == 0:
-        return {"error": f"old_string not found in {path}. Read the file first and copy the exact text."}
+        # Not-found errors are the #1 LLM failure mode for file_replace
+        # because the model guesses at the exact string. Give it real
+        # diagnostics instead of "Read the file first": the closest
+        # lines we found, the exact line numbers, and an actionable
+        # next step. The agent then knows where to look without
+        # re-reading the whole file.
+        suggestions = _suggest_anchor_lines(text, old_string)
+        hint = (
+            "old_string not found verbatim. Common causes: leading/trailing "
+            "whitespace, smart quotes, line-ending differences, or the file "
+            "has changed since the last read. "
+            "Fix: `file_read` the path with the line range covering the "
+            "expected location, copy the exact bytes, then retry. "
+            "Or use `file_edit_lines(path, start_line, end_line, new_content)` "
+            "if you already know the line range."
+        )
+        if suggestions:
+            hint += " Closest matches found:"
+        return {
+            "error":            "old_string_not_found",
+            "path":             path,
+            "anchor":           (
+                old_string.splitlines()[0][:120]
+                if old_string.splitlines() else ""
+            ),
+            "suggestions":      suggestions,
+            "total_lines":      text.count("\n") + 1,
+            "hint":             hint,
+        }
     if count > 1:
-        return {"error": f"old_string appears {count} times in {path}. Provide more surrounding context to make it unique."}
+        # Find every occurrence's line number so the LLM can pick the
+        # right one with a wider context fragment.
+        line_numbers: list[int] = []
+        idx = 0
+        while True:
+            idx = text.find(old_string, idx)
+            if idx < 0:
+                break
+            line_numbers.append(text.count("\n", 0, idx) + 1)
+            idx += 1
+            if len(line_numbers) >= 12:
+                break
+        return {
+            "error":         "old_string_not_unique",
+            "path":          path,
+            "occurrences":   count,
+            "line_numbers":  line_numbers,
+            "hint": (
+                f"old_string appears {count} times in {path}. Provide more "
+                "surrounding context (extra leading or trailing lines) to "
+                "make the match unique, or call file_edit_lines with the "
+                "specific line range you want to change."
+            ),
+        }
     patched = text.replace(old_string, new_string, 1)
     p.write_text(patched, encoding="utf-8")
     return {"path": path, "replaced": True, "occurrences_found": count}
@@ -148,6 +348,9 @@ async def file_append(path: str, content: str) -> dict:
     p, err = _safe_path(path)
     if err:
         return {"error": err}
+    gate = await _gate_write(p, "append")
+    if gate is not None:
+        return gate
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as f:
         f.write(content)

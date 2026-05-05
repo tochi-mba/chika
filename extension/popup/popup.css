@@ -436,6 +436,22 @@ body {
   to   { transform: rotate(360deg); }
 }
 
+/* Elapsed-time badge — visible on every row, but only the running rows
+   keep ticking. Frozen at the final duration on result. */
+.tool-elapsed {
+  margin-left: auto;
+  font-size: 9.5px;
+  color: var(--accent, #6c63ff);
+  background: var(--accent-dim, rgba(108, 99, 255, 0.10));
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tool-row.done    .tool-elapsed { opacity: 0.55; background: transparent; }
+.tool-row.error   .tool-elapsed { opacity: 0.55; background: transparent; color: var(--red, #e05c5c); }
+
 /* ── Approval card ───────────────────────────────────────────────────────────── */
 
 .approval-card {
@@ -734,4 +750,284 @@ body {
 @keyframes dot-pulse {
   0%, 80%, 100% { transform: scale(0.7); opacity: 0.4; }
   40%           { transform: scale(1);   opacity: 1; }
+}
+
+/* ── Pet companion ─────────────────────────────────────────────────────────── */
+.ext-pet {
+  position: absolute;
+  right: 12px;
+  bottom: 60px;
+  z-index: 80;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.ext-pet-emoji {
+  font-size: 22px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+  animation: ext-pet-bob 3.5s ease-in-out infinite;
+}
+.ext-pet-bubble {
+  background: var(--pet-accent, #9d7fff);
+  color: white;
+  font-size: 10.5px;
+  padding: 3px 7px;
+  border-radius: 10px;
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 200ms, transform 200ms;
+}
+.ext-pet-bubble.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+@keyframes ext-pet-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3px); }
+}
+
+
+/* ── Plan strip ────────────────────────────────────────────────────────────── */
+.ext-plan {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 12px 8px;
+  background: var(--surface-1);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+}
+.ext-plan-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ext-plan-glyph {
+  color: var(--accent, #6c63ff);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.ext-plan-goal {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-1);
+  font-weight: 500;
+}
+.ext-plan-progress {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--text-3);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.ext-plan-actions {
+  display: flex;
+  gap: 4px;
+}
+.ext-plan-btn {
+  flex: 1;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  font: inherit;
+  font-size: 10px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 100ms;
+}
+.ext-plan-btn:hover { color: var(--text-1); border-color: var(--border-strong); }
+.ext-plan-btn.accept { color: var(--green, #3dd68c); border-color: var(--green, #3dd68c); }
+.ext-plan-btn.edit   { color: var(--accent, #6c63ff); border-color: var(--accent, #6c63ff); }
+.ext-plan-btn.reject { color: var(--red, #e05c5c); border-color: var(--red, #e05c5c); }
+
+/* ── Profile gate ───────────────────────────────────────────────────── */
+.profile-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+.profile-gate-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.profile-gate .profile-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.profile-pick {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-2, rgba(255,255,255,0.04));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 120ms, background 120ms;
+}
+.profile-pick:hover {
+  border-color: var(--accent, #6c63ff);
+  background: rgba(108, 99, 255, 0.08);
+}
+.profile-pick .profile-arrow { color: var(--text-3); }
+.profile-pick .profile-badge { font-size: 10px; }
+
+.profile-create-toggle {
+  background: none;
+  border: 1px dashed var(--border);
+  color: var(--text-3);
+  border-radius: 8px;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: color 120ms, border-color 120ms;
+}
+.profile-create-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.profile-pwd, .profile-create {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.profile-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.profile-label input {
+  background: var(--surface-2, rgba(255,255,255,0.04));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 12px;
+  color: var(--text-1);
+  font: inherit;
+}
+.profile-label input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.profile-error {
+  color: var(--red, #e05c5c);
+  font-size: 11px;
+}
+.profile-back {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 0;
+  text-align: left;
+  width: max-content;
+}
+.profile-back:hover { color: var(--text-1); }
+.profile-fallback { font-size: 11px; padding-top: 4px; }
+
+/* ── Active shells strip ────────────────────────────────────────────── */
+.ext-shells {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px 4px;
+  background: var(--surface-2, rgba(255,255,255,0.03));
+  margin-bottom: 6px;
+}
+.ext-shells-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  margin-bottom: 4px;
+}
+.ext-shells-label { color: var(--text-3); font-weight: 600; }
+.ext-shells-count { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.ext-shells-killall {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--red, #e05c5c);
+  color: var(--red, #e05c5c);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.ext-shells-killall:hover {
+  background: var(--red, #e05c5c);
+  color: white;
+}
+.ext-shells-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ext-shell-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-family: var(--font-mono, monospace);
+}
+.ext-shell-pid {
+  color: var(--accent, #6c63ff);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ext-shell-cmd {
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ext-shell-kill {
+  background: none;
+  border: 1px solid var(--red, #e05c5c);
+  color: var(--red, #e05c5c);
+  border-radius: 3px;
+  padding: 1px 6px;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.ext-shell-kill:hover {
+  background: var(--red, #e05c5c);
+  color: white;
 }

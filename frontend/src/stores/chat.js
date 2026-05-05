@@ -29,11 +29,36 @@ export const useChatStore = defineStore('chat', () => {
   // Attach a tool/workflow event to the active assistant message.
   // Called for: workflow_start, step_start, tool_call, tool_result,
   // step_done, workflow_done, loop_iteration, condition_eval, variable_set
+  //
+  // tool_call events start as `pending: true` so the renderer can show a
+  // spinner. The matching tool_result (same step_id) flips them to
+  // `pending: false`. This gives the user a live signal during long-running
+  // tools (npm-create scaffolds, web fetches, browser scrapes) where the
+  // gap between call and result was previously dead air.
   function attachToolEvent(event) {
     const last = messages.value[messages.value.length - 1]
-    if (last?.role === 'assistant') {
-      last.toolEvents = [...(last.toolEvents ?? []), { ...event, _ts: Date.now() }]
+    if (last?.role !== 'assistant') return
+    const stamped = { ...event, _ts: Date.now() }
+
+    if (event.type === 'tool_result' && event.step_id) {
+      // Flip the matching pending tool_call (if any) and append the result.
+      last.toolEvents = (last.toolEvents ?? []).map(ev => {
+        if (ev.type === 'tool_call'
+            && ev.step_id === event.step_id
+            && ev.pending) {
+          return { ...ev, pending: false, _doneAt: Date.now() }
+        }
+        return ev
+      })
+      last.toolEvents = [...last.toolEvents, stamped]
+      return
     }
+
+    if (event.type === 'tool_call') {
+      stamped.pending = true
+      stamped._startedAt = Date.now()
+    }
+    last.toolEvents = [...(last.toolEvents ?? []), stamped]
   }
 
   function appendToken(text) {

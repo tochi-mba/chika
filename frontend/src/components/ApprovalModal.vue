@@ -67,8 +67,29 @@
           </p>
         </div>
 
-        <!-- Actions -->
-        <div class="actions">
+        <!-- Actions — workspace_scope shows three-way scope picker
+             so the user controls how long the grant lives. Other
+             approval types keep the existing two-button layout. -->
+        <div class="actions" v-if="req.approval_type === 'workspace_scope'">
+          <button
+            class="btn deny"
+            :disabled="pendingIds.has(req.request_id)"
+            @click="handleWorkspace(req, 'deny')"
+          >✕ Deny</button>
+          <button
+            class="btn approve-once"
+            :disabled="pendingIds.has(req.request_id)"
+            :title="`Allow once for ${req.args?.path || 'this path'}`"
+            @click="handleWorkspace(req, 'once')"
+          >Allow once</button>
+          <button
+            class="btn approve"
+            :disabled="pendingIds.has(req.request_id)"
+            :title="`Allow this folder for the whole session`"
+            @click="handleWorkspace(req, 'session')"
+          >Allow for session</button>
+        </div>
+        <div class="actions" v-else>
           <button
             class="btn deny"
             @click="emit('deny', req.request_id)"
@@ -123,13 +144,32 @@ watch(
 function iconFor(type) {
   if (type === 'verify_password') return '🔐'
   if (type === 'set_password')    return '🔑'
+  if (type === 'workspace_scope') return '📁'
   return '⚠️'
 }
 
 function titleFor(type) {
   if (type === 'verify_password') return 'Password Required'
   if (type === 'set_password')    return 'Set Password'
+  if (type === 'workspace_scope') return 'Write outside workspace?'
   return 'Approval Required'
+}
+
+function handleWorkspace(req, scope) {
+  // Workspace approvals carry the user's scope choice as part of the
+  // approval payload so the WorkspacePolicy on the backend can honour
+  // 'session' / 'once' / 'deny' distinctly. We re-use the 'approve'
+  // event with a scope payload — the backend handler unpacks it.
+  if (pendingIds.value.has(req.request_id)) return
+  pendingIds.value = new Set([...pendingIds.value, req.request_id])
+  emit('approve', req.request_id, { scope })
+  // Clear the pending flag the same way handleApprove does — the
+  // parent component removes the request from ``approvals`` once the
+  // backend confirms, but we don't want a stale spinner if the user
+  // double-clicks during the WS round-trip.
+  pendingIds.value = new Set(
+    [...pendingIds.value].filter(id => id !== req.request_id),
+  )
 }
 
 function togglePw(id) {
@@ -332,6 +372,16 @@ function handleApprove(req) {
   justify-content: center;
 }
 .btn.approve:hover:not(:disabled) { background: #7c72ff; }
+
+/* Workspace-scope picker — middle button is a softer "allow once". */
+.btn.approve-once {
+  background: #2a2a35;
+  color: #6c63ff;
+  border: 1px solid #6c63ff60;
+}
+.btn.approve-once:hover:not(:disabled) {
+  background: rgba(108, 99, 255, 0.12);
+}
 
 /* Spinner */
 .spinner {

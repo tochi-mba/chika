@@ -1,5 +1,12 @@
 <template>
-  <div class="app">
+  <div class="app-root">
+  <ProfileGate
+    v-if="!profileUnlocked"
+    :api-key="storedKey"
+    :session-id="chat.sessionId || ''"
+    @unlocked="onProfileUnlocked"
+  />
+  <div class="app" v-show="profileUnlocked">
     <header class="header">
       <div class="brand">
         <svg class="brand-logo" width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -83,6 +90,19 @@
           </div>
         </div>
 
+        <!-- Settings -->
+        <button
+          class="icon-btn"
+          :class="{ 'icon-btn--active': settingsOpen }"
+          @click="openSettings('provider')"
+          title="Settings — provider, environment, permissions, pet"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+
         <!-- Theme toggle -->
         <button class="icon-btn" @click="theme.toggle()" :title="theme.isDark ? 'Switch to light mode' : 'Switch to dark mode'">
           <!-- Moon: currently dark, click to go light -->
@@ -134,6 +154,16 @@
       @deny="id => approve(id, false, '')"
     />
 
+    <SettingsModal
+      :open="settingsOpen"
+      :api-key="storedKey"
+      :initial-tab="settingsInitialTab"
+      @close="settingsOpen = false"
+      @patch-settings="patchSettings"
+    />
+
+    <PetCompanion @open-settings="(t) => openSettings(t)" />
+
     <QuestionModal
       :questions="system.pendingQuestions"
       @answer="(id, payload) => answerQuestion(id, payload)"
@@ -150,6 +180,13 @@
       />
 
       <div class="chat-col">
+        <PlanPanel
+          :plan="activePlan"
+          @accept="onPlanAccept"
+          @reject="onPlanReject"
+          @edit-feedback="onPlanEditFeedback"
+          @toggle-task="onPlanTaskToggle"
+        />
         <MessageList :messages="chat.messages" :is-streaming="chat.isStreaming" />
         <ChatInput :disabled="chat.isStreaming" :streaming="chat.isStreaming" @send="send" @stop="stop" />
       </div>
@@ -159,10 +196,11 @@
       </div>
     </div>
   </div>
+  </div>
 </template>
 
 <script setup>
-import { ref, watch, watchEffect, onMounted, onUnmounted } from 'vue'
+import { ref, watch, watchEffect, onMounted, onUnmounted, computed } from 'vue'
 import { useChika }       from './composables/useChika'
 import { useChatStore }   from './stores/chat'
 import { useChatsStore }  from './stores/chats'
@@ -175,6 +213,10 @@ import ApprovalModal      from './components/ApprovalModal.vue'
 import QuestionModal      from './components/QuestionModal.vue'
 import ProfileSwitcher    from './components/ProfileSwitcher.vue'
 import ChatSidebar        from './components/ChatSidebar.vue'
+import SettingsModal      from './components/SettingsModal.vue'
+import PetCompanion       from './components/PetCompanion.vue'
+import PlanPanel          from './components/PlanPanel.vue'
+import ProfileGate        from './components/ProfileGate.vue'
 
 const chat   = useChatStore()
 const chats  = useChatsStore()
@@ -187,7 +229,20 @@ watchEffect(() => {
 })
 
 const storedKey = localStorage.getItem('chika_api_key') || ''
-const { send, stop, reset, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat, patchSettings } = useChika(storedKey)
+const { send, stop, reset, approve, answerQuestion, switchProfile, loadChat, newChat, deleteChat, patchSettings, connect } = useChika(storedKey)
+
+// ── Profile gate ──────────────────────────────────────────────────────────
+// We never default-load — the user must pick a profile (and pass its
+// password if set) before the chat surface mounts. localStorage caches
+// the choice for the rest of the browser session so refresh doesn't
+// re-prompt mid-task. Logging out (or clearing storage) re-opens the gate.
+const profileUnlocked = ref(
+  sessionStorage.getItem('chika_profile_unlocked') === '1',
+)
+function onProfileUnlocked(_profile) {
+  sessionStorage.setItem('chika_profile_unlocked', '1')
+  profileUnlocked.value = true
+}
 
 // ── Permissions popover ────────────────────────────────────────────────────
 
@@ -220,9 +275,57 @@ function onOutsideClick(e) {
 onMounted(() => document.addEventListener('mousedown', onOutsideClick))
 onUnmounted(() => document.removeEventListener('mousedown', onOutsideClick))
 
+// ── Plan panel ────────────────────────────────────────────────────────────
+// The plan lives as `$plan` in the variable store and arrives via
+// variable_set events. Re-derive it from the system store every render so
+// edits stay live as the agent calls plan_update / plan_edit.
+const activePlan = computed(() => {
+  const v = system.variables['plan']
+  if (!v) return null
+  // The store carries `value_preview` (a JSON-serialised snippet) for some
+  // var types; the actual structured payload lives on `value`.
+  const payload = v.value ?? v.value_preview ?? null
+  if (!payload) return null
+  if (typeof payload === 'string') {
+    try { return JSON.parse(payload) } catch { return null }
+  }
+  return payload
+})
+
+function onPlanAccept() {
+  // Tell the agent the plan is good — re-uses the auto-continue trigger
+  // shape so the rest of the engine treats it as a normal user nudge.
+  send("Plan looks good. Proceed.")
+}
+
+function onPlanReject() {
+  send("I don't like this plan — drop it and propose a different one.")
+}
+
+function onPlanEditFeedback(text) {
+  // Send the user's feedback verbatim, prefixed so the LLM clearly sees
+  // it as a plan tweak (the system prompt rule for plan_edit picks it up).
+  send(`[plan-edit feedback] ${text}`)
+}
+
+function onPlanTaskToggle(taskId, nextStatus) {
+  // Manual user tick. Send as a structured nudge — the agent will call
+  // plan_update on the backend in response.
+  send(`[plan-task] mark ${taskId} as ${nextStatus}`)
+}
+
 // Panel collapsed state — persisted across sessions
 const panelCollapsed = ref(localStorage.getItem('chika_panel_open') === 'false')
 watch(panelCollapsed, v => localStorage.setItem('chika_panel_open', v ? 'false' : 'true'))
+
+// Settings modal
+const settingsOpen = ref(false)
+const settingsInitialTab = ref('provider')
+
+function openSettings(tab) {
+  settingsInitialTab.value = tab || 'provider'
+  settingsOpen.value = true
+}
 </script>
 
 <style>

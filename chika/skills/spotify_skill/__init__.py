@@ -499,36 +499,7 @@ SPOTIFY_SKILL = Skill(
     name="spotify",
     description="Full Spotify Web API — search, catalog, playback, queue, library, playlists, follow, recommendations, podcasts",
     tools=SPOTIFY_TOOLS,
-    workflow_examples="""
-### Spotify Workflows
-
-**Play an artist's top tracks:**
-```json
-{"type": "sequential", "steps": [
-  {"id": "search", "tool": "spotify_search",
-   "args": {"query": "$artist_name", "type": "artist", "limit": 1},
-   "store_result_as": "$artist_result"},
-  {"id": "top", "tool": "spotify_get_artist_top_tracks",
-   "args": {"artist_id": "$artist_result.artists.items[0].id"},
-   "store_result_as": "$top_tracks"},
-  {"id": "play", "tool": "spotify_play",
-   "args": {"uris": "$top_tracks.tracks[0].uri"}}
-]}
-```
-
-**Save top-5 recommendations to a new playlist:**
-```json
-{"type": "sequential", "steps": [
-  {"id": "me",  "tool": "spotify_get_current_user", "store_result_as": "$me"},
-  {"id": "recs","tool": "spotify_get_recommendations",
-   "args": {"seed_genres": "pop", "limit": 5}, "store_result_as": "$recs"},
-  {"id": "pl",  "tool": "spotify_create_playlist",
-   "args": {"user_id": "$me.id", "name": "Chika Mix"}, "store_result_as": "$playlist"},
-  {"id": "add", "tool": "spotify_add_to_playlist",
-   "args": {"playlist_id": "$playlist.id", "uris": "$recs.tracks[0].uri"}}
-]}
-```
-""",
+    workflow_examples="",
     memory_seeds={
         "spotify_note": "Spotify URIs look like spotify:track:4iV5W9uYEdYUVa79Axb7Rh. Use spotify_search first to resolve names to IDs/URIs.",
     },
