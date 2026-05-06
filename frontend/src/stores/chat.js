@@ -25,6 +25,7 @@ export const useChatStore = defineStore('chat', () => {
       streaming: true,
     })
   }
+  
 
   // Attach a tool/workflow event to the active assistant message.
   // Called for: workflow_start, step_start, tool_call, tool_result,
