@@ -43,7 +43,7 @@ jobs:
         # The conftest auto-skips @pytest.mark.live_llm by default. CI never
         # calls a real LLM — see the live-llm workflow for the manual job.
         run: |
-          pytest tests/ -v --tb=short \
+          pytest -v --tb=short \
             --cov=chika --cov=api \
             --cov-report=term-missing \
             --cov-report=xml \
@@ -78,7 +78,7 @@ jobs:
           ANTHROPIC_API_KEY: test-key
         # Starlette's TestClient WebSocket support requires threading primitives
         # that behave differently on Windows — skip those tests in the Windows job.
-        run: pytest tests/ -v --tb=short -k "not test_websocket"
+        run: pytest -v --tb=short -k "not test_websocket"
 
   frontend-e2e:
     runs-on: ubuntu-latest

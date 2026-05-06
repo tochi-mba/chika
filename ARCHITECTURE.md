@@ -328,7 +328,7 @@ When the geometry changes, **all five** must change together. The "Brand mark" s
   - `ruff check .`
   - `mypy chika/ api/ config.py`
   - `bandit -r chika/ api/ -ll -x tests/`
-  - `pytest tests/ --cov=chika --cov=api --cov-fail-under=75`
+  - `pytest --cov=chika --cov=api --cov-fail-under=75`
   - `npm run test:e2e` (frontend + extension Playwright suites)
 
 PRs that don't pass the gauntlet locally are unlikely to pass it in CI. See the "CI-equivalent local check" section in [CONTRIBUTING.md](CONTRIBUTING.md) for the exact command sequence.

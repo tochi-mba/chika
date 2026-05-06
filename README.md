@@ -322,8 +322,8 @@ tokens; live-LLM tests are gated behind an explicit flag.
 ### Backend (Python) — fast, deterministic
 
 ```bash
-pytest tests/ -v
-pytest tests/ --cov=chika --cov=api --cov-report=term-missing
+pytest -v
+pytest --cov=chika --cov=api --cov-report=term-missing
 ```
 
 860+ tests covering every tool, skill, workflow type, and engine path.
@@ -445,7 +445,7 @@ CHIKA_LOG_CONSOLE=1 uvicorn api.server:app --port 8000
 ```bash
 ruff check .
 bandit -r chika/ api/ -ll -x tests/
-pytest tests/ --cov=chika --cov=api --cov-fail-under=60 -q
+pytest --cov=chika --cov=api --cov-fail-under=75 -q
 ```
 
 ---
