@@ -501,7 +501,16 @@ def _http_get_json(url: str, *, timeout: float) -> dict:
 
     Categorises common failure modes so the caller can map them onto
     ``UpdateInfo.reason``.
+
+    Security: the only URLs this function should ever see are the
+    constants we construct internally (``https://api.github.com/...``,
+    ``https://pypi.org/...``) — never anything user-supplied. We
+    nonetheless explicitly reject non-https schemes here as defence
+    in depth: that closes the SSRF / file-URL attack surface bandit
+    flags as B310 even if a future caller forgets the contract.
     """
+    if not url.lower().startswith("https://"):
+        raise _HttpError("bad_scheme")
     req = urllib.request.Request(
         url,
         headers={
@@ -510,7 +519,9 @@ def _http_get_json(url: str, *, timeout: float) -> dict:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        # Scheme is asserted https above; URL is a hard-coded internal
+        # constant. No user input reaches this call.
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             data = resp.read()
     except urllib.error.HTTPError as exc:
         if exc.code == 403:
