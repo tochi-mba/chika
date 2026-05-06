@@ -357,9 +357,7 @@ def test_slash_command_dispatches_to_install(monkeypatch, tmp_path: Path):
         called["kwargs"] = kwargs
         return tmp_path / "fake_dest"
 
-    monkeypatch.setattr(
-        "chika._cli.install_extension.install_extension", fake_install,
-    )
+    monkeypatch.setattr(inst, "install_extension", fake_install)
 
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100, color_system=None)
@@ -375,7 +373,7 @@ def test_slash_command_alias_install_ext(monkeypatch, tmp_path: Path):
 
     called: list[bool] = []
     monkeypatch.setattr(
-        "chika._cli.install_extension.install_extension",
+        inst, "install_extension",
         lambda **_: called.append(True) or (tmp_path / "x"),
     )
     buf = io.StringIO()
@@ -391,9 +389,7 @@ def test_slash_command_surfaces_missing_source_error(monkeypatch):
     def boom(**_):
         raise FileNotFoundError("extension source not found: /bogus")
 
-    monkeypatch.setattr(
-        "chika._cli.install_extension.install_extension", boom,
-    )
+    monkeypatch.setattr(inst, "install_extension", boom)
 
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=200, color_system=None)
@@ -429,9 +425,7 @@ def test_argv_subcommand_invokes_install(monkeypatch, tmp_path: Path):
         called["console_provided"] = console is not None
         return tmp_path / "ext"
 
-    monkeypatch.setattr(
-        "chika._cli.install_extension.install_extension", fake_install,
-    )
+    monkeypatch.setattr(inst, "install_extension", fake_install)
     # If _run_rich got called we'd boot the engine — guard against it.
     monkeypatch.setattr(appmod, "_run_rich", _fail_if_called)
 
@@ -444,7 +438,7 @@ def test_argv_subcommand_alias_install_ext(monkeypatch, tmp_path: Path):
 
     called: list[bool] = []
     monkeypatch.setattr(
-        "chika._cli.install_extension.install_extension",
+        inst, "install_extension",
         lambda **_: called.append(True) or (tmp_path / "ext"),
     )
     monkeypatch.setattr(appmod, "_run_rich", _fail_if_called)
@@ -456,10 +450,7 @@ def test_argv_subcommand_alias_install_ext(monkeypatch, tmp_path: Path):
 def test_argv_subcommand_does_not_boot_repl(monkeypatch, tmp_path: Path):
     from chika._cli import app as appmod
 
-    monkeypatch.setattr(
-        "chika._cli.install_extension.install_extension",
-        lambda **_: tmp_path / "ext",
-    )
+    monkeypatch.setattr(inst, "install_extension", lambda **_: tmp_path / "ext")
     boot = []
     monkeypatch.setattr(appmod, "_run_rich",
                          lambda: boot.append("nope"))
@@ -503,9 +494,7 @@ def test_argv_subcommand_exits_nonzero_on_missing_source(monkeypatch):
     def boom(**_):
         raise FileNotFoundError("nope")
 
-    monkeypatch.setattr(
-        "chika._cli.install_extension.install_extension", boom,
-    )
+    monkeypatch.setattr(inst, "install_extension", boom)
     monkeypatch.setattr(appmod, "_run_rich", _fail_if_called)
 
     with pytest.raises(SystemExit) as ei:
@@ -518,10 +507,7 @@ def test_argv_subcommand_plain_mode_when_rich_missing(monkeypatch, tmp_path, cap
     from chika._cli import app as appmod
 
     monkeypatch.setattr(appmod, "_have_rich", lambda: False)
-    monkeypatch.setattr(
-        "chika._cli.install_extension.install_extension",
-        lambda **_: tmp_path / "ext",
-    )
+    monkeypatch.setattr(inst, "install_extension", lambda **_: tmp_path / "ext")
     monkeypatch.setattr(appmod, "_run_rich", _fail_if_called)
 
     appmod.cli(argv=["install-extension"])
