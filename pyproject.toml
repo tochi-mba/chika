@@ -42,7 +42,24 @@ include = ["chika*", "api*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["tests", "chika/skills"]
+python_files = ["test_*.py"]
+
+[tool.coverage.run]
+omit = [
+    "*/tests/*",
+    "tests/*",
+    "*/conftest.py",
+    "*/_test_*.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
 
 [tool.ruff]
 line-length = 100
