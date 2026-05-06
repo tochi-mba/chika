@@ -183,7 +183,11 @@ def fire_and_forget(
         with contextlib.suppress(Exception):
             on_done(text)
 
+    coro = _runner()
     try:
-        return asyncio.create_task(_runner())
+        return asyncio.create_task(coro)
     except RuntimeError:
+        # No running event loop — close the coroutine explicitly so it
+        # doesn't trigger a RuntimeWarning ("coroutine was never awaited").
+        coro.close()
         return None

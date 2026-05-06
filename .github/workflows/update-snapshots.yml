@@ -1,0 +1,91 @@
+name: Update Playwright snapshots
+
+# Visual snapshot baselines are platform-specific — Chromium on Linux
+# renders fonts and antialiasing slightly differently than on macOS or
+# Windows, so a baseline generated on a dev's laptop will never match
+# the Linux runner CI uses. Rather than make devs install Docker
+# locally, this workflow lets them push UI changes, see CI fail on
+# visual diff, then trigger a re-baseline on CI itself.
+#
+# Trigger options:
+#   1. Add the "update-snapshots" label to a PR — workflow runs, commits
+#      fresh -chromium-linux.png files back to the PR branch.
+#   2. Manual: workflow_dispatch from the Actions tab.
+#
+# This mirrors the pattern Vercel / Next.js / Microsoft Playwright-MCP
+# use for the same cross-platform-snapshot problem.
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-snapshots:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.label.name == 'update-snapshots' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          # Need write access to push the new baselines back. Use the
+          # PR's head ref so we commit onto the source branch.
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Build the frontend (preview server serves dist/)
+        working-directory: frontend
+        run: npm run build
+
+      - name: Regenerate Playwright snapshots
+        working-directory: frontend
+        run: npx playwright test --update-snapshots --reporter=line
+        # Keep going even if some tests still fail after update —
+        # we still want to commit whatever baselines DID get
+        # regenerated, so the next PR-build sees them.
+        continue-on-error: true
+
+      - name: Commit + push the regenerated baselines
+        working-directory: frontend
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add e2e/*-snapshots/
+          if git diff --cached --quiet; then
+            echo "No baseline changes to commit"
+            exit 0
+          fi
+          git commit -m "chore: regenerate Playwright snapshots on Linux runner"
+          git push
+
+      - name: Remove the trigger label
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                issue_number: context.issue.number,
+                name:  'update-snapshots',
+              })
+            } catch (e) { /* label may already be gone */ }

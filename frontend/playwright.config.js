@@ -25,14 +25,17 @@ export default defineConfig({
   timeout: 30_000,
   expect: {
     timeout: 5_000,
-    // Pin baselines to a single name regardless of platform — Vue's
-    // CSS-driven layout is identical across Linux/Mac/Windows on
-    // Chromium, so a per-platform baseline just creates "doesn't
-    // exist" failures when CI runs on a different OS than the dev
-    // who generated them. Pixel diff tolerance (maxDiffPixelRatio)
-    // already absorbs minor antialiasing drift.
+    // Per-platform baselines — Chromium renders fonts and antialiasing
+    // differently on Linux vs macOS vs Windows, so the canonical
+    // baselines are committed under ``-chromium-linux.png`` (the CI
+    // platform). Devs on macOS / Windows generate their baselines via
+    // the .github/workflows/update-snapshots.yml workflow:
+    // push code, add the ``update-snapshots`` label, and CI commits
+    // freshly-generated Linux baselines back to the PR branch. This is
+    // the pattern Microsoft / Vercel / Next.js use for the same problem
+    // — devs don't have to install Docker locally.
     toHaveScreenshot: {
-      pathTemplate: '{testFileDir}/{testFileName}-snapshots/{arg}{ext}',
+      // Default Playwright path template includes platform suffix.
     },
   },
 

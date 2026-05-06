@@ -95,11 +95,71 @@ Examples:
 - `feat(workflow): add retry step type with backoff`
 - `test(variable_store): add concurrency + circular-ref tests`
 
+## Visual snapshot baselines (Playwright)
+
+Visual baselines under `frontend/e2e/*-snapshots/` and
+`extension/e2e/*-snapshots/` are pixel-compared in CI. Chromium renders
+fonts + antialiasing slightly differently on Linux vs macOS vs Windows,
+so the canonical baselines are the **Linux ones** (CI runs on
+`ubuntu-latest`). See ADR-26.
+
+Workflow when you change UI that has a visual baseline:
+
+1. Make your UI change locally; run the suite to see what fails.
+   ```bash
+   cd frontend
+   BASE_URL=http://localhost:5173 npx playwright test
+   ```
+2. Push your branch and open a PR.
+3. CI fails the visual snapshot tests with diff images uploaded as
+   `frontend-playwright-report` artifacts — eyeball them to confirm the
+   diff is intentional.
+4. Add the **`update-snapshots`** label to the PR.
+   `.github/workflows/update-snapshots.yml` runs on `ubuntu-latest`,
+   regenerates every `-chromium-linux.png` baseline, and commits the
+   updates back onto your PR branch.
+5. The label auto-removes when done. CI re-runs and goes green.
+
+Manual variant: trigger `update-snapshots.yml` from the Actions tab
+(`workflow_dispatch`).
+
+**Don't commit `-chromium-win32.png` or `-chromium-darwin.png`
+baselines as if they were ground truth** — CI ignores them. If you see
+them in a diff and didn't intend to push them, drop them. They're only
+useful as a local design-review preview.
+
+## CI-equivalent local check
+
+Before opening a PR, run the same gauntlet CI does:
+
+```bash
+# Lint
+python -m ruff check .
+
+# Types
+python -m mypy chika/ api/ config.py --ignore-missing-imports
+
+# Python tests + coverage gate
+python -m pytest tests/ -q --ignore=tests/test_cli_e2e.py \
+  --cov=chika --cov=api --cov-fail-under=60
+
+# Frontend Playwright (against the dev server for speed)
+cd frontend
+BASE_URL=http://localhost:5173 npx playwright test
+```
+
+If your `chromium-linux.png` baselines don't exist locally, the visual
+tests will fail — that's expected. Use the workflow above to generate
+them in CI.
+
 ## PR checklist
 
 - [ ] Tests pass: `pytest tests/ -v`
 - [ ] Linting clean: `ruff check .`
 - [ ] No type regressions: `mypy chika/ api/ config.py --ignore-missing-imports`
+- [ ] Coverage above the 60% gate (`--cov-fail-under=60`)
+- [ ] If UI changed: visual snapshot baselines regenerated via the
+  `update-snapshots` PR label (don't push Win32 / Darwin baselines)
 - [ ] New tools return `{"error": ...}` on failure
 - [ ] New tools registered in `session_manager.py`
 - [ ] Sensitive data (API keys, tokens) not committed

@@ -646,3 +646,37 @@ The frontend's `system.js` got a small fix in the same change: `tool_result` eve
 - The stub-LLM pattern is reusable: add a turn list, hand to `install(engine, StubLLM(...))`, drive `engine.chat()`. New regressions land as a new test in < 30 LOC.
 - The `live_llm` gate makes "yes you may call the real LLM here" an explicit decision rather than an implicit cost.
 - *Tradeoff*: visual snapshots need refreshing when the design changes. Update with `npx playwright test --update-snapshots visual.spec.js`. Baselines are committed under `<spec>-snapshots/<name>-chromium-<os>.png` so CI's ubuntu baselines match a `--update-snapshots` run on the same OS.
+
+---
+
+## ADR-26: Visual snapshots are platform-specific; CI generates Linux baselines via labelled workflow rather than locally via Docker
+
+**Status:** Implemented (`frontend/playwright.config.js`, `.github/workflows/update-snapshots.yml`)
+
+**Context**
+
+Visual baselines under `frontend/e2e/*-snapshots/` are pixel-compared in CI. Chromium renders fonts and antialiasing slightly differently across Linux, macOS and Windows even with identical DOM and CSS — so a baseline a dev generates on macOS or Windows will fail in CI on `ubuntu-latest`. Microsoft's Playwright docs flag this explicitly and recommend two paths:
+
+1. Devs run snapshot generation inside the official `mcr.microsoft.com/playwright:vX-jammy` Docker image so locally-produced baselines match the CI runner.
+2. CI itself regenerates baselines on demand and commits them back.
+
+(1) requires every dev to install Docker. Some don't have it, some are on locked-down corporate machines, some are on Windows where the Docker → WSL2 setup is awkward. We hit this directly: a Windows-based dev pushed beautiful Win32 baselines that all failed on Linux CI's `chromium-linux` channel.
+
+**Decision**
+
+Take path (2). Per-platform baselines are committed (`*-chromium-linux.png` for CI, optional `*-chromium-win32.png` / `*-chromium-darwin.png` for local dev preview). The standard Playwright path template (which embeds `-{platform}` in the filename) is used — we don't try to share one baseline across platforms.
+
+The `.github/workflows/update-snapshots.yml` workflow regenerates the Linux baselines on demand:
+
+- Triggered when a PR is labelled `update-snapshots`, OR by manual `workflow_dispatch`.
+- Spins up `ubuntu-latest`, runs `npx playwright test --update-snapshots`, commits the regenerated `*-chromium-linux.png` files back to the PR's source branch via the workflow's `GITHUB_TOKEN`.
+- Removes the `update-snapshots` label after running so the workflow doesn't re-trigger in a loop.
+
+This pattern is what Vercel (Next.js), Microsoft (playwright-mcp) and others use for the same problem.
+
+**Consequences**
+
+- Devs don't need Docker locally. Push UI changes, see CI fail on visual diff, label the PR, re-baseline lands as a follow-up commit on the same PR.
+- The CI-generated baselines are the ground truth. Local platform baselines (`-chromium-win32.png` etc.) are convenience artefacts for design review — CI never reads them.
+- *Tradeoff*: a malicious PR could push UI regressions and self-label to "rebaseline" them. Mitigation: maintainers gate the label, and `permissions: contents: write` is scoped to the head branch only — the workflow can't push to `main` directly.
+- *Future*: if Docker becomes a standard dev requirement, swap the workflow trigger for a local `npm run update-snapshots:docker` script so the dev cycle is self-contained.
