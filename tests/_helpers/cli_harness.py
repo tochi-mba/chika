@@ -101,6 +101,30 @@ def run_cli(
     env.setdefault("ANTHROPIC_API_KEY", "test-stub-key")
     # Pet speech off — we don't want a parallel LLM call from the CLI.
     env["CHIKA_PET_SPEECH"] = "off"
+    # Redirect the child's settings file to a tmp path so slash
+    # commands like ``/auto-continue off`` and ``/state verbs off``
+    # don't write to the committed ``data/settings.json``. The conftest
+    # autouse fixture handles this for in-process tests; for subprocess
+    # tests we need an env var the child can read at import time.
+    if "CHIKA_SETTINGS_PATH" not in env:
+        import tempfile as _tf
+        _settings_tmp = _tf.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8",
+        )
+        # Seed with the same defaults the real file would have, so the
+        # child sees ``auto_continue=on`` etc. without having to run init().
+        json.dump({
+            "auto_continue":     "on",
+            "auto_continue_max": 10,
+            "autonomy":          "supervised",
+            "tool_permissions":  {},
+            "pet_speech":        "off",
+            "pet_speech_tokens": 40,
+            "state_verbs":       "on",
+            "state_verbs_tokens": 80,
+        }, _settings_tmp)
+        _settings_tmp.flush(); _settings_tmp.close()
+        env["CHIKA_SETTINGS_PATH"] = _settings_tmp.name
     # Force-disable rich's terminal-detection magic so stdout is line-buffered
     # plain text — easier to assert on.
     env["TERM"] = "dumb"

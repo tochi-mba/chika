@@ -25,11 +25,18 @@ individual categories — the lock icon shows the mixed/custom state.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from chika.core._io import atomic_write
 
-_SETTINGS_PATH = Path("data/settings.json")
+# ``CHIKA_SETTINGS_PATH`` lets a parent process redirect the persisted
+# settings file — used by tests that spawn ``python chika.py`` as a
+# subprocess (the in-process monkeypatch in conftest can't reach a
+# child Python interpreter, so without this override, subprocess
+# slash commands like ``/auto-continue off`` would write to the real
+# committed ``data/settings.json``).
+_SETTINGS_PATH = Path(os.environ.get("CHIKA_SETTINGS_PATH", "data/settings.json"))
 
 _VALID_AUTONOMY = {"supervised", "autonomous"}
 _VALID_PERMISSION = {"ask", "skip"}

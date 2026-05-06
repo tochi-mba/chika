@@ -85,6 +85,34 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 @pytest.fixture(autouse=True)
+def _isolate_settings_file(tmp_path, monkeypatch):
+    """Redirect ``api.settings_store._SETTINGS_PATH`` to a per-test tmp
+    file so NO test can ever write to the committed
+    ``data/settings.json``.
+
+    Why this matters: several test fixtures historically wrote to the
+    real settings file as a side-effect (``auto_continue_on``,
+    ``test_auto_continue_blocked_when_disabled``, anything calling
+    ``settings_store.update``). Combined with a sibling test that
+    ``monkeypatch.setattr(ss, "_settings", {})`` mid-suite, the real
+    file ended up partially clobbered. This fixture is the bulletproof
+    backstop.
+
+    We only redirect the path. We do NOT pre-seed the tmp file —
+    ``init()`` only fills missing keys, and tests that call
+    ``init({"autonomy": "autonomous"})`` need the file to be empty so
+    their override actually sticks. The in-memory ``_settings`` is
+    copied so each test gets its own dict (no shared-reference leaks).
+    """
+    import api.settings_store as ss
+    monkeypatch.setattr(ss, "_SETTINGS_PATH", tmp_path / "settings.json")
+    # Each test gets its own copy of the settings dict — no leakage
+    # between tests via the shared module-level reference.
+    monkeypatch.setattr(ss, "_settings", dict(ss._settings))
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_workspace_policy_module_globals():
     """Reset the workspace-policy globals on ``chika.tools.file_tools``
     after every test. Otherwise a WS-pipeline test that wires a policy
