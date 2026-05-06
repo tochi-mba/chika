@@ -454,20 +454,10 @@ function openSettings(tab) {
   gap: 10px;
   flex-shrink: 0;
 }
-.brand-mark {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--accent-dim);
-  color: var(--accent);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  transition: background 160ms var(--spring);
-}
-.brand:hover .brand-mark {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-}
+/* The old ``.brand-mark`` rounded square wrapped a polygon icon and is
+   gone — replaced by ChikaMark.vue (the trefoil SVG component). The
+   .brand container wraps the trefoil + the wordmark; no separate mark
+   container is needed. */
 .brand-name {
   font-size: 14.5px;
   font-weight: 600;

@@ -81,9 +81,11 @@ test.describe('permissions popover', () => {
     await waitForApp(chikaPage)
     await chikaPage.locator('.perm-wrap > button.icon-btn').first().click()
     await expect(chikaPage.locator('.perm-popover')).toBeVisible()
-    // Click outside the popover. The brand mark is now the trefoil
-    // ChikaMark component (.chika-mark), not the old .brand-mark div.
-    await chikaPage.locator('.chika-mark').first().click()
+    // Click outside the popover. We target ``.brand-name`` (the
+    // wordmark text) rather than the trefoil SVG because the SVG
+    // can have pointer-events issues in headless Chromium — the
+    // wordmark is plain text and always reliably clickable.
+    await chikaPage.locator('.brand-name').first().click()
     await chikaPage.waitForTimeout(150)
     expect(await chikaPage.locator('.perm-popover').count()).toBe(0)
   })
