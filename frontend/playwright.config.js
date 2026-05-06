@@ -21,7 +21,16 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: 1,
-  reporter: process.env.CI ? [['github'], ['list']] : 'list',
+  // CI uses three reporters in parallel:
+  //   - github   : annotates the PR with inline pass/fail markers
+  //   - list     : streams progress in the action logs
+  //   - html     : writes ``playwright-report/`` so the upload-artifact
+  //                step has something to upload (without it the artifact
+  //                step warns "No files were found", and failures are
+  //                un-debuggable from the Actions UI).
+  reporter: process.env.CI
+    ? [['github'], ['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]]
+    : 'list',
   timeout: 30_000,
   expect: {
     timeout: 5_000,

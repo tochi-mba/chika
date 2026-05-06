@@ -81,8 +81,9 @@ test.describe('permissions popover', () => {
     await waitForApp(chikaPage)
     await chikaPage.locator('.perm-wrap > button.icon-btn').first().click()
     await expect(chikaPage.locator('.perm-popover')).toBeVisible()
-    // Click the brand mark (outside the popover).
-    await chikaPage.locator('.brand-mark').first().click()
+    // Click outside the popover. The brand mark is now the trefoil
+    // ChikaMark component (.chika-mark), not the old .brand-mark div.
+    await chikaPage.locator('.chika-mark').first().click()
     await chikaPage.waitForTimeout(150)
     expect(await chikaPage.locator('.perm-popover').count()).toBe(0)
   })
