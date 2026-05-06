@@ -64,8 +64,11 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Install Playwright browsers (docs)
+        # docs config emulates iPhone / iPad (webkit) + Pixel (chromium).
+        # Without webkit, every iphone/ipad project fails with
+        # "browserType.launch: Executable doesn't exist." Install both.
         working-directory: docs
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium webkit
 
       # The extension suite runs headed (MV3 SWs don't register in
       # headless Chromium); xvfb gives Chrome a virtual display.

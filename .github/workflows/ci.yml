@@ -135,8 +135,12 @@ jobs:
         run: npm install
 
       - name: Install Playwright browsers
+        # docs/playwright.config.js emulates iPhone / iPad / Pixel devices.
+        # iPhone + iPad use webkit under the hood; Pixel uses chromium.
+        # Both engines are required, otherwise the iphone/ipad projects
+        # fail with "browserType.launch: Executable doesn't exist."
         working-directory: docs
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Run docs Playwright e2e
         working-directory: docs
