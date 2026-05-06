@@ -21,13 +21,13 @@ cp .env.example .env
 ## Running tests
 
 ```bash
-pytest tests/ -v
+pytest -v
 ```
 
 For coverage report:
 
 ```bash
-pytest tests/ --cov=chika --cov=api --cov-report=term-missing
+pytest --cov=chika --cov=api --cov-report=term-missing
 ```
 
 ## Code style
@@ -322,8 +322,8 @@ python -m ruff check .
 python -m mypy chika/ api/ config.py --ignore-missing-imports
 
 # Python tests + coverage gate
-python -m pytest tests/ -q --ignore=tests/test_cli_e2e.py \
-  --cov=chika --cov=api --cov-fail-under=60
+python -m pytest -q --ignore=tests/test_cli_e2e.py \
+  --cov=chika --cov=api --cov-fail-under=75
 
 # Frontend Playwright (against the dev server for speed)
 cd frontend
@@ -336,10 +336,10 @@ them in CI.
 
 ## PR checklist
 
-- [ ] Tests pass: `pytest tests/ -v`
+- [ ] Tests pass: `pytest -v`
 - [ ] Linting clean: `ruff check .`
 - [ ] No type regressions: `mypy chika/ api/ config.py --ignore-missing-imports`
-- [ ] Coverage above the 60% gate (`--cov-fail-under=60`)
+- [ ] Coverage above the 75% gate (`--cov-fail-under=75`)
 - [ ] If UI changed: visual snapshot baselines regenerated via the
   `update-snapshots` PR label (don't push Win32 / Darwin baselines)
 - [ ] New tools return `{"error": ...}` on failure
