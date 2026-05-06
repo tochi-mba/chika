@@ -139,6 +139,74 @@ share the same `@keyframes` definitions. The CLI doesn't carry per-leaf
 animations (terminal grid resolution is too coarse); it uses the inline
 state-row indicator instead (see ADR-28).
 
+## Native installers
+
+Chika ships installers for every major OS. End users grab the installer for their platform from the GitHub Pages landing page; contributors build them locally to test changes.
+
+### Tree
+
+```
+installers/
+├── README.md                  ← per-installer build instructions
+├── windows/
+│   ├── chika.iss              ← Inno Setup script (the manifest)
+│   ├── build_installer.ps1    ← run from repo root: builds wheel + ISCC
+│   ├── post_install.ps1       ← creates venv + pip installs wheel
+│   ├── pre_uninstall.ps1      ← strips PATH, preserves user data
+│   ├── chika.cmd              ← on-PATH launcher (sets CHIKA_DATA_DIR)
+│   └── chika.ico              ← Add/Remove Programs icon
+├── macos/
+│   ├── build_pkg.sh           ← pkgbuild + productbuild
+│   ├── scripts/preinstall     ← clears prior venv
+│   ├── scripts/postinstall    ← creates venv, /usr/local/bin symlink
+│   ├── chika                  ← launcher shim
+│   └── uninstall.sh           ← user-runnable uninstaller
+└── linux/
+    ├── debian/control         ← .deb metadata (Version: VERSION_PLACEHOLDER)
+    ├── debian/postinst        ← creates venv, pip installs
+    ├── debian/prerm           ← venv cleanup
+    ├── chika                  ← launcher shim
+    ├── build_deb.sh           ← uses dpkg-deb
+    └── install.sh             ← universal curl|bash for any glibc 2.28+
+```
+
+### Building locally
+
+| OS | Requirements | Command |
+|---|---|---|
+| Windows | Inno Setup 6, Python 3.11+ | `.\installers\windows\build_installer.ps1` |
+| macOS   | Xcode CLT, Python 3.11+   | `./installers/macos/build_pkg.sh` |
+| Linux   | `dpkg-dev`, Python 3.11+   | `./installers/linux/build_deb.sh` |
+
+Each script reads the version from `pyproject.toml` so the installer version is locked to the package version. Pass `--version 2.0.5` to override.
+
+### Adding a new runtime file to the install
+
+If you add a new top-level runtime file (manifest, asset, config), update **every** installer build script's file list:
+
+- `installers/windows/build_installer.ps1` — `$includeFiles` / `$includeDirs` arrays
+- `installers/macos/build_pkg.sh` — payload tree population
+- `installers/linux/build_deb.sh` — `$PKG_DIR/opt/chika/` copies
+
+The structural test `test_installer_structure.py::test_release_workflow_attaches_all_assets` will catch missing assets at PR time.
+
+### Auto-update path for native installs
+
+When chika is run from a native installer (detected via `install_marker.json`), `chika update` and the on-launch auto-update thread download the next setup file from GitHub Releases and run it silently. The asset name patterns are encoded in `chika._cli.update._expected_asset_name`; **keep this in sync** with the build scripts' output filenames or the auto-update will fail to find the asset.
+
+### Asset filename matrix
+
+Build scripts produce these filenames; `update.py`'s asset detector looks for them:
+
+| Install kind | Filename |
+|---|---|
+| `windows_installer` | `chika-setup-{version}.exe` |
+| `macos_installer`   | `Chika-{version}.pkg`       |
+| `linux_deb`         | `chika_{version}_all.deb`   |
+| `linux_universal`   | (no asset; updates by re-running `install.sh`) |
+
+A test (`test_installer_structure.py::test_update_asset_names_match_*`) verifies the names match.
+
 ## Install / update / doctor CLI
 
 Three argv subcommands sit in front of the REPL — they exit before
@@ -167,36 +235,80 @@ Any failure → notice only, no apply. The full rationale is ADR-29.
 
 ## Visual snapshot baselines (Playwright)
 
-Visual baselines under `frontend/e2e/*-snapshots/` and
-`extension/e2e/*-snapshots/` are pixel-compared in CI. Chromium renders
-fonts + antialiasing slightly differently on Linux vs macOS vs Windows,
-so the canonical baselines are the **Linux ones** (CI runs on
-`ubuntu-latest`). See ADR-26.
+Visual baselines live in three places:
+
+- `frontend/e2e/*-snapshots/`
+- `extension/e2e/*-snapshots/`
+- `docs/e2e/*-snapshots/` *(landing page; ~70 baselines across 7 viewport projects)*
+
+Pixel-compared in CI. Chromium renders fonts + antialiasing slightly
+differently on Linux vs macOS vs Windows, so the canonical baselines
+are the **Linux ones** (CI runs on `ubuntu-latest`). See ADR-26.
 
 Workflow when you change UI that has a visual baseline:
 
-1. Make your UI change locally; run the suite to see what fails.
+1. Make your UI change locally; run the relevant suite to see what fails.
    ```bash
-   cd frontend
-   BASE_URL=http://localhost:5173 npx playwright test
+   # frontend
+   cd frontend && BASE_URL=http://localhost:5173 npx playwright test
+   # extension
+   cd extension && npm run test:e2e
+   # docs landing page
+   cd docs && npm run test:e2e
    ```
 2. Push your branch and open a PR.
 3. CI fails the visual snapshot tests with diff images uploaded as
-   `frontend-playwright-report` artifacts — eyeball them to confirm the
+   `frontend-playwright-report` / `extension-playwright-report` /
+   `docs-playwright-report` artifacts — eyeball them to confirm the
    diff is intentional.
 4. Add the **`update-snapshots`** label to the PR.
    `.github/workflows/update-snapshots.yml` runs on `ubuntu-latest`,
-   regenerates every `-chromium-linux.png` baseline, and commits the
-   updates back onto your PR branch.
+   regenerates every `-chromium-linux.png` baseline (frontend +
+   extension + docs), and commits the updates back onto your PR
+   branch.
 5. The label auto-removes when done. CI re-runs and goes green.
 
 Manual variant: trigger `update-snapshots.yml` from the Actions tab
 (`workflow_dispatch`).
 
 **Don't commit `-chromium-win32.png` or `-chromium-darwin.png`
-baselines as if they were ground truth** — CI ignores them. If you see
-them in a diff and didn't intend to push them, drop them. They're only
-useful as a local design-review preview.
+baselines as if they were ground truth** — CI ignores them. If you
+see them in a diff and didn't intend to push them, drop them. They're
+only useful as a local design-review preview.
+
+### Landing page (`docs/`) baseline coverage
+
+`docs/e2e/landing.spec.js` runs across 7 device profiles defined in
+`docs/playwright.config.js`:
+
+- `desktop` (1440×900)
+- `iphone-se` / `iphone-14` / `iphone-14-landscape` / `pixel-7`
+- `ipad-mini` / `ipad-pro`
+
+Per-section snapshots: header, terminal showcase, features, install,
+update, uninstall, footer. Plus mobile-only full-page, mobile-nav
+open state, desktop-only CTA hover, install-card hovers.
+
+When the v0 redesign first lands (or any major design change), there
+will be **no baselines yet**. Add the `update-snapshots` label to the
+PR to generate them; subsequent diffs are pixel-compared against
+those generated baselines.
+
+## Test pyramid health
+
+Per the reviewer's ADR-25 + ADR-36 guidance, we keep the suite shaped
+like a pyramid (lots of fast unit tests, fewer integration, even
+fewer e2e). `tests/test_pyramid_health.py` enforces this with two
+loose floors:
+
+- `MIN_TOTAL_TESTS` — total collected tests in `tests/`
+- `MIN_UNIT_LIKE` — tests without an `e2e` / `slow` marker
+
+The floors are set to ~80% of current count so a small handful of
+deletions doesn't trip the alarm, but a structural shift does. **If
+you legitimately delete a hundred unit tests in one PR, lower the
+floor in this file as part of the same PR.** The contract: drift is
+visible at PR time, not 6 months later.
 
 ## CI-equivalent local check
 

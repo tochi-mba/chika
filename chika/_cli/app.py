@@ -98,6 +98,15 @@ def cli(argv: list[str] | None = None) -> None:
     if args and args[0] == "doctor":
         _run_doctor_subcommand()
         return
+    if args and args[0] == "setup":
+        _run_setup_subcommand(args[1:])
+        return
+    if args and args[0] == "uninstall":
+        _run_uninstall_subcommand(args[1:])
+        return
+    if args and args[0] == "replay":
+        from chika._cli import replay as replay_mod
+        sys.exit(replay_mod.main(args[1:]))
 
     if not _have_rich():
         from chika._cli.fallback import run_plain
@@ -194,6 +203,37 @@ def _run_update_subcommand(args: list[str]) -> None:
         sys.exit(1)
 
 
+def _run_setup_subcommand(args: list[str]) -> None:
+    """``chika setup [--force]`` argv handler."""
+    from chika._cli.setup import run_setup
+    force = ("--force" in args or "-f" in args)
+    if _have_rich():
+        from rich.console import Console
+        console = Console(highlight=False, soft_wrap=True)
+        result = run_setup(console=console, force=force)
+    else:
+        result = run_setup(console=None, force=force)
+        print(f"chika: {result.message}")
+    if not result.success:
+        sys.exit(1)
+
+
+def _run_uninstall_subcommand(args: list[str]) -> None:
+    """``chika uninstall [--yes] [--remove-data]`` argv handler."""
+    from chika._cli.uninstall import uninstall_chika
+    yes = ("--yes" in args or "-y" in args)
+    remove_data = ("--remove-data" in args)
+    if _have_rich():
+        from rich.console import Console
+        console = Console(highlight=False, soft_wrap=True)
+        result = uninstall_chika(console=console, yes=yes, remove_data=remove_data)
+    else:
+        result = uninstall_chika(console=None, yes=yes, remove_data=remove_data)
+        print(f"chika: {result.message}")
+    if not result.success:
+        sys.exit(1)
+
+
 def _start_auto_update_thread(console) -> None:
     """Kick off a background thread that runs the upstream update check.
 
@@ -260,6 +300,18 @@ async def _run_rich() -> None:
     # profile (mirrors the frontend / extension where the brand renders
     # before the gate, not after).
     render_banner(console, version=_chika_version(), provider=cfg.provider, model=cfg.model)
+
+    # First-run nudge — when ``.env`` is missing or empty, surface a
+    # one-line "run /setup" hint right after the banner. Doesn't block,
+    # doesn't auto-launch the wizard (a user might be CI-piping into
+    # the REPL and not want a blocking prompt). Reassures the user
+    # that settings can be changed later.
+    try:
+        from chika._cli.setup import needs_first_run_setup, render_first_run_nudge
+        if needs_first_run_setup():
+            render_first_run_nudge(console)
+    except Exception:
+        pass
 
     # Fire-and-forget background update check. Never blocks startup —
     # if the network is down, GitHub is rate-limiting, or anything

@@ -222,39 +222,45 @@ onMounted(loadProfiles)
 .profile-gate {
   position: fixed;
   inset: 0;
-  background: var(--bg);
+  background:
+    radial-gradient(800px 600px at 50% -100px, color-mix(in srgb, var(--accent) 6%, transparent), transparent 60%),
+    var(--bg);
   display: grid;
   place-items: center;
   z-index: 9999;
-  padding: 24px;
+  padding: 32px;
 }
 .gate-card {
-  width: min(420px, 100%);
+  width: min(480px, 100%);
   background: var(--surface-1);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.10));
   border-radius: 16px;
-  padding: 32px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+  padding: 40px 40px 36px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+  text-align: center;
 }
 :root.dark .gate-card {
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.55);
 }
 
 .gate-brand {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   font-weight: 600;
-  font-size: 15px;
+  font-size: 22px;
   color: var(--text-1);
-  margin-bottom: 24px;
-  letter-spacing: -0.015em;
+  margin-bottom: 36px;
+  letter-spacing: -0.02em;
 }
 .gate-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--accent-dim);
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent) 16%, transparent),
+    color-mix(in srgb, var(--accent) 6%, transparent));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
   color: var(--accent);
   display: grid;
   place-items: center;
@@ -262,17 +268,18 @@ onMounted(loadProfiles)
 }
 
 .gate-title {
-  font-size: 22px;
-  margin: 0 0 6px;
+  font-size: 26px;
+  margin: 0 0 10px;
   color: var(--text-1);
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
 }
 .gate-sub {
-  margin: 0 0 24px;
+  margin: 0 0 32px;
   color: var(--text-3);
-  font-size: 13.5px;
-  line-height: 1.5;
+  font-size: 14px;
+  line-height: 1.55;
 }
 
 .gate-list {
@@ -287,24 +294,24 @@ onMounted(loadProfiles)
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 13px 14px;
+  border-radius: 12px;
+  padding: 14px 16px;
   color: var(--text-1);
   font: inherit;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: border-color 140ms var(--spring),
-              background-color 140ms var(--spring),
-              transform 140ms var(--spring);
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              background-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              transform 240ms cubic-bezier(0.32, 0.72, 0, 1);
   text-align: left;
 }
 .gate-pick:hover {
   border-color: var(--accent);
-  background: var(--accent-dim);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
   transform: translateY(-1px);
 }
 .gate-name { color: var(--text-1); }

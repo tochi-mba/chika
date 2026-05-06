@@ -2,7 +2,7 @@
 
 Detection
 ---------
-We support two install kinds:
+We support three install kinds:
 
   ``git_clone``
       The repo root contains a ``.git`` directory. Update with
@@ -15,9 +15,34 @@ We support two install kinds:
       Chika is importable AND ``importlib.metadata`` knows it. Update
       with ``pip install --upgrade chika``. (Once we ship to PyPI.)
 
+  ``windows_installer``
+      The Chika Windows installer drops an ``install_marker.json``
+      next to ``chika.cmd`` at install time. Update by downloading the
+      latest ``chika-setup-X.Y.Z.exe`` from GitHub Releases and
+      running it silently — Inno detects the existing install via its
+      AppId GUID and runs an in-place upgrade.
+
+  ``macos_installer``
+      Same idea as Windows, with a ``.pkg`` instead. The postinstall
+      script writes ``install_marker.json`` to
+      ``/Library/Application Support/Chika/``. Update by downloading
+      ``Chika-X.Y.Z.pkg`` and running ``installer -pkg <path>
+      -target CurrentUserHomeDirectory``.
+
+  ``linux_deb``
+      Detected by ``dpkg -s chika`` returning successfully. Update via
+      ``apt-get install --only-upgrade chika`` (assuming we publish to
+      a repo) or by downloading the next ``chika_X.Y.Z_all.deb`` from
+      Releases and running ``dpkg -i``.
+
+  ``linux_universal``
+      The fallback ``install.sh`` writes a marker. Update by re-running
+      ``install.sh`` against the latest version — same script handles
+      first install + upgrade.
+
   ``unknown``
-      Neither marker present. We print a helpful message rather than
-      guessing.
+      None of the markers present. We print a helpful message rather
+      than guessing.
 
 Auto-update on startup
 ----------------------
@@ -51,6 +76,7 @@ fails loudly so they decide what to do.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -122,18 +148,102 @@ _CHECK_THROTTLE_SECONDS = 60 * 60
 
 
 def detect_install_kind(root: Path | None = None) -> str:
-    """Return ``"git_clone"`` | ``"pip_pypi"`` | ``"unknown"``.
+    """Return ``"git_clone"`` | ``"pip_pypi"`` | ``"windows_installer"`` | ``"unknown"``.
 
-    A ``.git`` dir at the repo root wins — even if Chika is also pip-
-    installed from PyPI, the user is clearly working in a clone and
-    expects ``git pull`` semantics.
+    Order of detection:
+
+      1. ``.git`` dir at the repo root → git_clone (wins over everything;
+         a developer working in a clone expects git semantics even if a
+         system-wide pip install also exists).
+      2. ``install_marker.json`` next to chika's location → look at
+         ``kind`` field. Currently only ``windows_installer`` is
+         recognised.
+      3. ``importlib.metadata`` knows about chika → pip_pypi.
+      4. Otherwise → unknown.
     """
     r = root or REPO_ROOT
     if (r / ".git").is_dir():
         return "git_clone"
+    marker_kind = _read_install_marker()
+    if marker_kind:
+        return marker_kind
     if _is_pip_installed():
         return "pip_pypi"
     return "unknown"
+
+
+_VALID_INSTALL_KINDS = {
+    "windows_installer",
+    "macos_installer",
+    "linux_deb",
+    "linux_universal",
+}
+
+
+def _marker_candidate_paths() -> list[Path]:
+    """Where install_marker.json might live, in priority order.
+
+    Each native installer drops the marker next to its install dir,
+    so we resolve from the live ``sys.prefix`` (the venv) and walk
+    upward to the parent (the install dir).
+
+    The hard-coded paths cover the common case where the user runs
+    ``python chika.py`` from outside the installed venv (e.g. dev) but
+    happens to also have an installed copy on the same machine.
+    """
+    paths = [
+        Path(sys.prefix).parent / "install_marker.json",
+        Path(sys.prefix) / "install_marker.json",
+    ]
+    # System-wide install paths the native installers use.
+    paths.extend([
+        Path("/Library/Application Support/Chika/install_marker.json"),
+        Path("/opt/chika/install_marker.json"),
+        Path.home() / ".local" / "share" / "chika" / "install_marker.json",
+    ])
+    return paths
+
+
+def _read_install_marker() -> str | None:
+    """Look for ``install_marker.json`` in known locations.
+
+    Returns the ``kind`` string from the marker (validated against
+    :data:`_VALID_INSTALL_KINDS`), or ``None`` if no marker found
+    anywhere.
+    """
+    for path in _marker_candidate_paths():
+        try:
+            if path.is_file():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                kind = str(data.get("kind", ""))
+                if kind in _VALID_INSTALL_KINDS:
+                    return kind
+        except Exception:
+            continue
+    # Even without a marker, if dpkg knows about chika we're a .deb.
+    if _dpkg_has_chika():
+        return "linux_deb"
+    return None
+
+
+def _dpkg_has_chika() -> bool:
+    """Return True if ``dpkg -s chika`` reports an installed package.
+
+    Cheap fallback for when the .deb's postinst either failed to
+    write install_marker.json or somebody nuked it. ``dpkg -s`` is
+    fast and read-only.
+    """
+    if shutil.which("dpkg") is None:
+        return False
+    try:
+        proc = subprocess.run(
+            ["dpkg", "-s", "chika"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=5,
+        )
+        return proc.returncode == 0 and "Status: install ok installed" in proc.stdout
+    except Exception:
+        return False
 
 
 def _is_pip_installed() -> bool:
@@ -184,6 +294,9 @@ def check_for_updates(
         return _check_git_upstream(r, get, git, timeout=timeout)
     if kind == "pip_pypi":
         return _check_pypi_upstream(get, timeout=timeout)
+    if kind in ("windows_installer", "macos_installer",
+                "linux_deb", "linux_universal"):
+        return _check_native_installer_upstream(kind, get, timeout=timeout)
     return UpdateInfo(
         kind="unknown", available=False, current="?", latest="?",
         ci_green=False, reason="unknown_install",
@@ -330,6 +443,123 @@ def _check_pypi_upstream(
         kind="pip_pypi", available=True, current=cur, latest=latest,
         ci_green=True, reason="ok",
     )
+
+
+# Hostname for the GitHub repo we look at for releases. Lives here as
+# a single source of truth; the build pipelines write the same value
+# into ``install_marker.json`` so a future fork could override it
+# without recompiling.
+_GITHUB_OWNER = "tochi-mba"
+_GITHUB_REPO = "chika"
+
+
+def _expected_asset_name(kind: str, version: str) -> str | None:
+    """Filename pattern each native installer publishes to Releases.
+
+    Single source of truth: ``installers/asset_names.py``. Build
+    scripts also read from there so the names can never drift.
+    """
+    try:
+        from installers.asset_names import expected_asset_name
+        return expected_asset_name(kind, version)
+    except ImportError:
+        # Defensive: shouldn't happen in any real install (the
+        # ``installers/`` package ships with the wheel), but if it
+        # somehow does, fall back to the inline mapping.
+        return {
+            "windows_installer": f"chika-setup-{version}.exe",
+            "macos_installer":   f"Chika-{version}.pkg",
+            "linux_deb":         f"chika_{version}_all.deb",
+            "linux_universal":   None,
+        }.get(kind)
+
+
+def _check_native_installer_upstream(
+    kind: str, http_get: HttpGetter, *, timeout: float,
+) -> UpdateInfo:
+    """Check GitHub Releases for a newer installer than what's installed.
+
+    Generic across the four native-install kinds. GitHub publishes
+    the release at the end of CI, so by definition everything visible
+    here is post-CI-passing → ``ci_green=True`` when we find an asset.
+    """
+    cur = _read_installed_version() or current_version()
+    try:
+        body = http_get(
+            f"https://api.github.com/repos/{_GITHUB_OWNER}/{_GITHUB_REPO}/releases/latest",
+            timeout=timeout,
+        )
+    except _HttpError as exc:
+        return UpdateInfo(
+            kind=kind, available=False, current=cur, latest=cur,
+            ci_green=False, reason=exc.code,
+        )
+
+    tag = str(body.get("tag_name") or body.get("name") or "")
+    latest = tag.lstrip("vV") if tag else ""
+    if not latest:
+        return UpdateInfo(
+            kind=kind, available=False, current=cur, latest=cur,
+            ci_green=False, reason="no_release",
+        )
+    if latest == cur:
+        return UpdateInfo(
+            kind=kind, available=False, current=cur, latest=latest,
+            ci_green=True, reason="up_to_date",
+        )
+
+    # linux_universal updates via install.sh — we don't need an asset.
+    if kind == "linux_universal":
+        return UpdateInfo(
+            kind=kind, available=True, current=cur, latest=latest,
+            ci_green=True, reason="ok",
+        )
+
+    expected = _expected_asset_name(kind, latest)
+    if expected is None:
+        return UpdateInfo(
+            kind=kind, available=True, current=cur, latest=latest,
+            ci_green=True, reason="ok",
+        )
+    asset_url = _find_installer_asset(body, expected)
+    if not asset_url:
+        return UpdateInfo(
+            kind=kind, available=True, current=cur, latest=latest,
+            ci_green=False, reason="no_installer_asset",
+        )
+    return UpdateInfo(
+        kind=kind, available=True, current=cur, latest=latest,
+        ci_green=True, reason="ok",
+    )
+
+
+def _find_installer_asset(release: dict, asset_name: str) -> str | None:
+    """Return the ``browser_download_url`` for the named asset, or None."""
+    assets = release.get("assets") or []
+    for a in assets:
+        if str(a.get("name", "")).lower() == asset_name.lower():
+            url = a.get("browser_download_url")
+            if isinstance(url, str) and url.startswith("https://"):
+                return url
+    return None
+
+
+def _read_installed_version() -> str | None:
+    """Read ``version`` from install_marker.json (Windows installer)."""
+    candidates = [
+        Path(sys.prefix).parent / "install_marker.json",
+        Path(sys.prefix) / "install_marker.json",
+    ]
+    for path in candidates:
+        try:
+            if path.is_file():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                v = data.get("version")
+                if isinstance(v, str) and v:
+                    return v
+        except Exception:
+            continue
+    return None
 
 
 # ── Auto-update on startup ────────────────────────────────────────────────
@@ -633,14 +863,18 @@ def update_chika(
         result = _update_git_clone(r, dry_run=dry_run)
     elif kind == "pip_pypi":
         result = _update_pip_pypi(dry_run=dry_run)
+    elif kind == "windows_installer":
+        result = _update_windows_installer(dry_run=dry_run)
     else:
         result = UpdateResult(
             kind="unknown",
             success=False,
             message=(
                 "couldn't detect how Chika was installed.\n"
-                "  · clone install? run: git pull && pip install -e .\n"
-                "  · pip install?    run: pip install --upgrade chika"
+                "  · clone install?     run: git pull && pip install -e .\n"
+                "  · pip install?       run: pip install --upgrade chika\n"
+                "  · Windows installer? download the latest setup.exe from\n"
+                "                       github.com/tochi-mba/chika/releases"
             ),
         )
 
@@ -732,6 +966,133 @@ def _update_pip_pypi(*, dry_run: bool) -> UpdateResult:
         message="updated chika from PyPI.",
         restart_required=True,
     )
+
+
+# ── Windows-installer path ────────────────────────────────────────────────
+
+
+def _update_windows_installer(
+    *,
+    dry_run: bool,
+    http_get: HttpGetter | None = None,
+    download_to: Path | None = None,
+    runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None,
+) -> UpdateResult:
+    """Download the next chika-setup-X.Y.Z.exe and run it silently.
+
+    Strategy:
+
+      1. Hit GitHub releases/latest, pull tag_name + the
+         chika-setup-*.exe asset's browser_download_url.
+      2. Download to ``%TEMP%\\chika-setup-X.Y.Z.exe``.
+      3. Run it with ``/SILENT /SUPPRESSMSGBOXES`` — Inno's standard
+         silent-install flags. Inno detects the existing install
+         (same AppId GUID) and performs an in-place upgrade, which
+         re-runs ``post_install.ps1`` to refresh the venv.
+
+    The HTTP and subprocess hooks are injectable so tests can stage
+    a fake release without touching the network.
+    """
+    if dry_run:
+        return UpdateResult(
+            kind="windows_installer", success=True,
+            message="dry-run: would download + run latest chika-setup-*.exe",
+            restart_required=True,
+        )
+
+    get = http_get or _http_get_json
+    run_subprocess = runner or _run
+
+    try:
+        body = get(
+            f"https://api.github.com/repos/{_GITHUB_OWNER}/{_GITHUB_REPO}/releases/latest",
+            timeout=_HTTP_TIMEOUT,
+        )
+    except _HttpError as exc:
+        return UpdateResult(
+            kind="windows_installer", success=False,
+            message=f"couldn't reach GitHub releases ({exc.code})",
+        )
+
+    tag = str(body.get("tag_name") or body.get("name") or "")
+    version = tag.lstrip("vV") if tag else ""
+    if not version:
+        return UpdateResult(
+            kind="windows_installer", success=False,
+            message="GitHub release has no tag_name",
+        )
+    expected_name = _expected_asset_name("windows_installer", version) \
+        or f"chika-setup-{version}.exe"
+    asset_url = _find_installer_asset(body, expected_name)
+    if not asset_url:
+        return UpdateResult(
+            kind="windows_installer", success=False,
+            message=(
+                f"release {version} has no {expected_name} asset.\n"
+                f"  download manually from https://github.com/{_GITHUB_OWNER}/{_GITHUB_REPO}/releases"
+            ),
+        )
+
+    target = download_to or (
+        Path(os.environ.get("TEMP") or os.environ.get("TMP") or ".")
+        / f"chika-setup-{version}.exe"
+    )
+    try:
+        _download_file(asset_url, target)
+    except _HttpError as exc:
+        return UpdateResult(
+            kind="windows_installer", success=False,
+            message=f"download failed ({exc.code}): {asset_url}",
+        )
+    except Exception as exc:
+        return UpdateResult(
+            kind="windows_installer", success=False,
+            message=f"download failed: {exc}",
+        )
+
+    # Run the installer silently. Inno's ``/SILENT`` shows a small
+    # progress bar; ``/VERYSILENT`` shows none. We use ``/SILENT``
+    # so the user has visual confirmation the update is happening.
+    proc = run_subprocess([
+        str(target), "/SILENT", "/SUPPRESSMSGBOXES",
+        "/CLOSEAPPLICATIONS", "/NORESTART",
+    ])
+    if proc.returncode != 0:
+        return UpdateResult(
+            kind="windows_installer", success=False,
+            message=(
+                f"installer exited with code {proc.returncode}\n"
+                f"  log: {target}.log (Inno writes one alongside the .exe)"
+            ),
+        )
+
+    return UpdateResult(
+        kind="windows_installer", success=True,
+        message=f"updated to {version} via Windows installer.",
+        restart_required=True,
+    )
+
+
+def _download_file(url: str, dest: Path) -> None:
+    """Download ``url`` to ``dest``. Asserts https scheme."""
+    if not url.lower().startswith("https://"):
+        raise _HttpError("bad_scheme")
+    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    try:
+        # nosec B310 — scheme asserted https; url comes from the
+        # GitHub Releases API which we trust as a content source.
+        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT * 6) as resp:  # nosec B310
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with open(dest, "wb") as out:
+                while True:
+                    chunk = resp.read(64 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+    except urllib.error.HTTPError as exc:
+        raise _HttpError(f"http_{exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise _HttpError("offline") from exc
 
 
 # ── Subprocess helper ────────────────────────────────────────────────────

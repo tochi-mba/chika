@@ -1,23 +1,45 @@
 <template>
-  <!-- v0 tool-block card for tool_call / tool_result -->
+  <!-- tool-block card for tool_call / tool_result -->
   <div
     v-if="isToolEvent"
     class="tool-block"
-    :class="{
-      'is-pending': isPending,
-      'is-error': isErrorResult,
-      'is-success': isSuccessResult,
-      'is-skill-load': isSkillLoad,
-    }"
+    :class="[
+      categoryClass,
+      {
+        'is-pending': isPending,
+        'is-error': isErrorResult,
+        'is-success': isSuccessResult,
+        'is-skill-load': isSkillLoad,
+      }
+    ]"
   >
     <div class="tool-head">
       <div class="tool-head-left">
-        <span class="status-dot" :class="dotStateClass" />
-        <span class="tool-name">{{ toolName }}</span>
-        <span v-if="skillBadge" class="skill-badge">{{ skillBadge }}</span>
+        <div class="cat-icon" :title="categoryLabel">{{ categoryIcon }}</div>
+        <div class="tool-name-wrap">
+          <span class="tool-name">{{ toolName }}</span>
+          <span v-if="skillBadge" class="skill-badge">{{ skillBadge }}</span>
+        </div>
       </div>
       <div class="tool-head-right">
-        <span v-if="isPending" class="mini-spinner" aria-label="running" />
+        <span class="status-pill" :class="dotStateClass">
+          <template v-if="isPending">
+            <span class="status-dot dot-pending" />
+            <span class="status-word">Running</span>
+          </template>
+          <template v-else-if="isErrorResult">
+            <svg class="status-glyph" width="11" height="11" viewBox="0 0 12 12" fill="none">
+              <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <span class="status-word">Error</span>
+          </template>
+          <template v-else-if="isSuccessResult">
+            <svg class="status-glyph" width="11" height="11" viewBox="0 0 12 12" fill="none">
+              <path d="M2 6L5 9L10 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="status-word">Done</span>
+          </template>
+        </span>
         <span v-if="isPending && elapsedLabel" class="elapsed">{{ elapsedLabel }}</span>
         <span v-else-if="resultSummary" class="result-summary">{{ resultSummary }}</span>
       </div>
@@ -120,10 +142,10 @@ const skillBadge = computed(() => {
 })
 
 const dotStateClass = computed(() => {
-  if (isPending.value) return 'dot-pending'
-  if (isErrorResult.value) return 'dot-error'
-  if (isSuccessResult.value) return 'dot-success'
-  return 'dot-neutral'
+  if (isPending.value) return 'state-pending'
+  if (isErrorResult.value) return 'state-error'
+  if (isSuccessResult.value) return 'state-success'
+  return 'state-neutral'
 })
 
 const dotClass = computed(() => ({
@@ -153,6 +175,59 @@ const toolName = computed(() => {
   if (e.type === 'tool_call')   return e.tool || e.step_id || 'tool'
   if (e.type === 'tool_result') return e.tool || e.step_id || 'result'
   return ''
+})
+
+/**
+ * Map a tool name → category. Mirrors api/settings_store.py::TOOL_CATEGORY_MAP
+ * so a new tool inherits the right colour without a CSS edit. Falls through
+ * to a neutral default for unknown tools.
+ */
+const categoryKey = computed(() => {
+  const name = (toolName.value || '').toLowerCase()
+  if (name.startsWith('shell_') || name === 'python_run' || name === 'bg_shell_exec' || name === 'shell_kill') return 'shell'
+  if (name === 'file_write' || name === 'file_append' || name === 'file_create_dir' || name === 'file_delete') return 'file_write'
+  if (name.startsWith('file_'))     return 'file_read'
+  if (name === 'browser_click' || name === 'browser_fill_input' || name === 'browser_select_option' || name.startsWith('browser_set_') || name === 'browser_keypress') return 'browser_write'
+  if (name.startsWith('browser_')) return 'browser_read'
+  if (name.startsWith('memory_'))  return 'memory'
+  if (name.startsWith('profile_')) return 'profile'
+  if (name.startsWith('git_'))     return 'git'
+  if (name === 'web_fetch' || name === 'web_search' || name === 'verify_url' || name === 'verify' || name === 'web_head') return 'network'
+  return 'default'
+})
+
+const categoryClass = computed(() => `cat-${categoryKey.value}`)
+
+const categoryIcon = computed(() => {
+  const map = {
+    shell: '>_',
+    file_write: '+f',
+    file_read: '=f',
+    browser_write: '@w',
+    browser_read: '@r',
+    memory: '*m',
+    profile: '~p',
+    git: '%g',
+    network: '^n',
+    default: '··',
+  }
+  return map[categoryKey.value] || '··'
+})
+
+const categoryLabel = computed(() => {
+  const labels = {
+    shell: 'Shell / Python',
+    file_write: 'File write',
+    file_read: 'File read',
+    browser_write: 'Browser action',
+    browser_read: 'Browser read',
+    memory: 'Memory',
+    profile: 'Profile',
+    git: 'Git',
+    network: 'Network',
+    default: 'Tool',
+  }
+  return labels[categoryKey.value] || 'Tool'
 })
 
 const label = computed(() => {
@@ -207,9 +282,6 @@ const resultSummary = computed(() => {
   if (e.type !== 'tool_result') return null
   if (e.error) return truncate(e.error, 60)
   if (e.result == null) return 'ok'
-  // Per-tool compact summary first (web_fetch → "200 · 2400B",
-  // plan_set → "plan set · 1 task", etc). Falls back to a short
-  // JSON dump for tools without a registered formatter.
   const summary = summariseTool(e.tool, e.result)
   if (summary) return summary
   try { return truncate(JSON.stringify(e.result), 60) } catch { return 'ok' }
@@ -245,20 +317,46 @@ function fmtJson(v) {
 </script>
 
 <style scoped>
-/* ── v0 tool-block card ─────────────────────────────────────────────── */
+/* ── Tool-block card ──────────────────────────────────────────────────── */
 .tool-block {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 10px 12px 10px 14px;
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: 10px;
   margin: 4px 0;
-  transition: border-color 160ms var(--spring);
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              background 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  /* Per-category accent owned by --cat-color (set in cat-* classes below).
+     Fallback to accent so unstyled categories still look right. */
+  --cat-color: var(--accent);
+  --cat-tint: color-mix(in srgb, var(--cat-color) 12%, transparent);
+  --cat-bg:   color-mix(in srgb, var(--cat-color) 4%, var(--surface-1));
+  border-left: 3px solid var(--cat-color);
 }
-.tool-block:hover { border-color: var(--border-strong); }
-.tool-block.is-error { border-color: color-mix(in srgb, var(--error) 35%, var(--border)); }
+.tool-block:hover {
+  border-color: var(--border-strong);
+  background: var(--cat-bg);
+}
+
+/* Per-category palette — translates the React reference's amber/green/blue
+   /cyan/purple/pink/orange/violet to design-token mixes. */
+.tool-block.cat-shell         { --cat-color: var(--warn); }
+.tool-block.cat-file_write    { --cat-color: var(--success); }
+.tool-block.cat-file_read     { --cat-color: color-mix(in srgb, var(--success) 80%, var(--accent-2)); }
+.tool-block.cat-browser_write { --cat-color: var(--accent); }
+.tool-block.cat-browser_read  { --cat-color: var(--accent-2, var(--accent)); }
+.tool-block.cat-memory        { --cat-color: color-mix(in srgb, var(--accent) 60%, #b48cff); }
+.tool-block.cat-profile       { --cat-color: color-mix(in srgb, var(--accent) 50%, #ff8cb4); }
+.tool-block.cat-git           { --cat-color: color-mix(in srgb, var(--warn) 70%, var(--success)); }
+.tool-block.cat-network       { --cat-color: color-mix(in srgb, var(--accent-2, var(--accent)) 80%, #b48cff); }
+
+.tool-block.is-error {
+  --cat-color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 35%, var(--border));
+}
 .tool-block.is-skill-load {
   background: color-mix(in srgb, var(--accent) 6%, var(--surface-1));
   border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
@@ -274,40 +372,46 @@ function fmtJson(v) {
 .tool-head-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   flex: 1;
 }
 .tool-head-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-3);
+/* Category icon — colored monospace mini-tile, the React reference's
+   primary visual marker for "what kind of work is this." */
+.cat-icon {
   flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--cat-tint);
+  color: var(--cat-color);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  user-select: none;
 }
-.status-dot.dot-pending {
-  background: var(--accent);
-  animation: pulse-dot 1.4s ease-in-out infinite;
-}
-.status-dot.dot-success { background: var(--success); }
-.status-dot.dot-error   { background: var(--error); }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%      { opacity: 0.4; transform: scale(0.85); }
+.tool-name-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
 }
-
 .tool-name {
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-  font-size: 12px;
-  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-1);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -316,7 +420,7 @@ function fmtJson(v) {
 }
 
 .skill-badge {
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -326,22 +430,43 @@ function fmtJson(v) {
   white-space: nowrap;
 }
 
-.mini-spinner {
-  display: inline-block;
-  width: 11px;
-  height: 11px;
-  border: 1.5px solid var(--text-3);
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: spinner-rotate 0.8s linear infinite;
+/* Status pill (icon + word) — replaces the bare dot from the prior
+   version. Matches the React reference. */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
-@keyframes spinner-rotate {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+.status-pill.state-pending  { color: var(--accent); }
+.status-pill.state-success  { color: var(--success); }
+.status-pill.state-error    { color: var(--error); }
+.status-pill.state-neutral  { color: var(--text-3); }
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.status-dot.dot-pending {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+.status-glyph { color: currentColor; flex-shrink: 0; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.85); }
 }
 
 .elapsed {
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
@@ -349,7 +474,7 @@ function fmtJson(v) {
 }
 
 .result-summary {
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-3);
   white-space: nowrap;
@@ -364,6 +489,7 @@ function fmtJson(v) {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin-left: 36px; /* aligns under tool-name, past the cat-icon */
 }
 .arg-pill {
   display: inline-flex;
@@ -375,12 +501,12 @@ function fmtJson(v) {
   max-width: 100%;
 }
 .arg-key {
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-3);
 }
 .arg-val {
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-2);
   white-space: nowrap;
@@ -390,7 +516,7 @@ function fmtJson(v) {
 }
 
 /* Expandable details */
-.tool-details { margin-top: 2px; }
+.tool-details { margin-top: 2px; margin-left: 36px; }
 
 .tool-details-toggle {
   list-style: none;
@@ -410,7 +536,7 @@ function fmtJson(v) {
   display: inline-block;
   font-size: 13px;
   line-height: 1;
-  transition: transform 150ms var(--spring);
+  transition: transform 150ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 details[open] .tool-details-toggle::before { transform: rotate(90deg); }
 .tool-details-toggle:hover { color: var(--text-2); }
@@ -420,7 +546,7 @@ details[open] .tool-details-toggle::before { transform: rotate(90deg); }
   background: var(--surface-2);
   border-radius: 6px;
   padding: 8px 10px;
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-2);
   white-space: pre-wrap;
@@ -434,7 +560,7 @@ details[open] .tool-details-toggle::before { transform: rotate(90deg); }
   color: var(--error);
 }
 
-/* ── Inline row (non-tool events) ───────────────────────────────────── */
+/* ── Inline row (non-tool events) ────────────────────────────────────── */
 .row {
   display: flex;
   align-items: flex-start;
@@ -465,7 +591,7 @@ details[open] .tool-details-toggle::before { transform: rotate(90deg); }
 .glyph {
   font-size: 11px;
   color: var(--text-3);
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-family: var(--font-mono);
   line-height: 1;
   user-select: none;
 }

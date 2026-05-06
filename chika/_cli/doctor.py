@@ -104,11 +104,99 @@ def run_doctor(
         check_env_file(r),
         check_data_writable(r),
         check_console_script(),
+        # Auto-gen drift checks (added in ADR-37). Each is a warn,
+        # not error — drift is a contributor concern, not a runtime
+        # break. Errors here would block users on a stale checkout.
+        check_event_types_in_sync(r),
+        check_brand_parity(r),
+        check_skill_summaries_in_sync(r),
     )
     report = DoctorReport(checks=checks)
     if console is not None:
         _render_doctor_report(console, report)
     return report
+
+
+# ── Auto-gen drift checks (ADR-37) ───────────────────────────────────
+
+
+def _run_check_script(root: Path, script: str, args: list[str]) -> tuple[int, str]:
+    """Invoke ``python scripts/<script>`` with ``--check``-flavour args.
+
+    Returns ``(exit_code, last_stderr_line)`` so the caller can map
+    the result to a Check severity + detail.
+    """
+    import subprocess
+    proc = subprocess.run(
+        [sys.executable, str(root / "scripts" / script), *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        cwd=str(root), timeout=60,
+    )
+    err_tail = ""
+    for line in (proc.stderr or "").splitlines():
+        if line.strip():
+            err_tail = line.strip()
+    return proc.returncode, err_tail
+
+
+def check_event_types_in_sync(root: Path) -> Check:
+    """Verify the auto-generated TS + JSDoc event types are current."""
+    script = root / "scripts" / "gen_event_types.py"
+    if not script.is_file():
+        return Check(
+            name="event types in sync", severity="warn",
+            detail="gen_event_types.py missing",
+        )
+    rc, _err = _run_check_script(root, "gen_event_types.py", ["--check"])
+    if rc == 0:
+        return Check(
+            name="event types in sync", severity="ok",
+            detail="frontend + extension types match api/models.py",
+        )
+    return Check(
+        name="event types in sync", severity="warn",
+        detail="run: python scripts/gen_event_types.py",
+    )
+
+
+def check_brand_parity(root: Path) -> Check:
+    """Verify the trefoil path is byte-identical across all 5 surfaces."""
+    script = root / "scripts" / "check_brand_parity.py"
+    if not script.is_file():
+        return Check(
+            name="brand parity", severity="warn",
+            detail="check_brand_parity.py missing",
+        )
+    rc, err = _run_check_script(root, "check_brand_parity.py", [])
+    if rc == 0:
+        return Check(
+            name="brand parity", severity="ok",
+            detail="trefoil path identical on every surface",
+        )
+    return Check(
+        name="brand parity", severity="warn",
+        detail=err or "drift detected — see ADR-27",
+    )
+
+
+def check_skill_summaries_in_sync(root: Path) -> Check:
+    """Every committed SKILL.md has a matching-hash summary cache."""
+    script = root / "scripts" / "regenerate_skill_summaries.py"
+    if not script.is_file():
+        return Check(
+            name="skill summaries in sync", severity="warn",
+            detail="regenerate_skill_summaries.py missing",
+        )
+    rc, _err = _run_check_script(root, "regenerate_skill_summaries.py", ["--check"])
+    if rc == 0:
+        return Check(
+            name="skill summaries in sync", severity="ok",
+            detail="every SKILL.md has a matching-hash summary",
+        )
+    return Check(
+        name="skill summaries in sync", severity="warn",
+        detail="run: python scripts/regenerate_skill_summaries.py",
+    )
 
 
 # ── Individual checks ─────────────────────────────────────────────────────

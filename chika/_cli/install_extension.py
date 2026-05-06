@@ -147,11 +147,29 @@ def install_extension(
             "extension/ directory next to chika.py",
         )
 
+    # Detect existing install state BEFORE we copy. The result steers
+    # the post-copy messaging — if the user already has it loaded in
+    # Chrome, opening chrome://extensions just confuses them.
+    detection = None
+    try:
+        from chika._cli.extension_detect import detect_extension
+        detection = detect_extension()
+    except Exception:
+        # Detection is purely advisory — never block install on a
+        # detection failure.
+        detection = None
+
     dst = (dest or EXTENSION_DEST).resolve()
     _copy_runtime(src, dst)
 
+    # Skip the browser-open step when we already know the extension
+    # is loaded in Chrome — the user just gets a refresh, no need to
+    # nag them to "Load unpacked" again.
+    already_active = (
+        detection is not None and detection.is_present
+    )
     opened = False
-    if open_browser:
+    if open_browser and not already_active:
         try:
             opened = bool(webbrowser.open(CHROME_EXTENSIONS_URL))
         except Exception:
@@ -161,7 +179,10 @@ def install_extension(
             opened = False
 
     if console is not None:
-        _render_install_panel(console, dst, opened=opened)
+        if already_active:
+            _render_refresh_panel(console, dst, detection)
+        else:
+            _render_install_panel(console, dst, opened=opened)
 
     return dst
 
@@ -211,6 +232,44 @@ def _copy_tree(src: Path, dst: Path, *, exclude_names: frozenset[str]) -> None:
             _copy_tree(entry, dst / entry.name, exclude_names=frozenset())
         else:
             shutil.copy2(entry, dst / entry.name)
+
+
+def _render_refresh_panel(console: Console, dest: Path, detection) -> None:
+    """Slim panel for the case where the extension is already loaded
+    in Chrome. We refreshed the files; user doesn't need to click
+    'Load unpacked' again."""
+    from rich.panel import Panel
+    from rich.text import Text
+
+    from chika._cli.renderer import THEME
+
+    body = Text()
+    body.append("extension already detected — refreshed files at\n  ", style=THEME.muted)
+    body.append(f"{dest}\n\n", style=f"bold {THEME.text}")
+    body.append("how we detected: ", style=THEME.dim)
+    if detection and detection.signals:
+        body.append(detection.signals[0][0], style=f"bold {THEME.text}")
+        body.append(f"\n  ({detection.signals[0][1]})\n\n", style=THEME.dim)
+    else:
+        body.append("various signals\n\n", style=THEME.dim)
+    body.append(
+        "Chrome will pick up the refreshed files automatically the next "
+        "time it loads the extension. If you want to force a reload "
+        "now, open ",
+        style=THEME.muted,
+    )
+    body.append("chrome://extensions/", style=f"bold {THEME.accent}")
+    body.append(" and click ", style=THEME.muted)
+    body.append("Reload", style=f"bold {THEME.text}")
+    body.append(" on the Chika card.", style=THEME.muted)
+
+    console.print(Panel(
+        body,
+        title=Text("extension refreshed", style=f"bold {THEME.success}"),
+        title_align="left",
+        border_style=THEME.success,
+        padding=(1, 2),
+    ))
 
 
 def _render_install_panel(console: Console, dest: Path, *, opened: bool) -> None:

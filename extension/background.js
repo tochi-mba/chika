@@ -321,12 +321,21 @@ ws.onMessage(async (msg) => {
   }
 
   if (msg.type === 'tool_call') {
+    // step_id is the contract — required for tool_call ↔ tool_result
+    // correlation. We used to fall back to ``id || (tool + '_' + Date.now())``
+    // which silently broke matching across reconnects (the result event
+    // would generate a different fallback id and never match). Drop +
+    // warn instead of silently masking a caller bug.
+    if (!msg.step_id) {
+      console.warn('[chika] tool_call missing step_id; dropping event', msg)
+      return
+    }
     if (chatState.currentMsg) {
       chatState.currentMsg.toolEvents.push({
         kind: 'call',
         tool: msg.tool,
         args: msg.args,
-        id:   msg.id || msg.step_id || (msg.tool + '_' + Date.now()),
+        id:   msg.step_id,
       })
       notifyPopup('tool_event', { event: chatState.currentMsg.toolEvents.at(-1) })
     }
@@ -334,13 +343,17 @@ ws.onMessage(async (msg) => {
   }
 
   if (msg.type === 'tool_result') {
+    if (!msg.step_id) {
+      console.warn('[chika] tool_result missing step_id; dropping event', msg)
+      return
+    }
     if (chatState.currentMsg) {
       chatState.currentMsg.toolEvents.push({
         kind:   'result',
         tool:   msg.tool,
         result: msg.result,
         error:  msg.error,
-        id:     msg.id || (msg.tool + '_result'),
+        id:     msg.step_id,
       })
       notifyPopup('tool_event', { event: chatState.currentMsg.toolEvents.at(-1) })
     }

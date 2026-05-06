@@ -129,7 +129,7 @@ function submitEdit() {
 
 <style scoped>
 /*
- * Plan panel — v0 design system port. Header: P-avatar + title +
+ * Plan panel — design system port. Header: P-avatar + title +
  * progress bar + actions. Body: GOAL / REQUIREMENTS / TASKS sections
  * with caps-spaced labels, comfortable whitespace, hairline dividers.
  */
@@ -216,8 +216,8 @@ function submitEdit() {
 }
 .plan-bar-fill {
   height: 100%;
-  background: var(--success);
-  transition: width 280ms var(--spring);
+  background: linear-gradient(90deg, var(--accent), var(--accent-2, var(--accent)));
+  transition: width 280ms cubic-bezier(0.32, 0.72, 0, 1);
   border-radius: 999px;
 }
 .plan-pct {

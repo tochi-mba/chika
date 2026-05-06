@@ -194,6 +194,73 @@ def test_check_console_script_finds_exe(monkeypatch):
     assert seen == ["chika", "chika.exe"]
 
 
+# ── ADR-37 auto-gen drift checks ────────────────────────────────────
+
+
+def test_check_event_types_in_sync_returns_ok_or_warn():
+    """Smoke: the check runs and produces ok|warn (never error)."""
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parent.parent
+    c = doc.check_event_types_in_sync(repo_root)
+    assert c.severity in ("ok", "warn")
+
+
+def test_check_brand_parity_returns_ok_or_warn():
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parent.parent
+    c = doc.check_brand_parity(repo_root)
+    assert c.severity in ("ok", "warn")
+
+
+def test_check_skill_summaries_in_sync_runs():
+    """Smoke: the skill-summary drift check runs without crashing.
+    It will return ``warn`` until the contributor regenerates summaries."""
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parent.parent
+    c = doc.check_skill_summaries_in_sync(repo_root)
+    assert c.severity in ("ok", "warn")
+    # The detail must include a remediation hint
+    assert ("regenerate_skill_summaries.py" in c.detail
+            or "every SKILL.md" in c.detail)
+
+
+def test_run_doctor_includes_drift_checks():
+    """The full doctor report must include the three new auto-gen
+    checks added in ADR-37."""
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parent.parent
+    report = doc.run_doctor(console=None, root=repo_root)
+    names = [c.name for c in report.checks]
+    assert "event types in sync" in names
+    assert "brand parity" in names
+    assert "skill summaries in sync" in names
+
+
+def test_doctor_drift_checks_are_warn_severity_only():
+    """Drift checks must be ``warn``, never ``error`` — drift is a
+    contributor concern, not a runtime break. A user on a stale
+    checkout should still get exit code 0 from doctor."""
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parent.parent
+    report = doc.run_doctor(console=None, root=repo_root)
+    drift_check_names = {"event types in sync", "brand parity", "skill summaries in sync"}
+    drift_severities = {
+        c.severity for c in report.checks if c.name in drift_check_names
+    }
+    assert "error" not in drift_severities, (
+        "drift checks must be warn-only; saw an error severity"
+    )
+
+
+def test_doctor_drift_check_falls_back_when_script_missing(tmp_path):
+    """If a check script is missing on a fresh checkout, the check
+    surfaces 'warn' with a clear ``script missing`` detail."""
+    # Tmp_path has no scripts/ dir — every drift check should warn.
+    c = doc.check_event_types_in_sync(tmp_path)
+    assert c.severity == "warn"
+    assert "missing" in c.detail.lower()
+
+
 # ── DoctorReport orchestration ───────────────────────────────────────
 
 

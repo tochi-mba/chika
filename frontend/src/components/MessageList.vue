@@ -2,10 +2,20 @@
   <div class="message-list-wrapper">
     <div class="message-list" ref="container" @scroll="onScroll">
       <div v-if="messages.length === 0" class="empty">
-        <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="none" stroke="#4f4f6a" stroke-width="1.5" stroke-linejoin="round"/>
-        </svg>
-        <p>Send a message to start</p>
+        <ChikaMark :size="48" state="idle" class="empty-mark" />
+        <h2 class="empty-heading">How can I help?</h2>
+        <p class="empty-sub">
+          I can browse the web, write and execute code, manage files, and
+          help you accomplish complex tasks. Just ask.
+        </p>
+        <div class="quick-prompts">
+          <button
+            v-for="p in quickPrompts"
+            :key="p"
+            class="quick-prompt"
+            @click="$emit('quick-prompt', p)"
+          >{{ p }}</button>
+        </div>
       </div>
       <MessageBubble v-for="msg in messages" :key="msg.id" :message="msg" />
       <div ref="anchor" style="height: 1px;" />
@@ -31,11 +41,21 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue'
 import MessageBubble from './MessageBubble.vue'
+import ChikaMark from './ChikaMark.vue'
 
 const props = defineProps({
   messages:    { type: Array,   default: () => [] },
   isStreaming: { type: Boolean, default: false },
 })
+
+defineEmits(['quick-prompt'])
+
+const quickPrompts = [
+  'Help me debug this error',
+  'Create a new component',
+  'Search the web for…',
+  'Explain this code',
+]
 
 const container = ref(null)
 const anchor    = ref(null)
@@ -99,51 +119,105 @@ watch(
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  color: var(--text-3, #4f4f6a);
-  padding-bottom: 80px;
+  gap: 16px;
+  color: var(--text-3);
+  padding: 48px 32px 80px;
+  text-align: center;
 }
-.empty p {
+.empty-mark { margin-bottom: 8px; }
+.empty-heading {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.02em;
+}
+.empty-sub {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-2);
+  max-width: 440px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+}
+
+.quick-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 24px;
+  justify-content: center;
+}
+
+.quick-prompt {
+  padding: 8px 16px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font: inherit;
   font-size: 13px;
-  letter-spacing: -0.01em;
+  font-weight: 500;
+  cursor: pointer;
+  letter-spacing: -0.005em;
+  transition: color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              background 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              border-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.quick-prompt:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  transform: translateY(-1px);
 }
 
 /* Jump to bottom button */
 .jump-btn {
   position: absolute;
-  bottom: 12px;
+  bottom: 14px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 5px;
-  background: var(--surface-2, #18181f);
-  border: 1px solid var(--border-strong, rgba(255,255,255,0.12));
+  gap: 6px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 6px 13px 6px 10px;
+  padding: 7px 14px 7px 11px;
   font-size: 12px;
-  color: var(--text-2, #8888a2);
+  font-weight: 500;
+  color: var(--text-2);
   cursor: pointer;
   white-space: nowrap;
   font-family: inherit;
-  transition: background 150ms, color 150ms, border-color 150ms;
+  letter-spacing: -0.005em;
+  transition: background 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              border-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              transform 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              box-shadow 240ms cubic-bezier(0.32, 0.72, 0, 1);
   z-index: 10;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18),
+              0 0 0 1px color-mix(in srgb, var(--accent) 4%, transparent);
+  backdrop-filter: blur(8px);
 }
 .jump-btn:hover {
-  background: var(--surface-3, #20202a);
-  color: var(--text-1, #ededf2);
-  border-color: rgba(108,99,255,0.4);
+  background: var(--surface-2);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  transform: translateX(-50%) translateY(-1px);
 }
 
 /* FAB enter/leave transition */
 .fab-enter-active,
 .fab-leave-active {
-  transition: opacity 180ms, transform 220ms var(--ease, cubic-bezier(0.16, 1, 0.3, 1));
+  transition: opacity 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              transform 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .fab-enter-from,
 .fab-leave-to {
   opacity: 0;
-  transform: translateX(-50%) translateY(10px);
+  transform: translateX(-50%) translateY(8px) scale(0.96);
 }
 </style>

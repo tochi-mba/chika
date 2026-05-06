@@ -35,12 +35,17 @@ function fmt(val) {
 <style scoped>
 .tool-card {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
   overflow: hidden;
   font-size: 12px;
-  margin: 3px 0;
+  margin: 4px 0;
   background: var(--surface-1);
-  transition: border-color 140ms var(--spring);
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.tool-card:hover {
+  border-color: var(--border-strong, rgba(255, 255, 255, 0.10));
+  border-left-color: var(--accent-2, var(--accent));
 }
 .tool-card.done  { border-color: color-mix(in srgb, var(--success) 24%, var(--border)); }
 .tool-card.error { border-color: color-mix(in srgb, var(--error) 30%, var(--border)); }

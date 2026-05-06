@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -60 120 120">
+  <g stroke="#6c63ff" stroke-width="3.4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="rotate(0)"><path d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z"/></g>
+    <g transform="rotate(120)"><path d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z"/></g>
+    <g transform="rotate(240)"><path d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z"/></g>
+  </g>
+  <circle r="3.2" fill="#6c63ff"/>
+</svg>

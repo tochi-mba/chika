@@ -27,11 +27,16 @@ const icon = computed(() => ICONS[props.event.step_type] || '·')
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 10px;
-  border-radius: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
   font-size: 12px;
   background: var(--surface-2);
   margin: 2px 0;
+  transition: background 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.step-row:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-2));
 }
 .icon { width: 16px; text-align: center; color: var(--accent); font-family: var(--font-mono); }
 .label { flex: 1; font-family: var(--font-mono); color: var(--text-1); }

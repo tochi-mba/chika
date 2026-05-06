@@ -878,3 +878,403 @@ After update, the in-memory Python is still running last commit's bytecode. Rest
 - Users no longer fall behind silently — Chika updates itself when it's safe to.
 - *Tradeoff*: one extra GitHub API call per chika launch (throttled to ~24/day at most). If Chika ever goes viral we'll hit GitHub's anonymous rate limit; the path forward is GitHub App auth or moving the SHA + CI status check to a tiny CDN-cached JSON file we publish from CI.
 - *Tradeoff*: PyPI publishing isn't gated on CI green at the registry level — a maintainer could push a broken release. We treat "newer version exists on PyPI" as `ci_green=True` because the publish step itself is in our CI workflow. If we ever change that, this assumption needs revisiting.
+
+---
+
+## ADR-30: Native installers per OS, app-manager parity, GitHub Pages landing
+
+**Status:** Implemented (`installers/`, `chika/_cli/setup.py`, `chika/_cli/uninstall.py`, `chika/_cli/update.py`, `docs/`, `.github/workflows/release.yml`, `.github/workflows/pages.yml`, `api/settings_store.py`)
+
+**Context**
+
+Three problems were stacked:
+
+1. The only documented install path was `git clone + python install.py`. End users (not contributors) don't want to think about Python or git — they want a button.
+2. There was no way to uninstall Chika via the OS app manager (Add/Remove Programs on Windows, Applications-folder convention on macOS, `apt remove` on Linux). Pip-installed packages are invisible to those tools.
+3. Auto-update only worked for git clones and (eventually) PyPI. A user who installed via a hypothetical native installer would have nothing.
+
+**Decision — installers**
+
+Three native installers + a universal Linux fallback, all per-user (no admin/sudo for any except macOS where `.pkg` to `/Library/...` requires it):
+
+| OS | Format | Build tool | Install dir | Add/Remove Programs entry |
+|---|---|---|---|---|
+| Windows | `chika-setup-X.Y.Z.exe` | Inno Setup 6 (`installers/windows/chika.iss`) | `%LocalAppData%\Programs\Chika\` | Yes — Inno's AppId GUID |
+| macOS   | `Chika-X.Y.Z.pkg`        | `pkgbuild` + `productbuild` | `/Library/Application Support/Chika/` + `/usr/local/bin/chika` symlink | `pkgutil` receipt + manual uninstall.sh |
+| Linux (.deb) | `chika_X.Y.Z_all.deb` | `dpkg-deb`               | `/opt/chika/` + `/usr/bin/chika` shim | Yes — `dpkg -s chika`, `apt remove` |
+| Linux (any) | `install.sh` (curl\|bash) | n/a                      | `~/.local/share/chika/` + `~/.local/bin/chika` shim | Manual `uninstall.sh` |
+
+Each installer:
+
+- Builds a venv on the user's machine (Python 3.11+ required) — venvs aren't relocatable so we don't ship one prebuilt.
+- `pip install`s a bundled wheel into that venv.
+- Drops a launcher shim (`chika.cmd` on Windows, `chika` shell script elsewhere) that exports `CHIKA_DATA_DIR=~/.chika/data` before forwarding to the venv. This means user state lives outside the install dir and survives uninstall.
+- Writes `install_marker.json` with `{"kind": "<install_kind>", "version": "..."}` so `chika update` knows which auto-update path to take.
+- On missing-Python, opens `python.org/downloads/` in the user's default browser instead of just printing an error.
+
+**Decision — uninstall parity**
+
+Both surfaces work:
+
+- OS-native (Add/Remove Programs / `sudo .../uninstall.sh` / `apt remove`) — what users expect.
+- `chika uninstall` — detects the install kind and either runs the right uninstaller (with `--yes`) or prints the exact command (default — show, don't surprise).
+
+`chika uninstall` defaults to **preserving** `~/.chika/`. `--remove-data` opts in to wiping it. Same default applies to every OS-native uninstaller; reinstall picks up exactly where the user left off.
+
+**Decision — auto-update for native installers**
+
+`chika/_cli/update.py` gained four new `install_kind`s: `windows_installer`, `macos_installer`, `linux_deb`, `linux_universal`. Detection mirrors the marker file pattern (with a fallback to `dpkg -s chika` for the .deb case in case the marker was nuked).
+
+Per-kind update behaviour:
+
+- `windows_installer`: download `chika-setup-X.Y.Z.exe` from `releases/latest` and run with `/SILENT /SUPPRESSMSGBOXES`. Inno detects the existing install via AppId GUID and runs an in-place upgrade.
+- `macos_installer`: download `Chika-X.Y.Z.pkg`, run `installer -pkg <path> -target ...`.
+- `linux_deb`: (when we publish to an apt repo) `apt-get install --only-upgrade chika`. For now, manual `dpkg -i` of the next `.deb`.
+- `linux_universal`: re-run `install.sh`. The script is idempotent — first install + upgrade + reinstall all work.
+
+Asset filename patterns are encoded in `_expected_asset_name(kind, version)` in `update.py`. Build scripts produce matching names. A test (`test_installer_structure.py`) cross-checks the two so drift fails CI.
+
+**Decision — GitHub Pages landing**
+
+`docs/` is a single-page static site at `tochi-mba.github.io/chika`. Auto-detects the visitor's OS via `navigator.userAgent`/`navigator.platform`, fetches `releases/latest` from the GitHub API, and re-targets the primary CTA at the right asset. Falls back to a generic "view all releases" link if the API is rate-limited or there are no releases yet.
+
+The page mirrors the CLI's brand mark + thinking-state animation by hand-duplicating the canonical SVG geometry (extending ADR-27's parity rule to a fifth surface). Visitors see the same chika they get in the terminal.
+
+The page leans heavily on the **"settings change anytime"** reassurance — a recurring pain point with installers is users worry that pre-install choices are permanent. The landing tells them three times (hero subtitle, install card hints, footer reassurance) that everything is changeable.
+
+**Decision — `chika setup` + first-run nudge**
+
+After install, the user runs `chika` and gets a one-line hint: `first-run? provider + API key not configured. run /setup to launch the wizard`. They can dismiss it (just type their question) or run the wizard. The wizard is the same `install.py main()` that contributor installs use — single source of truth, no parallel prompt logic.
+
+`chika setup` is also exposed as an argv subcommand for users who haven't booted the REPL yet.
+
+Edge cases the wizard guards against:
+
+- Non-TTY stdin → refuses (CI / piped input would block forever).
+- Existing `.env` with content → refuses without `--force` (don't silently clobber a working configuration).
+- Python below 3.11 → fails before asking for an API key.
+- `install.py` missing or has no `main()` → corrupted install error message with the manual remediation command.
+
+**Decision — `CHIKA_DATA_DIR` env var**
+
+`api/settings_store.py` resolves the settings path from (in order): `CHIKA_SETTINGS_PATH`, then `CHIKA_DATA_DIR + "/settings.json"`, then `data/settings.json` relative to cwd. The launcher shims for all four native installers export `CHIKA_DATA_DIR=~/.chika/data` so settings persist across uninstalls. Future state stores (chat history, profiles, memory) can opt into the same env var without inventing new ones.
+
+**Test surface**
+
+- `tests/test_installer_structure.py` (65 tests) — installer file shape, Inno required sections, AppId is a GUID, asset naming matches the build scripts, marker contracts, brand-mark geometry parity between docs and the canonical Vue path, bash syntax checks (Linux/macOS only — skipped on Windows because MSYS bash mangles paths), PowerShell brace balance + ErrorActionPreference, Debian control fields, release workflow attaches all assets, Pages workflow deploys docs/.
+- `tests/test_setup.py` (24 tests) — every guard, every error path, the slash + argv wiring, the first-run nudge content.
+- `tests/test_uninstall.py` (25 tests) — every install kind, runner-failure paths, `--remove-data` semantics, console rendering, slash + argv wiring.
+- `tests/test_update.py` (extended; 120 tests) — the four new install kinds, `_check_native_installer_upstream`, `_find_installer_asset`, `_dpkg_has_chika`, `_download_file` scheme guard, marker file detection across all kinds.
+
+**Consequences**
+
+- A new user goes from `tochi-mba.github.io/chika` → click → installer wizard → `chika` works in any terminal in under a minute. No git, no Python (well, Python is required, but the installer opens python.org if missing). No "where do I put this folder."
+- Uninstall feels native: open Add/Remove Programs, click Uninstall. The CLI option exists for power users.
+- Auto-update keeps working post-install — same `chika update` on the CLI, same notice on REPL launch.
+- *Cost*: more CI surface (windows-latest + macos-latest + ubuntu-latest jobs in `release.yml`). Each installer build adds ~2-3 minutes per release.
+- *Tradeoff*: installers are unsigned. Windows SmartScreen will show "Windows protected your PC" on first run; macOS Gatekeeper will refuse the .pkg without authentication. The next round adds Authenticode + Apple Developer ID + GPG signing — out of scope here because all three need cert procurement.
+- *Tradeoff*: the macOS .pkg installs to `/Library/Application Support/` which requires admin. Per-user macOS installs would land at `~/Library/Application Support/` and not need admin, but then we can't symlink to `/usr/local/bin/`. Users would have to add `~/Library/Application Support/Chika/` to PATH manually, which isn't mac-native UX. We chose the admin-required path because it's standard.
+- *Future*: code signing, AppImage builds, RPM builds, an in-frontend "Uninstall Chika" button (calls a new `/api/uninstall` endpoint that shells out to `chika uninstall --yes`).
+
+---
+
+## ADR-31: Event contract — Pydantic-validated, surface-routed, drift-detected
+
+**Status:** Implemented (`api/models.py`, `api/event_routing.py`, `api/server.py`, `extension/background.js`, `tests/test_event_contract.py`)
+
+**Context**
+
+A staff-engineer architecture review of Chika identified the strongest property as "one engine, four surfaces" and warned that cross-surface drift would silently erode the differentiator over time. Three audits confirmed the concern:
+
+- `api/models.py` had Pydantic event models, but they were **never validated** at emit time — events flew as raw dicts on the WS edge.
+- `extension/background.js` correlated `tool_call` and `tool_result` via `id || step_id || (tool + '_' + Date.now())` — when `step_id` was absent, the fallback generated a fresh UUID, so `tool_call` and the matching `tool_result` got different ids and never correlated. **Live bug** affecting reconnects.
+- The extension silently dropped `validation_warning`, `thinking`, and `shell_*` events the frontend rendered — drift the type system couldn't see.
+
+**Decision**
+
+Three-part contract enforcement:
+
+1. **`EventType` enum** in `api/models.py` — single source of truth for the 35+ event names the engine emits. Adding a new event means adding to the enum (drift becomes a compile-time-ish event).
+2. **`validate_event(payload, *, strict=False)`** — runtime validator that routes by `type` to the matching Pydantic model. Strict mode raises on missing required fields (used in tests). Lax mode at the WS edge logs and lets the event through (validation is observability, not gatekeeping — the WS edge can't fail every time the engine emits something).
+3. **`api/event_routing.py`** — declarative `CLI_EVENTS`, `FRONTEND_EVENTS`, `EXTENSION_EVENTS`, plus `EXTENSION_DROPS_ON_PURPOSE` for events the popup surface deliberately ignores. The contract test (`tests/test_event_contract.py`) asserts every `EventType` is in at least one set — silent drops fail CI.
+
+**Bug fix:** `extension/background.js` now requires `step_id` on `tool_call` and `tool_result`. Missing step_id → console.warn + drop. Drops surface the caller bug instead of masking it with a UUID that breaks correlation downstream.
+
+**Why opt-in strict mode**
+
+The audit found 35+ event types, only 16 with Pydantic models. Forcing strict validation at the WS edge would block production until every type has a model. Lax-at-runtime + strict-in-tests means we get drift detection (CI fails when `tool_call` is emitted without `step_id`) without taking down the WS edge if the engine adds an unmodelled event.
+
+**Consequences**
+
+- The bug that broke `tool_call`/`tool_result` correlation across reconnects is fixed.
+- Adding a new event type now has a consistent shape: enum entry, optional Pydantic model, route assignment.
+- 26 contract tests in `tests/test_event_contract.py` lock the shape.
+- *Future*: as more event models land, strict-at-edge becomes feasible. For now, opt-in strict in tests catches drift without production risk.
+
+---
+
+## ADR-32: Skill summary injection — pre-generated, hash-keyed, non-blocking
+
+**Status:** Implemented (`chika/skills/summarizer.py`, `data/skill_summaries/<id>.json`, `scripts/regenerate_skill_summaries.py`, `tests/test_skill_summarizer.py`)
+
+**Context**
+
+The agent has 10+ skills, each with a SKILL.md. Today the agent doesn't see those docs unless it explicitly calls `skill_load(skill_id)` — so the agent is guessing which skills exist. Wrong guess → wasted turn. Right guess → skill_load → another turn. Either way, multi-turn cost on every novel skill use.
+
+**Decision**
+
+LLM-generated **summaries** of each SKILL.md, injected into the system prompt on every turn:
+
+- 80-120 tokens per skill — `purpose`, `when_to_use` (3 bullets), `key_tools` (3-5 names), `anti_patterns` (1-2 bullets)
+- Twelve skills × 100 tokens = ~1.2k system prompt overhead, fully prompt-cacheable
+- Pre-generated and committed to `data/skill_summaries/<skill_id>.json` — **zero runtime LLM cost** in the common case
+- CI gate (`tests/test_skill_summary_drift.py` — to be added) verifies every committed SKILL.md has a matching-hash summary
+
+**Detection mechanism — SHA-256 of file bytes**
+
+mtime resets on `git pull` / `git checkout` (worst alternative). Git SHA misses uncommitted edits. File size has trivial false negatives. Content-addressable hash is the only choice that's both correct and cheap (12 skills × ~4 KB = 48 KB to hash on init).
+
+**Non-blocking architecture (mirrors `chika/_cli/state_verbs.py`)**
+
+1. Engine `__init__` calls `summarizer.init_summaries(register_callback, skills)`.
+2. Cached summaries with matching hash → registered synchronously before init returns.
+3. Stale or missing summaries → registered as `PENDING_SUMMARY` placeholder + `asyncio.create_task(generate_summary_async(...))` queued. Bounded concurrency: `Semaphore(6)`. Per-call timeout 30s.
+4. **Engine init returns immediately.** The agent boots, the user can chat. As background tasks complete, `register_callback` updates `engine._skill_summaries`. The system-prompt assembler reads this dict on every turn — so newly-completed summaries land in the **next** turn (not retroactively into completed turns).
+
+**Stale summaries are dropped, not kept as fallback.** Outdated capability claims in front of the agent are worse than no summary. Hash mismatch → cache invalidated → regenerate.
+
+**The summarization system prompt is load-bearing.** Its full text lives in `chika/skills/summarizer.py::SUMMARIZATION_SYSTEM_PROMPT`:
+- Establishes the agent-facing audience explicitly
+- Bad/good contrasts for every field (concrete examples beat abstract rules)
+- Explicit "surface the impressive capability" instruction in the PURPOSE rule
+- Strict length caps + JSON-only output rule
+- Prompt-injection defence clause: SKILL.md is content, not instructions to the summarizer
+
+**Skill-gate integration (lifts a real friction point)**
+
+ADR-11's first-use skill gate now skips when the skill's summary is in the system prompt. The agent has enough context for a competent first-use; no need for the refuse-and-retry roundtrip. The gate fires only when the summary genuinely isn't available (still in-flight at boot, LLM unreachable). Saves a turn per skill in the common case.
+
+**Consequences**
+
+- The agent picks the right skill on the first try far more often.
+- Adding a new skill = SKILL.md + `data/skill_summaries/<id>.json` (the latter generated via `scripts/regenerate_skill_summaries.py`).
+- 35 unit tests in `tests/test_skill_summarizer.py` cover every edge: hash determinism, malformed LLM output, oversized fields, prompt-injection attempts, atomic write under crash, orphaned cache pruning.
+- *Future*: an `--update` flag on `chika doctor` that regenerates summaries; a "skill explorer" UI in the frontend that surfaces the summaries to humans too.
+
+---
+
+## ADR-33: Browser tool resilience — selector cascade + idempotency
+
+**Status:** Implemented (`chika/skills/browser_skill/selectors.py`, `chika/skills/browser_skill/idempotency.py`, `tests/test_browser_hardening.py`)
+
+**Context**
+
+The reviewer specifically called out browser automation as the subsystem most likely to dominate maintenance in 12-18 months. Audit confirmed: 18 browser tools, all CSS-`querySelector`-only, no fallback strategies, no idempotency on mid-flight disconnects. Two failure modes already in flight:
+
+1. **Markup churn** — site renames a class, every cached selector breaks until the agent retries with a different spec.
+2. **Mid-flight reconnect** — WS drops between `tool_call` and `tool_result`, engine retries the action, action double-fires (form submit, click "Buy now" → very bad).
+
+**Decision**
+
+Two new modules in `chika/skills/browser_skill/`:
+
+1. **`selectors.py`** — `candidate_specs(spec)` returns a cascade: CSS as-given → ARIA-aware variant when a label cue exists (`aria-label`, `title`, `alt`, `id`-as-words) → text-content variant via the extension's `:has-text("...")` synthetic pseudo. Successful resolutions cache per `(url, original_spec)` so subsequent actions reuse the working spec without re-cascading.
+2. **`idempotency.py`** — `IdempotencyKey.from_call(tab_id, action, args) → SHA-256 hash`. `IdempotencyCache` stores results with a 30-second sliding TTL. On reconnect within window, the engine returns the cached result instead of re-running. Outside window, action runs again (state likely changed).
+
+**Why 30 seconds for the idempotency window**
+
+Long enough to absorb realistic WS reconnects (most complete < 5s, mobile network blips < 30s). Short enough that the agent's "I'll do X" → user-page-state assumption stays consistent (after 30s, the page may have changed; re-running is the right call).
+
+**Why per-tab in the idempotency key**
+
+A "click submit" on tab 42 is a different action from the same on tab 51. Sharing a cache across tabs would mask real divergence.
+
+**Consequences**
+
+- Markup-churn-driven test failures should drop sharply once the cache warms up.
+- Form-double-submit class of bugs: gone for 30-second window.
+- 21 unit tests in `tests/test_browser_hardening.py` lock the cascade + idempotency contracts.
+- *Future*: Playwright `dom_resilience.spec.js` extension test that mutates a synthetic page mid-flight and asserts the cascade survives — needs the extension's content script to consume `candidate_specs()` first.
+
+---
+
+## ADR-34: Permission audit log
+
+**Status:** Implemented (`api/audit_log.py`, `tests/test_audit_log.py`)
+
+**Context**
+
+Trust UX is the moat for an agentic tool. The audit found: categories work, ask/skip works, autonomy mode works — but there's no audit trail. Users can't see what was approved when, can't grant temporarily, can't see what changed.
+
+**Decision**
+
+Append-only NDJSON at `data/audit.jsonl`. One record per:
+
+- **approval** — user said yes/no to a tool prompt
+- **permission_change** — category flipped from ask → skip etc.
+- **grant_expired** — a timed grant TTL elapsed
+- **tool_run** — tool executed (post-hoc, one line per actual run, not per WS event)
+
+Schema: `{ts, kind, actor, tool, category, decision, ttl_minutes, reason, session_id}`. None-valued fields are dropped at serialization for compactness.
+
+**Rotation:** capped at 10 MB. When the active log hits the cap, it's renamed to `audit.jsonl.<ts>` and a fresh log starts. Rotation failure is logged but non-fatal — better an over-cap log than a dropped record.
+
+**Concurrency:** internal `threading.Lock` so two threads writing simultaneously don't interleave bytes. 16 unit tests prove this end-to-end.
+
+**Why NDJSON**
+
+- `tail -f` works in development
+- Partial last line doesn't corrupt earlier records (unlike JSON arrays)
+- Trivial to grep / pipe / parse with any line-oriented tool
+- Same format the event log uses (Phase 4) — operationally consistent
+
+**Consequences**
+
+- Users have ground truth for "what tools did the agent run?"
+- Foundation for a future "Permissions audit" view in the frontend Settings modal
+- *Future*: `/audit [--last N]` slash command + `chika audit` argv subcommand for browsing the log; JIT timed grants (`"skip until <ts>"`) consume the same log infrastructure.
+
+---
+
+## ADR-35: Session event log + replay
+
+**Status:** Implemented (`api/event_log.py`, `chika/_cli/replay.py`, `tests/test_event_log.py`)
+
+**Context**
+
+The differentiator is "one engine, multiple synchronized surfaces." This ADR makes that concrete: every WS event for a session lands in `data/sessions/<session_id>.jsonl`, and `chika replay <session_id>` dispatches the recorded events to any chosen surface — CLI, frontend, extension.
+
+**Decision**
+
+`api/event_log.py::EventLog` is a per-session NDJSON writer. The engine attaches one as a bus subscriber for the session it owns. Schema mirrors the event payload + `ts` (append-time, set if absent) + `session_id` (sanitised — alnum + `-` + `_` only, defends against path traversal).
+
+**Rotation:** 5 MB per session — half the audit-log threshold because per-session traffic is bursty (many tokens during streaming, then idle). Rotated to `<id>.jsonl.<ts>`. Replay reads the active file by default.
+
+**`chika replay`** has three surface modes:
+- `cli` — dispatch through `Renderer.handle` (the CLI replays the session as if you were there)
+- `raw` — dump each event as one-line JSON to stdout (good for grep / piping / fixturing)
+- `count` — bucket by event type with totals (sanity check the recording)
+
+`replay()` itself is a small primitive — takes an iterable of events and a handler. Skips `_internal` events by default. Catches handler exceptions per-event so one broken event doesn't stop the rest of the replay.
+
+**Why this matters operationally**
+
+- A user reports a bad turn → grab their `data/sessions/<id>.jsonl` → `chika replay --surface cli` reproduces the turn locally without re-calling the LLM.
+- Demo: record a real session, `chika replay --surface count` shows the event-type histogram — concrete proof of "one engine emitting consistent events."
+- Regression tests can use a recorded session as a fixture instead of mocking the engine.
+
+**Consequences**
+
+- 25 unit tests cover read/write, rotation, malformed-line resilience, sanitised session ids, replay dispatch, handler-exception tolerance, and all three CLI surface modes.
+- The audit log (Phase 3) and event log (Phase 4) share the same NDJSON discipline — operationally consistent.
+- *Future*: a "Surface diff" tool — given a session, replay it against all three surfaces and diff the resulting render trees. Catches drift in the surfaces' rendering (vs. the engine emitting drift, which Phase 0's contract handles).
+- *Tradeoff*: 5 MB × N sessions adds up. Cleanup policy is a TODO; current state: nothing prunes the sessions/ directory automatically. A future `chika doctor` step could surface "you have 200 MB of session logs, prune?".
+
+---
+
+## ADR-36: Pyramid health enforcement + landing-page snapshot coverage
+
+**Status:** Implemented (`tests/test_pyramid_health.py`, `docs/e2e/landing.spec.js`, `.github/workflows/update-snapshots.yml`)
+
+**Context**
+
+Two pieces of cross-cutting work the reviewer + user both flagged:
+
+1. **Pyramid degradation** — the reviewer warned that the test pyramid would silently invert as the suite grows. Lots of unit tests today; six months from now we won't notice if half are gone.
+2. **Landing-page visual coverage** — the v0 redesign introduced a richer DOM but the existing e2e suite only had behavioural assertions. A real visual regression (broken hero card, missing button) would slip through.
+
+**Decision**
+
+**Pyramid floors.** `tests/test_pyramid_health.py` runs `pytest --collect-only` at test time, counts collected tests, and fails CI if the total drops below `MIN_TOTAL_TESTS`. The floor is set to ~80% of the current count so a small handful of deletions doesn't trip the alarm, but a structural shift does. Refresh the floor as part of a deliberate-deletion PR.
+
+**Landing-page snapshots.** `docs/e2e/landing.spec.js` now contains ~13 snapshot tests, each running across the 7 viewport projects in `docs/playwright.config.js` (desktop + 3 phone profiles + iPhone 14 landscape + 2 tablet profiles). Coverage:
+
+- Per-section snapshots: header, terminal showcase, features, install, update, uninstall, footer
+- Full-page snapshots on mobile/tablet projects (verifies the entire single-column flow)
+- Interaction snapshots: mobile-nav-open, primary-CTA-hover, features-grid-with-hover
+- Per-card snapshots: install-card-windows, install-card-curl
+
+Total baselines: ~70 PNGs once generated.
+
+**`update-snapshots` workflow extension.** `.github/workflows/update-snapshots.yml` already regenerated frontend + extension baselines on the `update-snapshots` PR label. Extended in this round to also regenerate `docs/e2e/*-snapshots/`. Maintainer flow: open PR → CI shows landing-page diffs → add `update-snapshots` label → workflow regenerates baselines on Linux runner → commits back to PR → CI passes. Same pattern Vercel / Microsoft Playwright-MCP use for the cross-platform-snapshot problem.
+
+**Why generated on the runner, not locally**
+
+Chromium's font rendering / antialiasing differs between Linux and macOS / Windows by 1-2 pixels per character — enough to fail a strict pixel-diff. CI runs on Linux; baselines must too. Generating locally and pushing them would just regenerate on next CI run with a diff. Saving everyone the cycle.
+
+**Consequences**
+
+- Visual regression in the landing page is now caught at PR time, not by a user noticing the broken hero on tochi-mba.github.io/chika.
+- The pyramid alarm fires loud (CI fail) when the suite shrinks unexpectedly.
+- *Cost*: one extra ~3 minute CI step (the docs-e2e Playwright job — it's 7 viewports × ~13 tests each).
+- *Tradeoff*: snapshot tests are noisy on legitimate redesign PRs. Mitigated by the `update-snapshots` workflow being one click. Documented in CONTRIBUTING.md.
+
+---
+
+## ADR-37: Auto-gen tooling (codegen + drift detection)
+
+**Status:** Implemented (`scripts/gen_event_types.py`, `scripts/gen_openapi_client.py`, `scripts/check_brand_parity.py`, `scripts/regenerate_skill_summaries.py`, `scripts/check_skill_tool_drift.py`, `scripts/scaffold.py`, `installers/asset_names.py`)
+
+**Context**
+
+After Phase 0 (event contract) + Phase 1 (skill summaries) shipped, the manual upkeep of derived files became the new bottleneck:
+
+- The Vue store typings + extension JSDoc were hand-maintained against `api/models.py` Pydantic models. Adding a new event meant editing four files instead of one.
+- The brand-mark cubic-bezier path was duplicated by hand on five surfaces (ADR-27 policy) — drift was a "did the contributor remember?" problem.
+- Skill summaries (ADR-32) needed a contributor-runnable regeneration path.
+- Each new tool, skill, event type, or ADR followed a conventional pattern that contributors had to remember from the existing examples.
+- The installer asset filenames (`chika-setup-{v}.exe`, `Chika-{v}.pkg`, `chika_{v}_all.deb`) were hard-coded in three build scripts plus the auto-update module — drift would break ``chika update`` silently.
+
+**Decision**
+
+Seven scripts under `scripts/` + one module under `installers/`. Each is a small focused tool with `--check` mode for CI:
+
+| Script | Purpose | CI gate |
+|---|---|---|
+| `gen_event_types.py` | Pydantic event models → TS interfaces (`frontend/src/types/events.d.ts`) + JSDoc typedefs (`extension/lib/event-types.js`) | `--check` |
+| `gen_openapi_client.py` | FastAPI OpenAPI spec → typed REST client (`frontend/src/types/api.d.ts` + `frontend/src/lib/api-client.js`) | `--check` |
+| `check_brand_parity.py` | Verify the trefoil cubic-bezier matches across all 6 surfaces (Vue, popup, render-html, mark.py, landing, favicon) | exit 1 on drift |
+| `regenerate_skill_summaries.py` | Walk every `chika/skills/*/SKILL.md`, regenerate `data/skill_summaries/*.json` via the configured LLM provider | `--check` |
+| `check_skill_tool_drift.py` | Flag SKILL.md tool mentions that don't exist in the live registry | exit 1 on drift |
+| `scaffold.py {skill,tool,event,adr}` | Generate the full file set for a new artefact + a passing test stub | n/a (interactive) |
+| `installers/asset_names.py` | Single source of truth for installer asset filenames; build scripts + update module both read from here | covered by `test_installer_structure.py` |
+
+Each script is opinionated about its output format: header banner says "AUTO-GENERATED — DO NOT EDIT BY HAND", a date stamp normalised away in `--check` so day-of-the-week doesn't flap CI, atomic write so a Ctrl-C never leaves a half-written generated file.
+
+**Why hand-roll instead of vendoring openapi-typescript-codegen / datamodel-code-generator**
+
+- Our surface is small: ~16 event models, ~12 REST routes. A 200-line generator we own beats a 20 MB dep we don't.
+- Codegen libraries' opinions don't match ours — they generate axios clients (we want fetch), pull in their own runtime helpers, and make it hard to drop ESLint rules cleanly.
+- A custom generator can shape the output around our existing conventions (header banner, normalised date stamp, atomic write).
+
+**Doctor integration (extending ADR-29)**
+
+`chika/_cli/doctor.py` gained three new checks that invoke the relevant `--check` script:
+
+- `check_event_types_in_sync` — calls `gen_event_types.py --check`
+- `check_brand_parity` — calls `check_brand_parity.py`
+- `check_skill_summaries_in_sync` — calls `regenerate_skill_summaries.py --check`
+
+All three are `warn`-only (never `error`). Drift is a contributor concern; users on a stale checkout should still get exit code 0 from doctor. The detail field includes the exact remediation command.
+
+**Extension active-state detection (related)**
+
+A complementary contribution this round: `chika/_cli/extension_detect.py` identifies whether the browser extension is loaded via three signals (heartbeat, Chrome profile walk, local files), used by:
+
+- `chika install-extension` — skip the "open chrome://extensions/" prompt when already loaded; render a refresh-only panel instead
+- The Windows / macOS / Linux `post_install` and `pre_uninstall` hooks — write `extension_detection.txt` for the installer success page; surface a removal reminder when uninstalling
+- `chika uninstall` (CLI) — surface the same removal reminder
+- The backend `extension_status` callback writes a heartbeat to `~/.chika/extension_active.json` whenever the extension WS connects, so subsequent runs see "confirmed active"
+
+**Test surface**
+
+- `tests/test_codegen_scripts.py` (24 tests) — every generator's `--check` mode passes on committed files, the round-trip is deterministic, parsers handle markdown fences + leading prose, scaffolders produce passing test stubs, brand-parity extracts both SVG path strings + Python constant blocks, asset-name SOT agrees with `update.py::_expected_asset_name`.
+- `tests/test_extension_detect.py` (50+ tests) — every detection signal in isolation, confidence-tier rollup (heartbeat ≻ chrome_profile ≻ filesystem ≻ unknown), heartbeat freshness boundaries (parametrised across ages 0 → 30 days), GUI installer hook contracts (Windows / macOS / Linux all reference `detect_extension` + write `extension_detection.txt` + emit `chrome://extensions/` reminder).
+
+**Consequences**
+
+- Adding a new event type drops from a 4-file edit to: bump `EventType` enum + maybe a Pydantic model, then `python scripts/gen_event_types.py`. CI catches drift if the regen step is skipped.
+- Adding a new skill: `python scripts/scaffold.py skill <name>` produces the directory + SKILL.md template + passing test. Then edit + `python scripts/regenerate_skill_summaries.py --skill <name>`.
+- Brand-mark geometry drift (the ADR-27 enforcement nightmare) becomes a 30 ms CI step instead of a code-review checklist item.
+- *Cost*: ~700 lines of generator code to maintain. Mitigated by each generator being narrowly scoped and having `--check` mode (changes to a generator are caught by their own contract tests).
+- *Future*: a `chika dev gauntlet` command that runs every generator's `--check` plus ruff + mypy + bandit + pytest in one shot, so contributors can verify CI-equivalent state before pushing.

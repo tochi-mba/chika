@@ -10,18 +10,31 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #app { height: 100%; width: 100%; overflow: hidden; }
+    /*
+     * Pre-Vue paint defaults. These have to honour the OS preference so
+     * cold-load doesn't FOUC into the wrong theme. Once Vue mounts and
+     * App.vue's :root tokens take over, body bg/colour follow them via
+     * the rule below.
+     */
     body {
       font-family: 'Inter', system-ui, -apple-system, sans-serif;
       font-size: 14px;
-      background: #09090d;
-      color: #ededf2;
+      background: #fafafb;
+      color: #0e0e14;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
+      transition: background 240ms cubic-bezier(0.32, 0.72, 0, 1),
+                  color      240ms cubic-bezier(0.32, 0.72, 0, 1);
     }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0e0e14; color: #ededf2; }
+    }
+    /* Once App.vue mounts, design-token-driven bg/colour wins. */
+    body { background: var(--bg, #fafafb); color: var(--text-1, #0e0e14); }
     ::-webkit-scrollbar       { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+    ::-webkit-scrollbar-thumb { background: rgba(127,127,127,0.18); border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(127,127,127,0.32); }
   </style>
 </head>
 <body>

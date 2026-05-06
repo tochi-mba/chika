@@ -8,18 +8,12 @@
   />
   <div class="app" v-show="profileUnlocked">
     <header class="header">
-      <div class="brand">
-        <ChikaMark
-          :size="22"
-          :state="chat.isStreaming ? 'streaming' : 'idle'"
-        />
-        <span class="brand-name">Chika</span>
-      </div>
-
-      <div class="header-center">
+      <div class="header-left">
         <ProfileSwitcher @switch="switchProfile" />
         <span v-if="chat.title" class="chat-title">{{ chat.title }}</span>
       </div>
+
+      <div class="header-spacer"></div>
 
       <div class="header-right">
         <span
@@ -163,8 +157,6 @@
       @patch-settings="patchSettings"
     />
 
-    <PetCompanion @open-settings="(t) => openSettings(t)" />
-
     <QuestionModal
       :questions="system.pendingQuestions"
       @answer="(id, payload) => answerQuestion(id, payload)"
@@ -175,10 +167,19 @@
         :chat-list="chats.chatList"
         :current-session-id="chat.sessionId"
         :loading="false"
+        :collapsed="sidebarCollapsed"
+        :profile="system.profile"
+        :workspace-path="system.profile.workspace_path || system.profile.workspace || ''"
         @new-chat="newChat"
         @load-chat="loadChat"
         @delete-chat="deleteChat"
-      />
+        @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
+        @open-settings="openSettings('provider')"
+      >
+        <template #pet>
+          <PetCompanion @open-settings="(t) => openSettings(t)" />
+        </template>
+      </ChatSidebar>
 
       <div class="chat-col">
         <PlanPanel
@@ -188,7 +189,11 @@
           @edit-feedback="onPlanEditFeedback"
           @toggle-task="onPlanTaskToggle"
         />
-        <MessageList :messages="chat.messages" :is-streaming="chat.isStreaming" />
+        <MessageList
+          :messages="chat.messages"
+          :is-streaming="chat.isStreaming"
+          @quick-prompt="send"
+        />
         <ChatInput :disabled="chat.isStreaming" :streaming="chat.isStreaming" @send="send" @stop="stop" />
       </div>
 
@@ -218,7 +223,6 @@ import SettingsModal      from './components/SettingsModal.vue'
 import PetCompanion       from './components/PetCompanion.vue'
 import PlanPanel          from './components/PlanPanel.vue'
 import ProfileGate        from './components/ProfileGate.vue'
-import ChikaMark          from './components/ChikaMark.vue'
 
 const chat   = useChatStore()
 const chats  = useChatsStore()
@@ -226,8 +230,8 @@ const system = useSystemStore()
 const theme  = useThemeStore()
 
 // Apply/remove .dark class on <html> so :root.dark tokens take effect
-// globally. Light is the BASE (no class) — matches the v0 design system
-// where light is the default and dark is opt-in via the .dark variant.
+// globally. Light is the BASE (no class) — light is the default,
+// dark is opt-in via the .dark variant.
 watchEffect(() => {
   document.documentElement.classList.toggle('dark', theme.isDark)
 })
@@ -355,6 +359,10 @@ function onPlanTaskToggle(taskId, nextStatus) {
 const panelCollapsed = ref(localStorage.getItem('chika_panel_open') === 'false')
 watch(panelCollapsed, v => localStorage.setItem('chika_panel_open', v ? 'false' : 'true'))
 
+// Sidebar collapsed state — persisted likewise
+const sidebarCollapsed = ref(localStorage.getItem('chika_sidebar_collapsed') === 'true')
+watch(sidebarCollapsed, v => localStorage.setItem('chika_sidebar_collapsed', v ? 'true' : 'false'))
+
 // Settings modal
 const settingsOpen = ref(false)
 const settingsInitialTab = ref('provider')
@@ -368,13 +376,13 @@ function openSettings(tab) {
 <style>
 /* ── Design tokens — light (default — matches OS prefers-color-scheme) ── */
 /*
- * Tokens lifted verbatim from the v0 design system audit so every
- * surface — Vue web app, extension popup, CLI Rich theme — speaks
- * the same colour vocabulary. Light is the BASE; ``:root.dark``
- * (and the App.vue watchEffect that toggles it) flips into dark
- * mode. Aliases like ``--green``, ``--red``, ``--yellow`` and
- * ``--accent-dim`` exist so prior components keep rendering — they
- * resolve to the canonical v0 names.
+ * Tokens unified across every surface — Vue web app, extension
+ * popup, CLI Rich theme — so all three speak the same colour
+ * vocabulary. Light is the BASE; ``:root.dark`` (and the App.vue
+ * watchEffect that toggles it) flips into dark mode. Aliases like
+ * ``--green``, ``--red``, ``--yellow`` and ``--accent-dim`` exist
+ * so prior components keep rendering — they resolve to the
+ * canonical names.
  */
 :root {
   --bg:            #fafafb;
@@ -448,31 +456,17 @@ function openSettings(tab) {
   gap: 14px;
 }
 
-.brand {
+/* The brand mark + wordmark moved into the sidebar (matches the
+   reference's three-column layout). The top-bar now just hosts
+   per-chat metadata + global controls. */
+.header-left {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-shrink: 0;
-}
-/* The old ``.brand-mark`` rounded square wrapped a polygon icon and is
-   gone — replaced by ChikaMark.vue (the trefoil SVG component). The
-   .brand container wraps the trefoil + the wordmark; no separate mark
-   container is needed. */
-.brand-name {
-  font-size: 14.5px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  color: var(--text-1);
-}
-
-.header-center {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
   min-width: 0;
 }
+
+.header-spacer { flex: 1; min-width: 0; }
 .chat-title {
   font-size: 11px;
   color: var(--text-3);

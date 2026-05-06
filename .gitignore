@@ -49,6 +49,9 @@ frontend/test-results/
 frontend/playwright-report/
 extension/test-results/
 extension/playwright-report/
+docs/test-results/
+docs/playwright-report/
+docs/node_modules/
 playwright/.cache/
 
 # Variable-resolution leak: when an unresolved $variable reaches

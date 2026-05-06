@@ -22,9 +22,10 @@
         title="Stop generation (Esc)"
         aria-label="Stop generation"
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-          <rect x="2" y="2" width="10" height="10" rx="2"/>
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor">
+          <rect x="3" y="3" width="8" height="8" rx="1.5"/>
         </svg>
+        <span>Stop</span>
       </button>
 
       <!-- Send button shown otherwise -->
@@ -36,13 +37,13 @@
         title="Send (Enter)"
         aria-label="Send message"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="12" y1="19" x2="12" y2="5"/>
-          <polyline points="5 12 12 5 19 12"/>
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+          <path d="M12.5 7L1.5 1.5V5.5L7 7L1.5 8.5V12.5L12.5 7Z" fill="currentColor"/>
         </svg>
+        <span>Send</span>
       </button>
     </div>
-    <div class="input-hint">Shift+Enter for newline · Esc to stop</div>
+    <div class="input-hint">Press Enter to send · Shift+Enter for newline · Esc to stop</div>
   </div>
 </template>
 
@@ -101,19 +102,21 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .input-box {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: 10px;
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 10px 10px 10px 14px;
-  transition: border-color 180ms var(--spring),
-              box-shadow 180ms var(--spring);
+  border-radius: 16px;
+  padding: 12px 12px 12px 16px;
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              box-shadow 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              background 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .input-box:hover { border-color: var(--border-strong); }
 
 .input-box.focused {
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--surface-1) 96%, var(--accent) 4%);
   box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
@@ -146,41 +149,59 @@ textarea:disabled {
 }
 
 .send-btn {
-  width: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 34px;
-  border-radius: 9px;
+  padding: 0 14px;
+  border-radius: 10px;
   border: none;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
   flex-shrink: 0;
-  transition: background 150ms var(--spring), transform 100ms var(--spring);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
+  transition: background 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              transform 120ms cubic-bezier(0.32, 0.72, 0, 1),
+              box-shadow 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-.send-btn:not(:disabled):hover { background: var(--accent-2); }
-.send-btn:not(:disabled):active { transform: scale(0.93); }
+.send-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.send-btn:not(:disabled):active { transform: translateY(0) scale(0.97); }
 .send-btn:disabled {
   background: var(--surface-2);
   color: var(--text-3);
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .stop-btn {
-  width: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 34px;
-  border-radius: 9px;
+  padding: 0 12px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text-2);
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
   flex-shrink: 0;
-  transition: all 150ms var(--spring);
+  transition: color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              border-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              background 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              transform 120ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .stop-btn:hover {
@@ -189,7 +210,7 @@ textarea:disabled {
   background: color-mix(in srgb, var(--error) 8%, transparent);
 }
 
-.stop-btn:active { transform: scale(0.93); }
+.stop-btn:active { transform: scale(0.96); }
 
 .input-hint {
   margin-top: 6px;

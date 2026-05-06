@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 # ── Inbound (client → server) ────────────────────────────────────────────────
 
@@ -143,3 +144,146 @@ class SettingsPatch(BaseModel):
     pet_speech_tokens: int | None = None
     auto_continue: str | None = None
     auto_continue_max: int | None = None
+
+
+# ── Event contract — single source of truth ──────────────────────────────────
+#
+# Every event the engine emits belongs to one of these types. Surfaces (CLI,
+# frontend, extension) consume these names. Adding a new event means:
+#
+#   1. Add the type to ``EventType``
+#   2. Add a Pydantic model above (or accept that it's typeless)
+#   3. Add it to the right surface set in ``api/event_routing.py``
+#   4. Update ``test_event_contract.py``
+#
+# The audit (Phase 0 of the system-hardening plan) found 35+ event types
+# already in flight. We're enumerating them here so drift becomes visible.
+
+
+class EventType(str, Enum):  # noqa: UP042 — keep multiple-inheritance form for back-compat with `str(EventType.TOKEN)` callers
+    # LLM streaming
+    TOKEN = "token"
+    THINKING = "thinking"
+    THINKING_END = "thinking_end"
+    # Workflow
+    WORKFLOW_START = "workflow_start"
+    WORKFLOW_DONE = "workflow_done"
+    STEP_START = "step_start"
+    STEP_DONE = "step_done"
+    LOOP_ITERATION = "loop_iteration"
+    CONDITION_EVAL = "condition_eval"
+    MAP_ITEM = "map_item"
+    RETRY_ATTEMPT = "retry_attempt"
+    RETRY_BACKOFF = "retry_backoff"
+    RETRY_NOTICE = "retry_notice"
+    # Tools
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    VARIABLE_SET = "variable_set"
+    # Memory + compaction
+    MEMORY_UPDATE = "memory_update"
+    COMPACTION = "compaction"
+    # Validation
+    VALIDATION_WARNING = "validation_warning"
+    # Lifecycle
+    DONE = "done"
+    ERROR = "error"
+    CANCELLED = "cancelled"
+    # State broadcasts
+    CHAT_TITLE = "chat_title"
+    CHAT_LIST = "chat_list"
+    SESSION_INFO = "session_info"
+    PROFILE_INFO = "profile_info"
+    PROFILE_SWITCH_DONE = "profile_switch_done"
+    SETTINGS_INFO = "settings_info"
+    PET_CHANGED = "pet_changed"
+    EXTENSION_STATUS = "extension_status"
+    RESET_DONE = "reset_done"
+    APPROVAL_REQUIRED = "approval_required"
+    # Shell
+    SHELL_PROCESS_START = "shell_process_start"
+    SHELL_OUTPUT = "shell_output"
+    SHELL_PROCESS_DONE = "shell_process_done"
+    # Extension-only relay
+    EXT_CHAT_START = "ext_chat_start"
+    EXT_CHAT_TURN = "ext_chat_turn"
+    EXT_CHAT_ERROR = "ext_chat_error"
+    EXT_CHAT_DONE = "ext_chat_done"
+    # Heartbeat
+    PING = "ping"
+    PONG = "pong"
+
+
+# Map from EventType value → strict Pydantic model. Events whose value isn't
+# in this map are accepted as-is (typeless events, e.g. metadata broadcasts
+# whose payload changes too often to model strictly).
+_TYPED_MODELS: dict[str, type[BaseModel]] = {
+    EventType.TOKEN.value:           TokenEvent,
+    EventType.WORKFLOW_START.value:  WorkflowStartEvent,
+    EventType.WORKFLOW_DONE.value:   WorkflowDoneEvent,
+    EventType.STEP_START.value:      StepStartEvent,
+    EventType.STEP_DONE.value:       StepDoneEvent,
+    EventType.TOOL_CALL.value:       ToolCallEvent,
+    EventType.TOOL_RESULT.value:     ToolResultEvent,
+    EventType.VARIABLE_SET.value:    VariableSetEvent,
+    EventType.LOOP_ITERATION.value:  LoopIterationEvent,
+    EventType.CONDITION_EVAL.value:  ConditionEvalEvent,
+    EventType.MAP_ITEM.value:        MapItemEvent,
+    EventType.RETRY_ATTEMPT.value:   RetryAttemptEvent,
+    EventType.MEMORY_UPDATE.value:   MemoryUpdateEvent,
+    EventType.COMPACTION.value:      CompactionEvent,
+    EventType.DONE.value:            DoneEvent,
+    EventType.ERROR.value:           ErrorEvent,
+}
+
+
+class EventValidationError(ValueError):
+    """Raised when an event payload doesn't conform to its declared type."""
+
+
+def validate_event(payload: dict, *, strict: bool = False) -> dict:
+    """Validate ``payload`` against the registered model for its ``type``.
+
+    Three modes:
+
+      - **Known type, valid payload** → returns payload (dict round-trip via
+        the model so default fields are filled in).
+      - **Known type, invalid payload** → raises :class:`EventValidationError`
+        when ``strict=True``; otherwise returns the payload unchanged so the
+        WS edge keeps flowing (validation is observability, not gatekeeping).
+      - **Unknown type** → returns payload unchanged in either mode. We
+        deliberately *don't* raise on unknown types — the event registry
+        grows organically and we don't want to break production every time
+        the engine adds a new event type.
+
+    Strict mode is intended for tests (``test_event_contract.py``) so a
+    drifted contract fails CI instead of silently propagating.
+
+    Why we don't enforce strict mode at the WS edge: the audit identified
+    35+ event types in flight, only 16 of which have models. Enforcing all
+    of them would block the WS edge until every type has a model. Strict
+    mode is opt-in for tests; production runs in observability mode.
+    """
+    if not isinstance(payload, dict):
+        if strict:
+            raise EventValidationError(f"event payload must be a dict, got {type(payload).__name__}")
+        return payload  # best-effort
+
+    etype = payload.get("type")
+    model = _TYPED_MODELS.get(etype) if isinstance(etype, str) else None
+    if model is None:
+        return payload
+
+    try:
+        validated = model(**payload)
+    except ValidationError as exc:
+        if strict:
+            raise EventValidationError(
+                f"event {etype!r} failed validation: {exc.errors()}",
+            ) from exc
+        return payload
+    return validated.model_dump()
+
+
+def is_known_event_type(name: str) -> bool:
+    return any(et.value == name for et in EventType)

@@ -89,6 +89,17 @@ async def _on_extension_status(connected: bool) -> None:
         "type":      "extension_status",
         "connected": connected,
     })
+    if connected:
+        # Heartbeat: when the extension WS connects, stamp
+        # ``~/.chika/extension_active.json`` so subsequent
+        # ``chika install-extension`` invocations + the doctor can
+        # tell that the extension is genuinely active. Best-effort —
+        # heartbeat write failure must never break the WS connect.
+        try:
+            from chika._cli.extension_detect import write_heartbeat
+            write_heartbeat()
+        except Exception:
+            pass
 
 
 extension_manager.add_status_listener(_on_extension_status)
@@ -545,6 +556,14 @@ async def websocket_endpoint(
                             if etype.startswith("_") or etype == "approval_required":
                                 continue
                             try:
+                                # Validate every outbound event against
+                                # the typed contract. Strict=False so a
+                                # validation failure logs a warning but
+                                # still flows the event — observability,
+                                # not gatekeeping. Strict=True is used
+                                # in tests/test_event_contract.py.
+                                from api.models import validate_event
+                                event = validate_event(event, strict=False)
                                 await send(event)
                             except Exception:
                                 return

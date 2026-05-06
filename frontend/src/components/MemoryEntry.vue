@@ -19,12 +19,16 @@ const open = ref(false)
 .mem-entry {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-left: 3px solid var(--success);
+  border-radius: 10px;
   margin: 6px 12px;
   overflow: hidden;
-  transition: border-color 140ms var(--spring);
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
-.mem-entry:hover { border-color: var(--border-strong); }
+.mem-entry:hover {
+  border-color: var(--border-strong);
+  border-left-color: color-mix(in srgb, var(--success) 80%, var(--accent));
+}
 
 .header {
   display: flex;

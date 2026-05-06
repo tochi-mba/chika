@@ -1,0 +1,20 @@
+#!/bin/sh
+# ──────────────────────────────────────────────────────────────────────
+#  Chika launcher — installed at /usr/bin/chika by the .deb
+# ──────────────────────────────────────────────────────────────────────
+#
+# Sets CHIKA_DATA_DIR so user settings live at ``~/.chika/data/`` and
+# survive ``apt remove chika``. Forwards arguments to the venv's
+# chika executable.
+
+set -e
+
+INSTALL_DIR="/opt/chika"
+
+: "${CHIKA_DATA_DIR:=$HOME/.chika/data}"
+: "${CHIKA_SETTINGS_PATH:=$CHIKA_DATA_DIR/settings.json}"
+export CHIKA_DATA_DIR CHIKA_SETTINGS_PATH
+
+mkdir -p "$CHIKA_DATA_DIR" 2>/dev/null || true
+
+exec "$INSTALL_DIR/venv/bin/chika" "$@"

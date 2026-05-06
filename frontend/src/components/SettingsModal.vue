@@ -531,40 +531,47 @@ watch(() => props.open, (v) => {
 .settings-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(11, 12, 16, 0.7);
   z-index: 500;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .settings-modal {
   background: var(--surface-1);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
-  width: min(640px, 100%);
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.10));
+  border-radius: 14px;
+  width: min(720px, 100%);
   max-height: min(720px, 100%);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.55);
+  animation: settings-pop 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes settings-pop {
+  from { transform: scale(0.97) translateY(8px); opacity: 0; }
+  to   { transform: scale(1)    translateY(0);   opacity: 1; }
 }
 
 .modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 18px 22px;
   border-bottom: 1px solid var(--border);
 }
 .modal-header h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-1);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
 .close-btn {
   background: none;
@@ -580,35 +587,41 @@ watch(() => props.open, (v) => {
 
 .tabs {
   display: flex;
-  gap: 2px;
-  padding: 0 20px;
+  gap: 4px;
+  padding: 0 22px;
   border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.tabs::-webkit-scrollbar { display: none; }
 .tab {
   background: none;
   border: none;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-3);
-  padding: 10px 14px;
+  padding: 12px 14px;
   cursor: pointer;
   border-bottom: 2px solid transparent;
-  transition: color 120ms, border-color 120ms;
+  transition: color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              border-color 240ms cubic-bezier(0.32, 0.72, 0, 1);
   margin-bottom: -1px;
+  white-space: nowrap;
 }
 .tab:hover { color: var(--text-2); }
 .tab.active {
-  color: var(--accent);
+  color: var(--text-1);
   border-bottom-color: var(--accent);
 }
 
 .panel {
-  padding: 20px;
+  padding: 22px;
   overflow-y: auto;
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .hint {

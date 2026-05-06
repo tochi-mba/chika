@@ -22,12 +22,17 @@ function fmtSize(bytes) {
 .var-card {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
   padding: 10px 12px;
   margin: 6px 12px;
-  transition: border-color 140ms var(--spring);
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
 }
-.var-card:hover { border-color: var(--border-strong); }
+.var-card:hover {
+  border-color: var(--border-strong);
+  border-left-color: var(--accent-2, var(--accent));
+}
 
 .header { display: flex; align-items: center; gap: 8px; }
 .name {

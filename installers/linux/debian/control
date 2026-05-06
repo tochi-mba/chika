@@ -1,0 +1,17 @@
+Package: chika
+Version: VERSION_PLACEHOLDER
+Section: utils
+Priority: optional
+Architecture: all
+Depends: python3 (>= 3.11), python3-venv, python3-pip
+Maintainer: Chika <noreply@example.com>
+Homepage: https://github.com/tochi-mba/chika
+Description: Agentic AI assistant with browser control
+ Chika is a local-first agentic AI assistant featuring full browser
+ control via a Chrome/Edge extension, multi-provider LLM support
+ (Claude, OpenAI, Azure, Ollama), per-profile workspaces with
+ password-protected memory, and a Claude Code-style CLI.
+ .
+ Includes ``chika doctor`` to verify the install, ``chika update`` for
+ auto-updates from GitHub Releases, and ``chika install-extension`` to
+ deploy the bundled browser extension to your home directory.

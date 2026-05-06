@@ -6,26 +6,32 @@
 
 An agentic AI assistant with **full browser control** — reads your open tabs, navigates pages, extracts data, takes screenshots, and answers questions about anything you can see in Chrome. Powered by Claude, GPT-4o, Azure OpenAI, or **Ollama (local/free)**.
 
+> **System design:** see [ARCHITECTURE.md](ARCHITECTURE.md) for the full open-source plan — components, data flow, install/update/uninstall flows, governance.
+
 ---
 
-## Quick Start
+## Install
 
-**Requires Python 3.11+**
+Download the installer for your OS at **[tochi-mba.github.io/chika](https://tochi-mba.github.io/chika)** — the page auto-detects your platform.
+
+| Platform | Installer | Uninstall via |
+|---|---|---|
+| **Windows** | [`chika-setup-X.Y.Z.exe`](https://github.com/tochi-mba/chika/releases/latest) | Settings → Apps → Installed apps → Chika → Uninstall |
+| **macOS**   | [`Chika-X.Y.Z.pkg`](https://github.com/tochi-mba/chika/releases/latest) | `sudo /Library/Application\ Support/Chika/uninstall.sh` |
+| **Linux (Debian/Ubuntu)** | [`chika_X.Y.Z_all.deb`](https://github.com/tochi-mba/chika/releases/latest) | `sudo apt remove chika` |
+| **Linux (any distro)** | `curl -fsSL https://raw.githubusercontent.com/tochi-mba/chika/main/installers/linux/install.sh \| bash` | `~/.local/share/chika/uninstall.sh` |
+
+Each installer puts `chika` on your PATH globally, registers in your OS app manager, and ships a real uninstaller. Per-user installs — no admin/sudo required.
+
+After install, run `chika` from any terminal. First launch will nudge you to run `chika setup` to pick a provider and save your API key. **Settings can be changed anytime** — `/settings`, `/provider`, `/env`, or the web Settings modal.
+
+> **Contributors:** if you want to develop chika, clone + install.py instead — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 git clone https://github.com/tochi-mba/chika
 cd chika
 python install.py
 ```
-
-The installer will:
-- Install all dependencies
-- Walk you through choosing a provider (Anthropic / OpenAI / Azure)
-- Securely prompt for your API key
-- Create your `.env`
-- Start the server
-
-Then open **http://localhost:8000**
 
 ---
 
@@ -53,31 +59,58 @@ Re-run `chika install-extension` any time after an update to refresh your instal
 
 ---
 
-## Updating Chika
+## Update
 
-Chika **auto-updates on startup** when its CI is green:
-
-- On every CLI launch, a background thread checks the upstream remote (GitHub for git clones, PyPI for pip installs)
-- If a newer commit exists *and* its CI is passing, Chika silently runs `git pull --ff-only && pip install -e . --upgrade --no-deps` and prints `· auto-updated abc1234 → def5678 (restart Chika to load the new code)`
-- The check is throttled to once an hour and writes its state to `~/.chika/update_state.json`
-- **Auto-update will NOT run** if you're on a feature branch, your working tree is dirty, the upstream CI is red/in-progress, or the network is unreachable — fail-safe by design
-
-Manual control:
+Chika **auto-updates on launch** when upstream CI is green. You don't need to do anything. Manually:
 
 ```bash
-chika update          # pull + refresh now (regardless of CI)
+chika update          # apply now
 chika update --check  # peek; don't apply
 chika doctor          # verify the install (Python, deps, extension, .env, …)
+chika replay <id>     # replay a recorded session offline (debug + demo)
 ```
 
-Inside the REPL, the same actions are slash commands: `/update`, `/update --check`, `/auto-update on|off`, `/doctor`.
+Inside the REPL: `/update`, `/update --check`, `/auto-update on|off`, `/doctor`.
 
-To opt out of the auto-update behaviour:
+The auto-update path varies by install kind:
+
+| Install kind | Auto-update behaviour |
+|---|---|
+| Native installers (Windows .exe / macOS .pkg / Linux .deb / curl install.sh) | Downloads next installer from GitHub Releases, runs silently |
+| `git clone + python install.py` | `git pull --ff-only` + editable refresh — only on `main`/`master`, clean tree, CI green |
+| `pip install chika` | `pip install --upgrade chika` |
+
+**Auto-update will NOT run** if you're on a feature branch, your working tree is dirty, upstream CI is red/in-progress, or the network is unreachable — fail-safe by design. Throttled to once an hour; state at `~/.chika/update_state.json`.
+
+Disable the auto-update behaviour:
 
 ```bash
-echo '{"auto_update": "off"}' >> data/settings.json   # or:
 chika  # then: /auto-update off
 ```
+
+---
+
+## Uninstall
+
+Two ways. Use whichever feels normal for your OS.
+
+**Via your OS app manager** (the standard way):
+
+- **Windows:** Settings → Apps → Installed apps → Chika → Uninstall
+- **macOS:** `sudo /Library/Application\ Support/Chika/uninstall.sh`
+- **Linux (.deb):** `sudo apt remove chika`
+- **Linux (curl install):** `~/.local/share/chika/uninstall.sh`
+
+**Via the CLI**:
+
+```bash
+chika uninstall              # show the right command for your install
+chika uninstall --yes        # actually run it
+chika uninstall --remove-data
+                             # also wipe ~/.chika/  (settings, profiles, chats)
+```
+
+User data at `~/.chika/` is **always preserved by default**. A reinstall picks up where you left off — same settings, same profiles, same chat history. Pass `--remove-data` for a clean wipe.
 
 Once connected, Chika can see everything in your browser. Try:
 

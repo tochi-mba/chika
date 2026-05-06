@@ -1,0 +1,125 @@
+#!/bin/bash
+# ──────────────────────────────────────────────────────────────────────
+#  Chika .pkg — postinstall
+# ──────────────────────────────────────────────────────────────────────
+#
+# Runs as root after files are placed at $INSTALL_DIR. We:
+#
+#   1. Locate Python 3.11+ (prefers /usr/bin/python3 → Homebrew →
+#      anything on PATH).
+#   2. Create a venv at $INSTALL_DIR/venv.
+#   3. pip install the bundled wheel into the venv.
+#   4. Symlink /usr/local/bin/chika → $INSTALL_DIR/chika so it lands
+#      on PATH for every user on this machine.
+#
+# Failures are written to /var/log/chika-install.log but we never
+# return non-zero — macOS would roll back the install otherwise, and
+# leaving the user with a broken install they can debug + fix is far
+# more useful than no install at all.
+
+set -e
+
+INSTALL_DIR="/Library/Application Support/Chika"
+LOG="/var/log/chika-install.log"
+
+log() { echo "[$(date)] $1" >> "$LOG" 2>/dev/null || true; }
+
+log "postinstall starting"
+
+# ── Find a usable Python ──────────────────────────────────────────────
+
+find_python() {
+    local candidates=(
+        "python3.13" "python3.12" "python3.11" "python3"
+        "/opt/homebrew/bin/python3"
+        "/usr/local/bin/python3"
+        "/usr/bin/python3"
+    )
+    for c in "${candidates[@]}"; do
+        if command -v "$c" >/dev/null 2>&1; then
+            local v
+            v=$("$c" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")' 2>/dev/null || echo "")
+            local major minor
+            major=$(echo "$v" | cut -d. -f1)
+            minor=$(echo "$v" | cut -d. -f2)
+            if [ "$major" = "3" ] && [ "$minor" -ge 11 ] 2>/dev/null; then
+                log "Found Python $v at $c"
+                echo "$c"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+PYTHON="$(find_python || true)"
+if [ -z "$PYTHON" ]; then
+    log "ERROR: Python 3.11+ not found on PATH"
+    log "Suggested next steps:"
+    log "  1. Install via Homebrew:   brew install python@3.12"
+    log "  2. Or download the .pkg:   https://www.python.org/downloads/macos/"
+    log "  3. Re-run this .pkg installer when Python is on PATH."
+    # Try to open the python.org download page in the user's default
+    # browser so they have an obvious next step. Best-effort — we
+    # never want a hung installer if the open call stalls.
+    if [ -n "${SUDO_USER:-}" ]; then
+        sudo -u "$SUDO_USER" open "https://www.python.org/downloads/macos/" 2>/dev/null || true
+    else
+        open "https://www.python.org/downloads/macos/" 2>/dev/null || true
+    fi
+    exit 0
+fi
+
+# ── Create venv + pip install ─────────────────────────────────────────
+
+log "Creating venv at $INSTALL_DIR/venv"
+"$PYTHON" -m venv "$INSTALL_DIR/venv"
+
+VENV_PIP="$INSTALL_DIR/venv/bin/pip"
+"$VENV_PIP" install --upgrade pip --quiet 2>>"$LOG"
+
+WHEEL="$(ls "$INSTALL_DIR"/chika-*.whl 2>/dev/null | head -1)"
+if [ -z "$WHEEL" ]; then
+    log "ERROR: No wheel found at $INSTALL_DIR/chika-*.whl"
+    exit 0
+fi
+
+log "Installing $WHEEL"
+"$VENV_PIP" install --upgrade --force-reinstall "$WHEEL" --quiet 2>>"$LOG"
+
+# ── Symlink to /usr/local/bin ────────────────────────────────────────
+
+mkdir -p /usr/local/bin
+
+# The shim at $INSTALL_DIR/chika sets CHIKA_DATA_DIR before forwarding
+# to the venv's chika executable. Symlink that, not the venv binary
+# directly, so user-data env vars are always set.
+if [ -L /usr/local/bin/chika ] || [ -f /usr/local/bin/chika ]; then
+    rm -f /usr/local/bin/chika
+fi
+ln -s "$INSTALL_DIR/chika" /usr/local/bin/chika
+chmod +x "$INSTALL_DIR/chika"
+
+# ── Write the install marker for chika update ─────────────────────────
+
+cat > "$INSTALL_DIR/install_marker.json" <<JSON
+{
+  "kind": "macos_installer",
+  "version": "$("$INSTALL_DIR/venv/bin/python" -c 'from importlib.metadata import version; print(version("chika"))' 2>/dev/null || echo "unknown")",
+  "installed_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+JSON
+
+# ── Extension detection (advisory) ────────────────────────────────────
+
+# Run detection so the install summary can tell the user whether the
+# browser extension is already active. Detection failures are silent.
+DETECT="$INSTALL_DIR/venv/bin/python -c \"from chika._cli.extension_detect import detect_extension; r = detect_extension(); print(r.confidence, '|', '; '.join(f'{n}={d}' for n, d in r.signals[:3]))\""
+DETECT_OUT="$($DETECT 2>/dev/null || true)"
+if [ -n "$DETECT_OUT" ]; then
+    echo "$DETECT_OUT" > "$INSTALL_DIR/extension_detection.txt"
+    log "Extension detection: $DETECT_OUT"
+fi
+
+log "postinstall complete — chika is at /usr/local/bin/chika"
+exit 0

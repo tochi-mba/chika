@@ -1,17 +1,21 @@
 /* Chika Extension Popup — full chat UI
  *
- * Tokens mirror the v0 design system (matches the Vue frontend's dark
- * tokens so every surface speaks one colour vocabulary). The popup is
+ * Tokens mirror the canonical Chika design system (matches the Vue
+ * frontend's dark tokens so every surface speaks one colour
+ * vocabulary). The popup is
  * intentionally dark-only — see extension/e2e/theme.spec.js which pins
  * the dark baseline.
  */
 :root {
-  --bg:            #0e0e14;
-  --surface-1:     #161620;
-  --surface-2:     #1f1f2c;
+  /* Aligned with frontend/src/styles/design-tokens.css and the
+   * canonical CLI Theme (chika/_cli/renderer.py). One palette,
+   * three surfaces. */
+  --bg:            #0b0c10;
+  --surface-1:     #14161c;
+  --surface-2:     #1a1d25;
   --surface-3:     #2a2a38;
-  --border:        rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
+  --border:        rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.10);
   --accent:        #6c63ff;
   --accent-2:      #7c70ff;
   --accent-dim:    rgba(108, 99, 255, 0.16);
@@ -26,10 +30,12 @@
   --green:         var(--success);
   --red:           var(--error);
   --yellow:        var(--warn);
-  --radius-sm:     6px;
-  --radius:        10px;
-  --spring:        cubic-bezier(0.16, 1, 0.3, 1);
-  --font-mono:     'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --radius-sm:     8px;
+  --radius:        12px;
+  --spring:        cubic-bezier(0.22, 1, 0.36, 1);
+  --duration:      240ms;
+  --font-mono:     'JetBrains Mono', 'Fira Code', "SF Mono", "Cascadia Code", ui-monospace, monospace;
+  --font-sans:     -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -264,20 +270,27 @@ body {
 .btn-primary {
   display: inline-flex;
   align-items: center;
-  padding: 6px 16px;
-  background: var(--accent);
+  padding: 8px 18px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
   border: none;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
   font-family: inherit;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: -0.005em;
   cursor: pointer;
   text-decoration: none;
-  transition: background 150ms;
-  margin-top: 4px;
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 28%, transparent);
+  transition: transform 120ms cubic-bezier(0.32, 0.72, 0, 1),
+              box-shadow 200ms cubic-bezier(0.32, 0.72, 0, 1);
+  margin-top: 6px;
 }
-.btn-primary:hover { background: var(--accent-2); }
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.btn-primary:active { transform: translateY(0) scale(0.97); }
 
 .btn-retry {
   display: inline-flex;
@@ -354,28 +367,35 @@ body {
 
 .bubble {
   max-width: 87%;
-  padding: 8px 11px;
+  padding: 9px 13px;
   font-size: 13px;
-  line-height: 1.57;
+  line-height: 1.6;
   word-break: break-word;
   white-space: pre-wrap;
+  letter-spacing: -0.005em;
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              background 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .bubble-user {
-  background: var(--accent-dim);
-  border: 1px solid rgba(108, 99, 255, 0.18);
-  border-radius: var(--radius) var(--radius) 3px var(--radius);
-  color: var(--text-1);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 14px;
+  border-top-right-radius: 4px;
+  color: #fff;
   white-space: pre-wrap;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 26%, transparent);
 }
 
 .bubble-assistant {
-  background: var(--surface-2);
+  background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: var(--radius) var(--radius) var(--radius) 3px;
+  border-radius: 14px;
+  border-top-left-radius: 4px;
   color: var(--text-1);
   white-space: pre-wrap;
 }
+.bubble-assistant:hover { border-color: var(--border-strong); }
 
 .bubble-assistant pre {
   white-space: pre;
@@ -693,13 +713,17 @@ body {
   gap: 6px;
   background: var(--surface-1);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  padding: 5px 5px 5px 8px;
-  transition: border-color 180ms;
+  border-radius: 14px;
+  padding: 7px 7px 7px 10px;
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              background 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              box-shadow 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .input-row:focus-within {
-  border-color: rgba(108, 99, 255, 0.38);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--surface-1) 96%, var(--accent) 4%);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
 /* Tab context button */
@@ -754,42 +778,54 @@ body {
 
 .send-btn {
   flex-shrink: 0;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   color: #fff;
   cursor: pointer;
-  padding: 5px 7px;
+  padding: 6px 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 120ms, opacity 120ms;
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 28%, transparent);
+  transition: background 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              transform 120ms cubic-bezier(0.32, 0.72, 0, 1),
+              box-shadow 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              opacity 120ms;
   margin-bottom: 2px;
 }
 .send-btn:disabled {
-  opacity: 0.28;
+  opacity: 0.32;
   cursor: default;
   background: var(--text-3);
+  box-shadow: none;
 }
-.send-btn:not(:disabled):hover { background: var(--accent-2); }
+.send-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.send-btn:not(:disabled):active { transform: translateY(0) scale(0.96); }
 
 .stop-btn {
   flex-shrink: 0;
-  background: var(--surface-2, #1c1c26);
-  border: 1.5px solid var(--border, rgba(255,255,255,0.1));
-  border-radius: 6px;
-  color: var(--text-2, #9898b8);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-2);
   cursor: pointer;
-  padding: 5px 7px;
+  padding: 6px 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 120ms, color 120ms;
+  transition: background 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              color 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              border-color 200ms cubic-bezier(0.32, 0.72, 0, 1);
   margin-bottom: 2px;
 }
 .stop-btn:hover {
-  background: var(--surface-3, #26263a);
-  color: var(--text-1, #ededf2);
+  border-color: var(--error);
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 8%, transparent);
 }
 
 /* ── Toast notification ──────────────────────────────────────────────────────── */

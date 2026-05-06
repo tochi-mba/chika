@@ -8,16 +8,13 @@
     <div class="compaction-line" />
   </div>
 
-  <div v-else class="message" :class="message.role">
+  <div v-else class="message" :class="[message.role, { 'is-streaming': message.streaming }]">
     <div class="avatar" :class="message.role + '-avatar'" aria-hidden="true">
-      <svg
+      <ChikaMark
         v-if="message.role === 'assistant'"
-        width="14" height="14" viewBox="0 0 24 24"
-        fill="none" stroke="currentColor"
-        stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"
-      >
-        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-      </svg>
+        :size="18"
+        :state="message.streaming ? 'streaming' : 'idle'"
+      />
       <span v-else class="avatar-letter">U</span>
     </div>
     <div class="bubble" :class="message.role + '-bubble'">
@@ -41,7 +38,13 @@
 
       <!-- Main text content -->
       <div v-if="message.text" class="prose" v-html="formattedText" />
-      <span v-if="message.streaming && !message.text && !message.toolEvents?.length" class="cursor-only" />
+      <div
+        v-else-if="message.streaming && !message.toolEvents?.length"
+        class="thinking-indicator"
+      >
+        <ChikaMark :size="14" state="streaming" />
+        <span>Thinking…</span>
+      </div>
       <span v-if="message.streaming && message.text" class="cursor" />
 
       <!-- Browser screenshots (from browser_screenshot tool results) -->
@@ -86,6 +89,7 @@
 <script setup>
 import { computed } from 'vue'
 import InlineActivity from './InlineActivity.vue'
+import ChikaMark from './ChikaMark.vue'
 
 const props = defineProps({
   message: { type: Object, required: true }
@@ -194,7 +198,7 @@ const formattedText = computed(() => {
 </script>
 
 <style scoped>
-/* ── Message layout — avatar + bubble row, mirroring the v0 design ────── */
+/* ── Message layout — avatar + bubble row ──────────────────────────────── */
 .message {
   display: flex;
   align-items: flex-start;
@@ -212,14 +216,38 @@ const formattedText = computed(() => {
   display: grid;
   place-items: center;
   margin-top: 2px;
+  transition: transform 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .assistant-avatar {
-  background: var(--surface-2);
+  /* primary/10 — subtle accent tint that reads as a "Chika" badge
+     without competing with the trefoil glyph inside */
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  transition: transform 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              box-shadow 240ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.message.is-streaming .assistant-avatar {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent);
+  animation: assistant-pulse 1.6s ease-in-out infinite;
+}
+@keyframes assistant-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 20%, transparent); }
+}
+
+.thinking-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-3);
+  letter-spacing: -0.005em;
 }
 .user-avatar {
   background: var(--accent);
   color: #fff;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .avatar-letter {
   font-weight: 600;
@@ -230,34 +258,46 @@ const formattedText = computed(() => {
 /* ── Bubbles ─────────────────────────────────────────────────────────────── */
 .bubble {
   max-width: 80%;
-  border-radius: 14px;
-  padding: 12px 16px;
+  padding: 14px 18px;
   font-size: 14px;
   line-height: 1.65;
   word-wrap: break-word;
   letter-spacing: -0.004em;
 }
 
+/* Assistant: card surface + border + asymmetric top-left corner so the
+   bubble visually points at the avatar (matches the canonical design). */
 .assistant-bubble {
-  background: var(--surface-2);
-  color: var(--text-1);
+  background: var(--surface-1, var(--surface, #14161c));
+  color: var(--text-1, var(--text, #ededf2));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  border-radius: 16px;
+  border-top-left-radius: 6px;
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.assistant-bubble:hover {
+  border-color: var(--border-strong, var(--border-hover, rgba(255, 255, 255, 0.10)));
 }
 
+/* User: accent-filled, asymmetric top-right corner. */
 .user-bubble {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2, #7c70ff));
   color: #fff;
+  border-radius: 16px;
+  border-top-right-radius: 6px;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 /* ── Streaming cursor ─────────────────────────────────────────────────────── */
 .cursor, .cursor-only {
   display: inline-block;
-  width: 2px;
+  width: 6px;
   height: 1em;
   background: var(--accent, #6c63ff);
-  margin-left: 2px;
+  margin-left: 3px;
   vertical-align: text-bottom;
-  border-radius: 1px;
-  animation: blink 0.75s steps(1) infinite;
+  border-radius: 2px;
+  animation: blink 0.9s steps(1) infinite;
 }
 .cursor-only {
   display: block;

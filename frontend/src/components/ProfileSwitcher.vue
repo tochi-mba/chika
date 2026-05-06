@@ -136,33 +136,37 @@ onMounted(fetchProfiles)
 .trigger {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 3px 10px 3px 3px;
+  padding: 4px 12px 4px 4px;
   cursor: pointer;
   font: inherit;
-  transition: border-color 140ms var(--spring), background 140ms var(--spring);
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              background 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .trigger:hover {
-  background: var(--accent-dim);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
   border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  transform: translateY(-1px);
 }
 
 .avatar {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2, var(--accent)));
   color: #fff;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   letter-spacing: -0.02em;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 .name {
   font-size: 12.5px;
@@ -192,11 +196,13 @@ onMounted(fetchProfiles)
 .dropdown {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 6px;
-  min-width: 200px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
-  animation: pop 140ms var(--spring);
+  min-width: 220px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18),
+              0 0 0 1px color-mix(in srgb, var(--accent) 6%, transparent);
+  backdrop-filter: blur(8px);
+  animation: pop 200ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 :root.dark .dropdown {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);

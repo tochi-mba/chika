@@ -5,16 +5,21 @@
     :class="{ 'pet-working': state === 'working' || state === 'thinking',
               'pet-celebrate': state === 'celebrate',
               'pet-sad': state === 'sad',
-              'pet-bubble-open': !!bubble }"
+              'pet-curious': state === 'curious',
+              'pet-bubble-open': !!activeSpeech,
+              'reduced-motion': reducedMotion }"
     :style="{ '--pet-accent': active.accent || 'var(--accent)' }"
     @click="$emit('open-settings', 'pet')"
     :title="`${active.name} — click to change`"
   >
     <transition name="bubble">
-      <div v-if="bubble" class="pet-bubble">{{ bubble }}</div>
+      <div v-if="activeSpeech" class="pet-bubble" role="status">
+        {{ activeSpeech }}
+        <div class="pet-bubble-tail" />
+      </div>
     </transition>
 
-    <div class="pet-body">
+    <div class="pet-body" :class="{ blinking }">
       <pre v-if="currentFrame" class="pet-ascii">{{ currentFrame }}</pre>
       <span v-else class="pet-emoji">{{ active.emoji || '🐾' }}</span>
       <div class="pet-shadow"/>
@@ -55,22 +60,88 @@ const active = computed(() => {
 
 const shortName = computed(() => active.value?.name?.split(' ')?.[0] || '')
 
-// Bubble auto-dismiss after 4s of inactivity. The store updates petState
-// on every relevant event so we just mirror it locally.
-const bubble = ref('')
-let bubbleTimer = null
+// ── Speech queue ─────────────────────────────────────────────────────
+// When the engine speaks faster than the bubble's display window, we
+// queue the new line rather than slam-replacing the current one — the
+// user actually gets to read each bubble. Mirrors the React reference's
+// queue/drain loop so the two surfaces feel identical.
+const SPEECH_DISPLAY_MS = 4000
+const SPEECH_FADE_MS = 200
+
+const activeSpeech = ref('')
+const speechQueue = []
+let speechTimer = null
+
+function drainSpeech() {
+  if (speechTimer) { clearTimeout(speechTimer); speechTimer = null }
+  const next = speechQueue.shift()
+  if (!next) {
+    activeSpeech.value = ''
+    return
+  }
+  activeSpeech.value = next
+  speechTimer = setTimeout(() => {
+    activeSpeech.value = ''
+    // Allow the leave transition to finish before showing the next bubble;
+    // otherwise the user sees a hard cut between consecutive lines.
+    setTimeout(drainSpeech, SPEECH_FADE_MS)
+  }, SPEECH_DISPLAY_MS)
+}
 
 watch(() => system.petState.bubble, (next) => {
-  if (next) {
-    bubble.value = next
-    if (bubbleTimer) clearTimeout(bubbleTimer)
-    bubbleTimer = setTimeout(() => { bubble.value = '' }, 4000)
+  if (!next) return
+  speechQueue.push(next)
+  if (!activeSpeech.value) drainSpeech()
+})
+
+// ── prefers-reduced-motion ───────────────────────────────────────────
+// Respect the OS-level motion-sensitivity flag. Bouncing/blinking is
+// stripped out via .reduced-motion in the stylesheet, but the JS-driven
+// idle blink also needs to short-circuit so we don't queue timers we
+// never fire.
+const reducedMotion = ref(false)
+let mediaQuery = null
+
+function syncReducedMotion(e) {
+  reducedMotion.value = e?.matches ?? mediaQuery?.matches ?? false
+}
+
+onMounted(() => {
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+    syncReducedMotion(mediaQuery)
+    mediaQuery.addEventListener?.('change', syncReducedMotion)
   }
 })
 
+// ── Idle blink ───────────────────────────────────────────────────────
+// A short squint every ~7s while idle keeps the pet feeling alive
+// without becoming distracting. Disabled under reduced-motion.
+const IDLE_BLINK_INTERVAL_MS = 7200
+const IDLE_BLINK_DURATION_MS = 140
+
+const blinking = ref(false)
+let blinkTimer = null
+
+function stopBlink() {
+  if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null }
+  blinking.value = false
+}
+
+function startBlink() {
+  stopBlink()
+  if (reducedMotion.value) return
+  blinkTimer = setInterval(() => {
+    blinking.value = true
+    setTimeout(() => { blinking.value = false }, IDLE_BLINK_DURATION_MS)
+  }, IDLE_BLINK_INTERVAL_MS)
+}
+
 onUnmounted(() => {
-  if (bubbleTimer) clearTimeout(bubbleTimer)
+  if (speechTimer) clearTimeout(speechTimer)
   if (frameTimer)  clearInterval(frameTimer)
+  stopBlink()
+  if (mediaQuery) mediaQuery.removeEventListener?.('change', syncReducedMotion)
 })
 
 const state = computed(() => system.petState.state || 'idle')
@@ -107,9 +178,11 @@ function startTicker() {
   }, delay)
 }
 
-watch(state, () => {
+watch(state, (s) => {
   frameIdx.value = 0
   startTicker()
+  if (s === 'idle') startBlink()
+  else stopBlink()
 }, { immediate: false })
 
 watch(currentFrames, () => {
@@ -117,27 +190,33 @@ watch(currentFrames, () => {
   if (currentFrames.value.length && !frameTimer) startTicker()
 })
 
+watch(reducedMotion, () => {
+  if (state.value === 'idle') startBlink()
+  else stopBlink()
+})
+
 onMounted(() => {
   // Fire after the catalogue fetch resolves; if it's already cached the
   // computed re-evaluates immediately.
   startTicker()
+  if (state.value === 'idle') startBlink()
 })
 </script>
 
 <style scoped>
+/* The pet now renders INSIDE the sidebar slot (mirrors the React
+   reference). No more position:fixed — it shares the column with
+   StateIndicator and the profile footer. */
 .pet-companion {
-  position: fixed;
-  right: 18px;
-  bottom: 70px;
-  z-index: 90;
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   cursor: pointer;
-  padding: 8px;
+  padding: 4px 8px;
   user-select: none;
-  transition: transform 200ms var(--ease, cubic-bezier(0.16, 1, 0.3, 1));
+  transition: transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .pet-companion:hover {
   transform: translateY(-2px);
@@ -153,7 +232,10 @@ onMounted(() => {
   place-items: center;
   animation: pet-bob 3.5s ease-in-out infinite;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.12));
+  transform-origin: 50% 70%;
+  transition: transform 140ms cubic-bezier(0.32, 0.72, 0, 1);
 }
+.pet-body.blinking { transform: scaleY(0.7); }
 :root.dark .pet-body { filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3)); }
 
 .pet-emoji {
@@ -198,48 +280,46 @@ onMounted(() => {
 
 .pet-name {
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-3);
-  background: var(--surface-1);
-  padding: 3px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  font-family: var(--font-mono);
 }
 
 /* ── Speech bubble ───────────────────────────────────────────────────── */
 .pet-bubble {
   position: absolute;
   bottom: 100%;
-  right: -8px;
-  margin-bottom: 8px;
-  background: var(--pet-accent, var(--accent));
-  color: #fff;
-  padding: 8px 12px;
-  border-radius: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 10px;
+  background: var(--surface-1);
+  color: var(--text-2);
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
   font-size: 12px;
-  white-space: nowrap;
-  max-width: 220px;
-  text-overflow: ellipsis;
-  overflow: hidden;
+  text-align: center;
+  white-space: normal;
+  max-width: 200px;
   font-weight: 500;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
+  line-height: 1.4;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
 }
 :root.dark .pet-bubble { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4); }
 
-.pet-bubble::after {
-  content: '';
+.pet-bubble-tail {
   position: absolute;
-  bottom: -5px;
-  right: 24px;
+  bottom: -6px;
+  left: 50%;
   width: 10px;
   height: 10px;
-  background: var(--pet-accent, var(--accent));
-  transform: rotate(45deg);
-  border-radius: 2px;
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  transform: translateX(-50%) rotate(45deg);
+  border-bottom-right-radius: 2px;
 }
 
 /* ── State animations ────────────────────────────────────────────────── */
@@ -294,12 +374,46 @@ onMounted(() => {
   50%      { transform: scale(1.06); opacity: 0.20; }
 }
 
-/* Bubble enter/leave */
-.bubble-enter-from, .bubble-leave-to {
+/* Bubble enter/leave — symmetric around the centered horizontal anchor */
+.bubble-enter-from {
   opacity: 0;
-  transform: translateY(6px) scale(0.9);
+  transform: translateX(-50%) translateY(4px) scale(0.96);
+}
+.bubble-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-4px) scale(0.96);
 }
 .bubble-enter-active, .bubble-leave-active {
-  transition: opacity 240ms ease, transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* prefers-reduced-motion — strip every continuous animation. The bubble
+   transition is a discrete swap so we leave it; the bob, work-tilt,
+   bounce, sad-wobble, glow and shadow-pulse all stop. Static visual,
+   same hierarchy. */
+.pet-companion.reduced-motion .pet-body,
+.pet-companion.reduced-motion.pet-working .pet-body,
+.pet-companion.reduced-motion.pet-celebrate .pet-body,
+.pet-companion.reduced-motion.pet-sad .pet-emoji {
+  animation: none !important;
+}
+.pet-companion.reduced-motion .pet-shadow {
+  animation: none !important;
+}
+.pet-companion.reduced-motion .pet-body::before {
+  animation: none !important;
+  opacity: 0.35;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pet-body,
+  .pet-shadow,
+  .pet-working .pet-body,
+  .pet-celebrate .pet-body,
+  .pet-sad .pet-emoji,
+  .pet-working .pet-body::before,
+  .pet-celebrate .pet-body::before {
+    animation: none !important;
+  }
 }
 </style>

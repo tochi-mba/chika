@@ -31,12 +31,34 @@ from pathlib import Path
 from chika.core._io import atomic_write
 
 # ``CHIKA_SETTINGS_PATH`` lets a parent process redirect the persisted
-# settings file — used by tests that spawn ``python chika.py`` as a
-# subprocess (the in-process monkeypatch in conftest can't reach a
-# child Python interpreter, so without this override, subprocess
-# slash commands like ``/auto-continue off`` would write to the real
-# committed ``data/settings.json``).
-_SETTINGS_PATH = Path(os.environ.get("CHIKA_SETTINGS_PATH", "data/settings.json"))
+# settings file:
+#
+#   - Tests that spawn ``python chika.py`` as a subprocess use this
+#     because the in-process monkeypatch in conftest can't reach a
+#     child Python interpreter (without it, subprocess slash commands
+#     like ``/auto-continue off`` would write to the real committed
+#     ``data/settings.json``).
+#   - The Windows installer's ``chika.cmd`` shim sets it to
+#     ``%USERPROFILE%\.chika\data\settings.json`` so user settings
+#     survive an Add/Remove Programs uninstall — the install dir gets
+#     wiped on uninstall but ``~/.chika/`` is left alone.
+#
+# ``CHIKA_DATA_DIR`` is the broader equivalent for *any* future state
+# file we add. If set, files default to ``$CHIKA_DATA_DIR/<name>``;
+# ``CHIKA_SETTINGS_PATH`` (when also set) wins over it for settings
+# specifically. We don't currently consume CHIKA_DATA_DIR for settings
+# because the installer's chika.cmd already sets the more specific
+# CHIKA_SETTINGS_PATH — but exposing it as a published env var means
+# future state stores can opt into the same uninstall-survives pattern
+# without each one inventing its own env var.
+_SETTINGS_PATH = Path(
+    os.environ.get("CHIKA_SETTINGS_PATH")
+    or (
+        f"{os.environ['CHIKA_DATA_DIR']}/settings.json"
+        if os.environ.get("CHIKA_DATA_DIR")
+        else "data/settings.json"
+    )
+)
 
 _VALID_AUTONOMY = {"supervised", "autonomous"}
 _VALID_PERMISSION = {"ask", "skip"}

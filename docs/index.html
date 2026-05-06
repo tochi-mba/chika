@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b0c10" />
+  <meta name="description" content="Chika — agentic AI assistant with full browser control. Local-first, multi-provider, one-click install." />
+  <meta property="og:title" content="Chika" />
+  <meta property="og:description" content="Agentic AI with full browser control. Powered by Claude, GPT-4o, Azure OpenAI, or Ollama." />
+  <meta property="og:type" content="website" />
+
+  <title>Chika — agentic AI with full browser control</title>
+
+  <link rel="preconnect" href="https://api.github.com">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="hero-glow" aria-hidden="true"></div>
+
+  <header class="header">
+    <nav class="nav" aria-label="Primary">
+      <a href="#" class="brand" aria-label="Chika home">
+        <svg class="brand-mark" viewBox="-60 -60 120 120" aria-hidden="true">
+          <g stroke="currentColor" stroke-width="3.4" fill="none" stroke-linecap="round">
+            <path class="leaf leaf-1" d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z"/>
+            <path class="leaf leaf-2" d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z" transform="rotate(120)"/>
+            <path class="leaf leaf-3" d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z" transform="rotate(240)"/>
+          </g>
+          <circle r="3.2" fill="currentColor"/>
+        </svg>
+        <span class="brand-text">chika</span>
+      </a>
+
+      <div class="nav-links" id="nav-links">
+        <a href="#features">features</a>
+        <a href="#install">install</a>
+        <a href="#update">update</a>
+        <a href="https://github.com/tochi-mba/chika/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener noreferrer">architecture</a>
+        <a href="https://github.com/tochi-mba/chika" target="_blank" rel="noopener noreferrer" class="nav-github" aria-label="GitHub repository">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+        </a>
+      </div>
+
+      <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links">
+        <span></span><span></span><span></span>
+      </button>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <h1 class="hero-title">
+          agentic AI with full <span class="gradient-text">browser control</span>
+        </h1>
+        <p class="hero-subtitle">
+          a local-first assistant that reads your tabs, navigates pages, runs workflows, and remembers everything across sessions — powered by claude, openai, azure, or ollama.
+        </p>
+        <div class="hero-ctas">
+          <a id="primary-download" href="https://github.com/tochi-mba/chika/releases/latest" class="btn btn-primary">
+            <span class="btn-text">download chika</span>
+            <span class="btn-sub" id="primary-download-os">view all platforms</span>
+          </a>
+          <a href="#install" class="btn btn-ghost">other platforms</a>
+        </div>
+        <p class="hero-reassurance">
+          free, open source (MIT). settings can be changed any time — provider, API keys, autonomy, browser permissions — from the REPL, the web UI, or by editing <code>.env</code>.
+        </p>
+      </div>
+    </section>
+
+    <section class="showcase">
+      <div class="container">
+        <h2 class="section-title">while it thinks, you see it think</h2>
+        <p class="section-subtitle">chika streams its reasoning, tool calls, and plan checklist in real time. no opaque spinners. no "loading…" silence.</p>
+
+        <div class="terminal" aria-hidden="true">
+          <div class="terminal-chrome">
+            <div class="terminal-dots"><span></span><span></span><span></span></div>
+            <div class="terminal-title">chika · supervised · claude-sonnet-4-6</div>
+          </div>
+          <div class="terminal-content">
+            <div class="term-line term-prompt">
+              <span class="term-dim">› what files did i touch today?</span>
+            </div>
+            <div class="term-line term-state">
+              <span class="term-triangles">
+                <span class="tri tri-left active">◣</span>
+                <span class="tri tri-mid">▲</span>
+                <span class="tri tri-right">◢</span>
+              </span>
+              <span class="term-status" id="state-verb">investigating</span>
+              <span class="term-timer" id="state-elapsed">2.3s</span>
+            </div>
+            <div class="term-line term-tool">
+              <span class="term-tool-icon">⏺</span>
+              <span class="term-tool-name">shell_exec</span>
+              <span class="term-dim">command="git log --since='24 hours ago' --name-only"</span>
+            </div>
+            <div class="term-line term-result">
+              <span class="term-result-icon">⎿</span>
+              <span class="term-dim">chika/_cli/app.py</span>
+            </div>
+            <div class="term-line term-result">
+              <span class="term-result-icon">⎿</span>
+              <span class="term-dim">chika/core/engine.py …</span>
+            </div>
+            <div class="term-line term-answer">
+              today you touched 4 files, mostly in <code>chika/_cli</code> — adding the first-run wizard and wiring the new slash commands. want me to summarise the diff?
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="features" id="features">
+      <div class="container">
+        <h2 class="section-title">what's in the box</h2>
+
+        <div class="features-grid">
+          <article class="feature-card">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h.01M15 9h.01M9 15c.83.67 1.87 1 3 1s2.17-.33 3-1"/>
+              </svg>
+            </div>
+            <h3>browser hands</h3>
+            <p>read DOM, click, fill, screenshot, monitor element changes</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+              </svg>
+            </div>
+            <h3>workflow engine</h3>
+            <p>10 step types, single-step recovery, auto-continue</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+              </svg>
+            </div>
+            <h3>plan checklist</h3>
+            <p>verbose patch-editable plans across CLI/frontend/extension</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><path d="M22 6l-10 7L2 6"/>
+              </svg>
+            </div>
+            <h3>multi-provider</h3>
+            <p>anthropic, openai, azure, ollama; switch via /provider or settings modal</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>
+              </svg>
+            </div>
+            <h3>profiles + memory</h3>
+            <p>isolated workspaces, per-profile markdown memory with TTL</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+            </div>
+            <h3>auto-update</h3>
+            <p>updates itself on launch when CI is green; opt out with /auto-update off</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="install" id="install">
+      <div class="container">
+        <h2 class="section-title">install</h2>
+        <p class="section-subtitle">pick your platform. each installer registers in your OS app manager so you can uninstall like a normal app.</p>
+
+        <div class="install-grid">
+          <a class="install-card install-card-clickable" data-os="windows" href="https://github.com/tochi-mba/chika/releases/latest">
+            <div class="install-card-header">
+              <svg class="install-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/>
+              </svg>
+              <div class="install-info">
+                <h3>Windows</h3>
+                <span class="install-meta">Windows 10/11 · per-user install · no admin</span>
+              </div>
+            </div>
+            <div class="install-file" id="windows-asset">chika-setup.exe</div>
+            <p class="install-hint">uninstall via Settings → Apps → Installed apps → Chika</p>
+          </a>
+
+          <a class="install-card install-card-clickable" data-os="macos" href="https://github.com/tochi-mba/chika/releases/latest">
+            <div class="install-card-header">
+              <svg class="install-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+              </svg>
+              <div class="install-info">
+                <h3>macOS</h3>
+                <span class="install-meta">macOS 12+ · pkg installer · admin required</span>
+              </div>
+            </div>
+            <div class="install-file" id="macos-asset">Chika.pkg</div>
+            <p class="install-hint">uninstall via <code>sudo /Library/Application\ Support/Chika/uninstall.sh</code></p>
+          </a>
+
+          <a class="install-card install-card-clickable" data-os="linux" href="https://github.com/tochi-mba/chika/releases/latest">
+            <div class="install-card-header">
+              <svg class="install-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.132 1.884 1.071.771-.06 1.592-.536 2.257-1.306.631-.765 1.683-1.084 2.378-1.503.348-.199.629-.469.649-.853.023-.4-.2-.811-.714-1.376v-.097l-.003-.003c-.17-.2-.25-.535-.338-.926-.085-.401-.182-.786-.492-1.046h-.003c-.059-.054-.123-.067-.188-.135a.357.357 0 00-.19-.064c.431-1.278.264-2.55-.173-3.694-.533-1.41-1.465-2.638-2.175-3.483-.796-1.005-1.576-1.957-1.56-3.368.026-2.152.236-6.133-3.544-6.139z"/>
+              </svg>
+              <div class="install-info">
+                <h3>Linux .deb</h3>
+                <span class="install-meta">debian/ubuntu/mint/pop!_os</span>
+              </div>
+            </div>
+            <div class="install-file" id="linux-deb-asset">chika_all.deb</div>
+            <p class="install-hint">uninstall via <code>sudo apt remove chika</code></p>
+          </a>
+
+          <div class="install-card">
+            <div class="install-card-header">
+              <svg class="install-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+              </svg>
+              <div class="install-info">
+                <h3>Linux universal</h3>
+                <span class="install-meta">any distro with bash + curl</span>
+              </div>
+            </div>
+            <div class="code-block">
+              <code id="curl-cmd">curl -fsSL https://raw.githubusercontent.com/tochi-mba/chika/main/installers/linux/install.sh | bash</code>
+              <button class="copy-btn" data-copy-target="curl-cmd" aria-label="Copy install command">
+                <svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                </svg>
+              </button>
+            </div>
+            <p class="install-hint">uninstall via <code>~/.local/share/chika/uninstall.sh</code></p>
+          </div>
+
+          <div class="install-card">
+            <div class="install-card-header">
+              <svg class="install-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/>
+              </svg>
+              <div class="install-info">
+                <h3>from source</h3>
+                <span class="install-meta">python 3.11+ required</span>
+              </div>
+            </div>
+            <div class="code-block">
+              <code id="git-cmd">git clone https://github.com/tochi-mba/chika.git &amp;&amp; cd chika &amp;&amp; python install.py</code>
+              <button class="copy-btn" data-copy-target="git-cmd" aria-label="Copy clone command">
+                <svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                </svg>
+              </button>
+            </div>
+            <p class="install-hint">uninstall via <code>chika uninstall</code></p>
+          </div>
+
+          <div class="install-card install-card-soon">
+            <div class="install-card-header">
+              <svg class="install-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12.042 23.648c-7.813 0-12.042-4.876-12.042-11.171 0-6.727 4.762-12.125 13.276-12.125 6.695 0 10.583 3.977 10.583 8.82 0 4.163-2.462 7.05-5.908 7.05-1.403 0-2.528-.582-2.847-1.961h-.117c-.698 1.139-1.884 1.961-3.467 1.961-2.111 0-3.727-1.696-3.727-4.316 0-3.747 2.58-6.624 6.4-6.624 1.463 0 2.702.418 3.375.97l-.698 4.163c-.231 1.401.12 2.077.878 2.077.998 0 1.908-1.194 1.908-3.397 0-3.596-2.522-6.206-7.413-6.206-5.083 0-9.029 3.799-9.029 9.302 0 5.298 3.405 8.52 9.027 8.52 2.111 0 4.163-.524 5.539-1.342l.878 2.078c-1.696 1.075-4.316 1.746-6.906 1.746z"/>
+              </svg>
+              <div class="install-info">
+                <h3>PyPI</h3>
+                <span class="install-meta">coming soon</span>
+              </div>
+            </div>
+            <div class="code-block code-block-disabled">
+              <code>pip install chika</code>
+            </div>
+            <p class="install-hint">standard pip install when released</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="update" id="update">
+      <div class="container">
+        <h2 class="section-title">update</h2>
+        <p class="section-subtitle">chika updates itself on launch when upstream CI is green. you don't need to do anything. but if you want to:</p>
+
+        <div class="update-grid">
+          <div class="update-card">
+            <h3>from the CLI</h3>
+            <div class="code-block"><pre><code>chika update
+chika update --check
+chika doctor</code></pre></div>
+          </div>
+          <div class="update-card">
+            <h3>from inside the REPL</h3>
+            <div class="code-block"><pre><code>/update
+/update --check
+/auto-update on|off
+/doctor</code></pre></div>
+          </div>
+        </div>
+
+        <p class="update-reassurance">
+          auto-update only applies on a fast-forward to main with all CI green and your working tree clean. never rolls you onto a broken commit.
+        </p>
+      </div>
+    </section>
+
+    <section class="uninstall" id="uninstall">
+      <div class="container">
+        <h2 class="section-title">uninstall</h2>
+        <p class="section-subtitle">two ways: the os app manager (the one you already know), or <code>chika uninstall</code>.</p>
+
+        <div class="uninstall-grid">
+          <div class="uninstall-card">
+            <h3>OS app manager</h3>
+            <ul class="uninstall-list">
+              <li><strong>Windows:</strong> Settings → Apps → Installed apps → Chika</li>
+              <li><strong>macOS:</strong> <code>sudo /Library/Application\ Support/Chika/uninstall.sh</code></li>
+              <li><strong>Linux (deb):</strong> <code>sudo apt remove chika</code></li>
+              <li><strong>Linux (universal):</strong> <code>~/.local/share/chika/uninstall.sh</code></li>
+            </ul>
+          </div>
+          <div class="uninstall-card">
+            <h3>CLI</h3>
+            <div class="code-block"><pre><code>chika uninstall
+chika uninstall --yes
+chika uninstall --remove-data</code></pre></div>
+          </div>
+        </div>
+
+        <p class="uninstall-reassurance">
+          user data at <code>~/.chika/</code> is preserved by default. delete it manually if you want a clean removal.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-content">
+      <svg class="footer-mark" viewBox="-60 -60 120 120" aria-hidden="true">
+        <g stroke="currentColor" stroke-width="3.4" fill="none" stroke-linecap="round">
+          <path d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z"/>
+          <path d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z" transform="rotate(120)"/>
+          <path d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z" transform="rotate(240)"/>
+        </g>
+        <circle r="3.2" fill="currentColor"/>
+      </svg>
+      <nav class="footer-links" aria-label="Footer">
+        <span>MIT licensed</span>
+        <span class="footer-sep">·</span>
+        <a href="https://github.com/tochi-mba/chika" target="_blank" rel="noopener noreferrer">open source</a>
+        <span class="footer-sep">·</span>
+        <a href="https://github.com/tochi-mba/chika/issues" target="_blank" rel="noopener noreferrer">file an issue</a>
+        <span class="footer-sep">·</span>
+        <a href="https://github.com/tochi-mba/chika/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener noreferrer">architecture</a>
+        <span class="footer-sep">·</span>
+        <a href="https://github.com/tochi-mba/chika/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener noreferrer">contributing</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="script.js" defer></script>
+</body>
+</html>

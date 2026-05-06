@@ -126,8 +126,8 @@ const summary = computed(() => {
 }
 
 .activity-rail {
-  margin-top: 6px;
-  padding-left: 14px;
-  border-left: 1px solid var(--border-strong, rgba(255,255,255,0.12));
+  margin-top: 8px;
+  padding-left: 16px;
+  border-left: 2px solid color-mix(in srgb, var(--accent, #6c63ff) 40%, transparent);
 }
 </style>

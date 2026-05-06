@@ -318,6 +318,98 @@ def test_panel_tells_user_to_open_when_browser_failed(fake_source: Path, dest: P
     assert "opened chrome://extensions/" not in out
 
 
+# ── Already-active detection: refresh-only path ─────────────────────
+
+
+def test_install_skips_browser_open_when_already_active(
+    fake_source: Path, dest: Path, monkeypatch,
+):
+    """When the extension is already loaded in Chrome, we don't open
+    chrome://extensions/ (the user doesn't need to Load unpacked again);
+    we just refresh the files quietly."""
+    from chika._cli import extension_detect
+
+    fake_result = extension_detect.DetectionResult(
+        confidence="confirmed_active",
+        signals=[("heartbeat", "12s ago")],
+        last_heartbeat=1234567890.0,
+    )
+    monkeypatch.setattr(
+        "chika._cli.extension_detect.detect_extension",
+        lambda **_: fake_result,
+    )
+    with patch.object(inst.webbrowser, "open") as wb:
+        inst.install_extension(source=fake_source, dest=dest)
+    wb.assert_not_called()
+
+
+def test_install_renders_refresh_panel_when_already_active(
+    fake_source: Path, dest: Path, monkeypatch,
+):
+    """The 'already detected' path uses _render_refresh_panel, not
+    _render_install_panel."""
+    import io
+    from rich.console import Console
+    from chika._cli import extension_detect
+
+    monkeypatch.setattr(
+        "chika._cli.extension_detect.detect_extension",
+        lambda **_: extension_detect.DetectionResult(
+            confidence="present_in_chrome_profile",
+            signals=[("chrome_profile", "Chrome/Default/Extensions/x")],
+        ),
+    )
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=140, color_system=None)
+    with patch.object(inst.webbrowser, "open"):
+        inst.install_extension(source=fake_source, dest=dest, console=console)
+    out = buf.getvalue()
+    # Refresh-panel-specific copy
+    assert "already detected" in out.lower() or "refreshed" in out.lower()
+
+
+def test_install_uses_full_panel_when_unknown(
+    fake_source: Path, dest: Path, monkeypatch,
+):
+    """unknown confidence → still show the full Load-unpacked panel."""
+    import io
+    from rich.console import Console
+    from chika._cli import extension_detect
+
+    monkeypatch.setattr(
+        "chika._cli.extension_detect.detect_extension",
+        lambda **_: extension_detect.DetectionResult(
+            confidence="unknown", signals=[],
+        ),
+    )
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=140, color_system=None)
+    with patch.object(inst.webbrowser, "open", return_value=True):
+        inst.install_extension(source=fake_source, dest=dest, console=console)
+    out = buf.getvalue()
+    # The full install panel mentions the Load-unpacked steps
+    assert "Load unpacked" in out
+
+
+def test_install_handles_detection_failure_gracefully(
+    fake_source: Path, dest: Path, monkeypatch,
+):
+    """Detection failures shouldn't break install — fall through
+    to the standard first-time panel."""
+    def boom(**_):
+        raise RuntimeError("detection broken")
+
+    monkeypatch.setattr(
+        "chika._cli.extension_detect.detect_extension", boom,
+    )
+    with patch.object(inst.webbrowser, "open", return_value=True) as wb:
+        result = inst.install_extension(source=fake_source, dest=dest)
+    # Install still completed
+    assert result == dest.resolve()
+    # Browser still opened (full first-time flow)
+    wb.assert_called_once()
+
+
 def test_no_panel_rendered_when_console_is_none(fake_source: Path, dest: Path):
     """``console=None`` should silently skip rendering — used in tests."""
     with patch.object(inst.webbrowser, "open", return_value=False):

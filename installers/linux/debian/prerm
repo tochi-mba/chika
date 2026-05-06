@@ -1,0 +1,61 @@
+#!/bin/sh
+# ──────────────────────────────────────────────────────────────────────
+#  Chika .deb — prerm
+# ──────────────────────────────────────────────────────────────────────
+#
+# Wipes /opt/chika/venv before dpkg removes the rest. We don't touch
+# ~/.chika/ — that's user data and ``apt remove`` should preserve it.
+# Use ``apt purge chika`` if you want a full nuke (but we don't ship
+# config files for it to remove, so purge ≡ remove for us).
+
+set -e
+
+case "$1" in
+    remove|deconfigure|upgrade)
+        # Detect the browser extension BEFORE we wipe the venv (we
+        # need the venv's python to import chika).
+        if [ -x /opt/chika/venv/bin/python ]; then
+            DETECT="$(/opt/chika/venv/bin/python -c \
+                "from chika._cli.extension_detect import detect_extension; \
+                 print(detect_extension().confidence)" 2>/dev/null || true)"
+            if [ "$DETECT" = "confirmed_active" ] || [ "$DETECT" = "present_in_chrome_profile" ]; then
+                # Write a reminder for the dpkg user-facing log.
+                # apt prints stderr from prerm; that's where users see
+                # post-removal notes.
+                echo "" >&2
+                echo "The Chika browser extension is still loaded in your browser." >&2
+                echo "apt cannot remove it. Open chrome://extensions/, find" >&2
+                echo "'Chika Browser Agent', and click Remove." >&2
+                echo "" >&2
+                # Persisting reminder for users who use unattended apt:
+                if [ -n "$SUDO_USER" ] && [ -d "/home/$SUDO_USER" ]; then
+                    REMINDER="/home/$SUDO_USER/.chika/uninstall_reminder.txt"
+                    mkdir -p "$(dirname "$REMINDER")" 2>/dev/null || true
+                    cat > "$REMINDER" <<EOF
+The Chika browser extension was detected as still loaded in your
+browser. apt cannot reach inside Chrome's profile to remove it.
+
+To finish the uninstall:
+  1. Open chrome://extensions/
+  2. Find "Chika Browser Agent"
+  3. Click Remove
+EOF
+                fi
+            fi
+        fi
+
+        if [ -d /opt/chika/venv ]; then
+            rm -rf /opt/chika/venv || true
+        fi
+        ;;
+
+    failed-upgrade)
+        ;;
+
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 0
+        ;;
+esac
+
+exit 0

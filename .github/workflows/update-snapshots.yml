@@ -51,12 +51,20 @@ jobs:
         working-directory: extension
         run: npm install
 
+      - name: Install docs deps
+        working-directory: docs
+        run: npm install
+
       - name: Install Playwright browsers (frontend)
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
       - name: Install Playwright browsers (extension)
         working-directory: extension
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright browsers (docs)
+        working-directory: docs
         run: npx playwright install --with-deps chromium
 
       # The extension suite runs headed (MV3 SWs don't register in
@@ -81,11 +89,19 @@ jobs:
         run: xvfb-run -a npx playwright test --update-snapshots --reporter=line
         continue-on-error: true
 
+      - name: Regenerate docs landing-page Playwright snapshots
+        working-directory: docs
+        # Docs site is a flat-file static page served by http-server.
+        # Playwright project matrix covers desktop + 3 phone profiles
+        # + 2 tablet profiles, so this generates ~70 baselines.
+        run: npx playwright test --update-snapshots --reporter=line
+        continue-on-error: true
+
       - name: Commit + push the regenerated baselines
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add frontend/e2e/*-snapshots/ extension/e2e/*-snapshots/ 2>/dev/null || true
+          git add frontend/e2e/*-snapshots/ extension/e2e/*-snapshots/ docs/e2e/*-snapshots/ 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No baseline changes to commit"
             exit 0

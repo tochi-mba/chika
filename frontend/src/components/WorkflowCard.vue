@@ -62,9 +62,15 @@ const stepDone = computed(() => {
 .wf-card {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: 12px;
   overflow: hidden;
   margin: 8px 12px;
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.wf-card:hover {
+  border-color: var(--border-strong);
+  border-left-color: var(--accent-2, var(--accent));
 }
 .wf-header {
   display: flex;

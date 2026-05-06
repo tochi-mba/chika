@@ -124,29 +124,31 @@ function submit(q) {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(11, 12, 16, 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
   padding: 24px;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 .modal {
   background: var(--surface-1);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.10));
   border-radius: 16px;
   padding: 24px 28px;
   width: min(540px, 100%);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
-  animation: pop 160ms var(--spring);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+  animation: pop 180ms cubic-bezier(0.32, 0.72, 0, 1);
+  border-top: 3px solid var(--accent);
 }
 :root.dark .modal {
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.55);
 }
 @keyframes pop {
-  from { transform: scale(0.94); opacity: 0; }
-  to   { transform: scale(1);    opacity: 1; }
+  from { transform: scale(0.96) translateY(8px); opacity: 0; }
+  to   { transform: scale(1)    translateY(0);   opacity: 1; }
 }
 
 .modal-header {

@@ -1,0 +1,46 @@
+name: Pages
+
+# Deploy the static landing site at docs/ to GitHub Pages.
+# The site auto-detects the visitor's OS and pulls the right
+# installer asset from the latest GitHub Release.
+#
+# To enable for the first time:
+#   GitHub repo → Settings → Pages → Source: GitHub Actions
+#
+# After that, every push to main that touches docs/ redeploys.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Avoid concurrent deploys racing each other.
+concurrency:
+  group: 'pages'
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

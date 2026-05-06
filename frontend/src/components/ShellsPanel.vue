@@ -222,46 +222,54 @@ function fmtDuration(start, end) {
 }
 .shells-killall {
   background: none;
-  border: 1px solid var(--red, #e05c5c);
-  color: var(--red, #e05c5c);
-  border-radius: 4px;
-  padding: 3px 9px;
+  border: 1px solid var(--error);
+  color: var(--error);
+  border-radius: 6px;
+  padding: 4px 10px;
   font: inherit;
   font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 100ms, color 100ms;
+  transition: background 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              color 200ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .shells-killall:hover:not(:disabled) {
-  background: var(--red, #e05c5c);
-  color: white;
+  background: var(--error);
+  color: #fff;
 }
 .shells-killall:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .kill-btn {
   background: none;
-  border: 1px solid var(--red, #e05c5c);
-  color: var(--red, #e05c5c);
-  border-radius: 4px;
-  padding: 2px 7px;
+  border: 1px solid var(--error);
+  color: var(--error);
+  border-radius: 6px;
+  padding: 3px 9px;
   font: inherit;
   font-size: 10px;
+  font-weight: 500;
   cursor: pointer;
   margin-left: auto;
-  transition: background 100ms, color 100ms;
+  transition: background 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              color 200ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .kill-btn:hover:not(:disabled) {
-  background: var(--red, #e05c5c);
-  color: white;
+  background: var(--error);
+  color: #fff;
 }
 .kill-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .proc-card {
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-3);
+  border-radius: 10px;
   overflow: hidden;
+  background: var(--surface-1);
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
-.proc-card.running { border-color: var(--green); }
-.proc-card.exited  { border-color: var(--border-strong); }
+.proc-card.running { border-left-color: var(--success); }
+.proc-card.exited  { border-left-color: var(--text-3); }
+.proc-card:hover { border-color: var(--border-strong); }
 
 .proc-header {
   display: flex;
@@ -273,7 +281,7 @@ function fmtDuration(start, end) {
   user-select: none;
   font-size: 12px;
 }
-.proc-header:hover { background: var(--surface-3); }
+.proc-header:hover { background: color-mix(in srgb, var(--accent) 6%, var(--surface-2)); }
 
 .status-dot {
   width: 7px;

@@ -1,0 +1,26 @@
+#!/bin/bash
+# ──────────────────────────────────────────────────────────────────────
+#  Chika launcher — installed at /Library/Application Support/Chika/chika
+#  Symlinked from /usr/local/bin/chika (added to PATH by postinstall)
+# ──────────────────────────────────────────────────────────────────────
+#
+# Sets CHIKA_DATA_DIR + CHIKA_SETTINGS_PATH so user state lives at
+# ``~/.chika/data/`` — survives uninstall.
+#
+# Forwards every argument to the venv's chika executable.
+
+set -e
+
+INSTALL_DIR="/Library/Application Support/Chika"
+
+# CHIKA_DATA_DIR is the broader env var (any future state file picks
+# it up). CHIKA_SETTINGS_PATH is the more specific one settings_store
+# already reads. We export both so other state stores can opt into
+# the persistence pattern without inventing new env vars.
+: "${CHIKA_DATA_DIR:=$HOME/.chika/data}"
+: "${CHIKA_SETTINGS_PATH:=$CHIKA_DATA_DIR/settings.json}"
+export CHIKA_DATA_DIR CHIKA_SETTINGS_PATH
+
+mkdir -p "$CHIKA_DATA_DIR" 2>/dev/null || true
+
+exec "$INSTALL_DIR/venv/bin/chika" "$@"

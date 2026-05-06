@@ -120,6 +120,36 @@ jobs:
           path: frontend/playwright-report
           retention-days: 7
 
+  docs-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install docs deps
+        working-directory: docs
+        run: npm install
+
+      - name: Install Playwright browsers
+        working-directory: docs
+        run: npx playwright install --with-deps chromium
+
+      - name: Run docs Playwright e2e
+        working-directory: docs
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-playwright-report
+          path: docs/playwright-report
+          retention-days: 7
+
   extension-e2e:
     runs-on: ubuntu-latest
     steps:

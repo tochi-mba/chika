@@ -1,0 +1,94 @@
+#!/bin/sh
+# ──────────────────────────────────────────────────────────────────────
+#  Chika .deb — postinst
+# ──────────────────────────────────────────────────────────────────────
+#
+# dpkg invokes this with $1 ∈ {configure, abort-upgrade, ...}. We
+# only do real work on ``configure`` — the others are recovery paths
+# and leaving them no-op matches Debian policy.
+#
+# Layout we land:
+#
+#   /opt/chika/                    install dir
+#   /opt/chika/chika-<v>.whl       bundled wheel
+#   /opt/chika/venv/               python venv (created here, not at
+#                                  package-build time, so the venv is
+#                                  pinned to the user's actual python)
+#   /opt/chika/install_marker.json kind=linux_deb
+#   /usr/bin/chika                 launcher shim that exports
+#                                  CHIKA_DATA_DIR
+
+set -e
+
+case "$1" in
+    configure)
+        INSTALL_DIR="/opt/chika"
+        LOG="/var/log/chika-install.log"
+
+        log() { echo "[$(date)] $1" >> "$LOG" 2>/dev/null || true; }
+        log "postinst: configuring chika"
+
+        # Locate Python 3.11+. Debian's ``python3`` package is the
+        # de-facto entry point; we trust the dependency declaration
+        # in the control file to ensure it's >=3.11 on supported
+        # distros.
+        PY="$(command -v python3 || true)"
+        if [ -z "$PY" ]; then
+            log "ERROR: python3 not found despite dependency declaration"
+            exit 0
+        fi
+
+        # Build venv at /opt/chika/venv. ``--without-pip`` would be
+        # faster but we then can't bootstrap pip via ensurepip on
+        # some distros, so use the full venv.
+        if [ ! -d "$INSTALL_DIR/venv" ]; then
+            log "Creating venv at $INSTALL_DIR/venv"
+            "$PY" -m venv "$INSTALL_DIR/venv"
+        fi
+
+        VENV_PIP="$INSTALL_DIR/venv/bin/pip"
+        "$VENV_PIP" install --upgrade pip --quiet 2>>"$LOG" || \
+            log "WARN: pip upgrade failed, continuing"
+
+        WHEEL="$(ls "$INSTALL_DIR"/chika-*.whl 2>/dev/null | head -1)"
+        if [ -z "$WHEEL" ]; then
+            log "ERROR: No wheel at $INSTALL_DIR/chika-*.whl"
+            exit 0
+        fi
+
+        log "Installing $WHEEL into venv"
+        "$VENV_PIP" install --upgrade --force-reinstall "$WHEEL" --quiet 2>>"$LOG"
+
+        # Make the on-PATH shim executable.
+        chmod 0755 /usr/bin/chika 2>/dev/null || true
+
+        # Drop install_marker.json so chika update knows we're a .deb.
+        cat > "$INSTALL_DIR/install_marker.json" <<JSON
+{
+  "kind": "linux_deb",
+  "version": "$("$INSTALL_DIR/venv/bin/python" -c 'from importlib.metadata import version; print(version("chika"))' 2>/dev/null || echo "unknown")",
+  "installed_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+JSON
+
+        # Extension detection (advisory) — surfaces in install
+        # diagnostics whether the browser extension is already loaded.
+        DETECT_OUT="$("$INSTALL_DIR/venv/bin/python" -c "from chika._cli.extension_detect import detect_extension; r = detect_extension(); print(r.confidence, '|', '; '.join(f'{n}={d}' for n, d in r.signals[:3]))" 2>/dev/null || true)"
+        if [ -n "$DETECT_OUT" ]; then
+            echo "$DETECT_OUT" > "$INSTALL_DIR/extension_detection.txt"
+            log "Extension detection: $DETECT_OUT"
+        fi
+
+        log "postinst complete — chika is at /usr/bin/chika"
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 0
+        ;;
+esac
+
+exit 0

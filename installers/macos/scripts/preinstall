@@ -1,0 +1,33 @@
+#!/bin/bash
+# ──────────────────────────────────────────────────────────────────────
+#  Chika .pkg — preinstall
+# ──────────────────────────────────────────────────────────────────────
+#
+# pkgbuild invokes this with the following env:
+#
+#   $1 = full path to the .pkg
+#   $2 = full path to the install location for the package
+#   $3 = mountpoint of the destination volume
+#   $4 = root directory of the system used to install
+#
+# We use it to clear out the previous venv (if any) so the postinstall
+# can build a fresh one. macOS has no built-in upgrade story for
+# .pkg's the way Inno does on Windows; we do it manually here.
+
+set -e
+
+INSTALL_DIR="/Library/Application Support/Chika"
+LOG="/tmp/chika-preinstall.log"
+
+echo "[$(date)] preinstall: clearing existing venv at $INSTALL_DIR/venv" >> "$LOG"
+
+if [ -d "$INSTALL_DIR/venv" ]; then
+    rm -rf "$INSTALL_DIR/venv" || true
+fi
+
+# Also clear any stale install_marker; postinstall will write a fresh one.
+if [ -f "$INSTALL_DIR/install_marker.json" ]; then
+    rm -f "$INSTALL_DIR/install_marker.json" || true
+fi
+
+exit 0

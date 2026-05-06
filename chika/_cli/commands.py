@@ -959,6 +959,35 @@ def _cmd_doctor(ctx: CommandContext, _args: list[str]) -> None:
     run_doctor(console=ctx.console)
 
 
+# ── /setup ────────────────────────────────────────────────────────────────
+
+
+def _cmd_setup(ctx: CommandContext, args: list[str]) -> None:
+    """Run the interactive provider/API-key wizard.
+
+    /setup           — refuses if .env already exists with content
+    /setup --force   — overwrite an existing .env
+    """
+    from chika._cli.setup import run_setup
+    run_setup(console=ctx.console, force=("--force" in args or "-f" in args))
+
+
+# ── /uninstall ────────────────────────────────────────────────────────────
+
+
+def _cmd_uninstall(ctx: CommandContext, args: list[str]) -> None:
+    """Show OS-appropriate uninstall instructions, or actually run them.
+
+    /uninstall                — show instructions for the detected install
+    /uninstall --yes          — run the uninstaller (no further prompts)
+    /uninstall --remove-data  — also wipe ~/.chika/  (settings + chats)
+    """
+    from chika._cli.uninstall import uninstall_chika
+    yes = ("--yes" in args or "-y" in args)
+    remove_data = ("--remove-data" in args)
+    uninstall_chika(console=ctx.console, yes=yes, remove_data=remove_data)
+
+
 def _cmd_killall(ctx: CommandContext, _args: list[str]) -> None:
     """Kill every running background process."""
     from chika.tools.shell_tool import ProcessRegistry
@@ -1067,6 +1096,14 @@ def _register_all() -> None:
     register(Command("doctor",
                      "verify the install (deps, extension, .env, etc.)",
                      _cmd_doctor))
+    register(Command("setup",
+                     "interactive wizard — pick a provider, save your API key",
+                     _cmd_setup,
+                     args_hint="[--force]"))
+    register(Command("uninstall",
+                     "show OS-appropriate uninstall steps (or --yes to run them)",
+                     _cmd_uninstall,
+                     args_hint="[--yes] [--remove-data]"))
 
 
 _register_all()

@@ -3,6 +3,7 @@
     <div class="overlay" v-if="approvals.length > 0">
       <div
         class="modal"
+        :class="`risk-${riskFor(req)}`"
         v-for="req in approvals"
         :key="req.request_id"
       >
@@ -204,6 +205,24 @@ function titleFor(type) {
   return 'Approval Required'
 }
 
+/**
+ * Classify the request's risk tier. Drives the risk-{tier} CSS
+ * modifier so destructive actions read with stronger visual weight.
+ *   high   — workspace_scope (writes outside workspace)
+ *   medium — most tool approvals (shell, browser_write, file_write)
+ *   low    — informational / read-only (workspace_scope read, etc.)
+ */
+function riskFor(req) {
+  if (!req) return 'low'
+  if (req.approval_type === 'workspace_scope') return 'high'
+  if (req.approval_type === 'plan_review')     return 'low'
+  if (req.approval_type === 'set_password')    return 'medium'
+  if (req.approval_type === 'verify_password') return 'low'
+  // Default for unknown approval types: medium — surfaces the prompt
+  // without screaming destructive.
+  return 'medium'
+}
+
 function armPlanReview(req, mode) {
   // First click on Edit/Deny: open the textarea so the user can write
   // a reason or feedback. Second click on the SAME button submits.
@@ -312,7 +331,7 @@ function handleApprove(req) {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(11, 12, 16, 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -320,26 +339,34 @@ function handleApprove(req) {
   gap: 16px;
   flex-direction: column;
   padding: 24px;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .modal {
   background: var(--surface-1);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.10));
   border-radius: 16px;
   padding: 24px 28px;
-  width: 460px;
+  width: 480px;
   max-width: 100%;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
-  animation: pop 160ms var(--spring);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+  animation: pop 180ms cubic-bezier(0.32, 0.72, 0, 1);
+  /* Risk-tier accent on the top border. The .modal class is also
+     given a `risk-{tier}` modifier from the script (see further down)
+     so destructive actions read with a stronger visual weight. */
+  border-top: 3px solid var(--accent);
 }
+.modal.risk-medium { border-top-color: var(--warn); }
+.modal.risk-high   { border-top-color: var(--error); }
+
 :root.dark .modal {
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
 }
 
 @keyframes pop {
-  from { transform: scale(0.94); opacity: 0; }
-  to   { transform: scale(1);    opacity: 1; }
+  from { transform: scale(0.96) translateY(8px); opacity: 0; }
+  to   { transform: scale(1)    translateY(0);   opacity: 1; }
 }
 
 .modal-header {

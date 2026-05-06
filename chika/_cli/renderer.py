@@ -37,16 +37,16 @@ from rich.text import Text
 
 @dataclass(frozen=True)
 class Theme:
-    """Colour tokens for the CLI. Mirrors the v0 frontend palette so every
+    """Colour tokens for the CLI. Mirrors the canonical Chika palette so every
     surface (Vue web app, extension popup, CLI) speaks the same vocabulary."""
 
-    accent:    str = "#6c63ff"      # canonical v0 accent (was #9d7fff)
+    accent:    str = "#6c63ff"      # canonical accent (was #9d7fff)
     accent_2:  str = "#7c70ff"
     success:   str = "#3dd68c"
     error:     str = "#e05c5c"
     warn:      str = "#e0b35c"
-    muted:     str = "#a8a8b8"      # v0 dark text-2 — was #6b6b85
-    dim:       str = "#6b6b85"      # v0 dark text-3 — was #4f4f6a
+    muted:     str = "#a8a8b8"      # dark text-2 — was #6b6b85
+    dim:       str = "#6b6b85"      # dark text-3 — was #4f4f6a
     text:      str = "#ededf2"
     thinking:  str = "italic #6b6b85"
 

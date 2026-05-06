@@ -163,20 +163,30 @@ function fmtTs(ts) {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 11px 13px;
+  padding: 12px 14px;
   font-size: 12px;
+  font-weight: 500;
   font-family: inherit;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
-  color: var(--text-2);
+  color: var(--text-3);
   cursor: pointer;
   white-space: nowrap;
-  transition: color 150ms var(--spring), border-color 150ms var(--spring);
+  letter-spacing: -0.005em;
+  transition: color 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              border-color 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              background 200ms cubic-bezier(0.32, 0.72, 0, 1);
 }
-.tab:hover    { color: var(--text-1); }
-.tab.active   { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:hover    {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+.tab.active   {
+  color: var(--text-1);
+  border-bottom-color: var(--accent);
+}
 
 .tab-count {
   font-size: 10px;
@@ -228,13 +238,18 @@ function fmtTs(ts) {
   gap: 8px;
   padding: 9px 14px;
   border-bottom: 1px solid var(--border);
+  border-left: 2px solid transparent;
   font-size: 11.5px;
   line-height: 1.4;
   cursor: default;
-  transition: background 120ms;
+  transition: background 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              border-left-color 200ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .event-row:last-child { border-bottom: none; }
-.event-row:hover { background: var(--surface-2); }
+.event-row:hover {
+  background: var(--surface-2);
+  border-left-color: var(--accent);
+}
 
 .ev-type {
   font-family: var(--font-mono);
@@ -263,7 +278,7 @@ function fmtTs(ts) {
   flex-shrink: 0;
 }
 
-/* Type-specific colours — v0 palette only (success/warn/error/accent/text-3) */
+/* Type-specific colours — canonical palette only (success/warn/error/accent/text-3) */
 .event-row.tool_call     .ev-type { color: var(--warn); }
 .event-row.tool_result   .ev-type { color: var(--success); }
 .event-row.error         .ev-type { color: var(--error); }
