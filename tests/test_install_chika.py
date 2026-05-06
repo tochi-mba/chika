@@ -32,10 +32,8 @@ isn't covered by behavioural tests. That's the point.
 """
 from __future__ import annotations
 
-import importlib
 import json
 import re
-import sys
 import tomllib
 from pathlib import Path
 
@@ -302,10 +300,14 @@ def test_frontend_index_html_exists():
 
 
 def test_chika_cli_imports_cleanly():
-    """``import chika`` must not crash even before deps are installed."""
-    importlib.invalidate_caches()
-    sys.modules.pop("chika", None)
-    import chika  # noqa: F401
+    """``import chika`` exposes ``cli`` as a callable.
+
+    We deliberately don't pop and re-import ``chika`` — that strips
+    submodules from ``chika.*`` and breaks every later test that uses
+    ``monkeypatch.setattr("chika.<sub>...")``.
+    """
+    import chika
+    assert callable(chika.cli)
 
 
 def test_install_extension_argv_subcommand_registered():
