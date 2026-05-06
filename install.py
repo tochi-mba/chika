@@ -385,11 +385,20 @@ def start_server() -> None:
     print()
     info("Starting server on http://localhost:8000  (Ctrl+C to stop)")
     print()
+    # Use subprocess.run instead of os.execv: on Windows, os.execv joins
+    # argv into a single command line WITHOUT quoting paths, so a
+    # repo at e.g. "C:\Users\You\Downloads\New folder\chika" gets split
+    # at the first space and Python tries to open the wrong path.
+    # subprocess.run passes argv as an array so Windows' CreateProcess
+    # handles the quoting itself.
     try:
-        os.execv(sys.executable, [sys.executable, str(server)])
+        rc = subprocess.run([sys.executable, str(server)]).returncode
+        sys.exit(rc)
+    except KeyboardInterrupt:
+        sys.exit(130)
     except Exception as e:
         err(f"Could not start server: {e}")
-        warn(f"Run manually: python {server}")
+        warn(f'Run manually: python "{server}"')
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
