@@ -121,6 +121,43 @@ function _installMockEnv() {
                emoji: '🐱', accent: '#e0b35c' },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
+    // Spotify integration mocks. Tests can inject custom payloads via
+    // window.__chikaSpotifyStatus / __chikaSpotifyConnect /
+    // __chikaSpotifyProfile (set via page.addInitScript) to drive each
+    // scenario; we fall back to a baseline configured-but-not-connected
+    // response so unrelated tests don't see the disabled-button state.
+    if (url.includes('/api/spotify/status')) {
+      const stub = window.__chikaSpotifyStatus || {
+        authorized: false, client_id_set: true,
+        profile: 'default', active_profile: 'default',
+        shared: false, shared_setting: false,
+        overrides_share: false, profile_overrides: {},
+      }
+      return new Response(JSON.stringify(stub), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    if (url.includes('/api/spotify/connect')) {
+      const stub = window.__chikaSpotifyConnect || {
+        auth_url: 'https://accounts.spotify.com/authorize?client_id=test&state=zzz',
+        opened: true, client_id_set: true,
+      }
+      return new Response(JSON.stringify(stub), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    if (url.includes('/api/spotify/disconnect')) {
+      return new Response(JSON.stringify({ ok: true, tokens_clear: true }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    if (url.includes('/api/spotify/profile')) {
+      const stub = window.__chikaSpotifyProfile || null
+      return new Response(JSON.stringify(stub), {
+        status: stub ? 200 : 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
     if (url.includes('/api/')) {
       return new Response('null', {
         status: 200, headers: { 'Content-Type': 'application/json' },
@@ -258,6 +295,42 @@ const wsMockInit = `
           pet: { id: 'cat', name: 'Mochi the Cat',
                  emoji: '🐱', accent: '#e0b35c' },
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      // Spotify integration mocks. Tests can inject a custom
+      // window.__chikaSpotifyStatus (and friends) via
+      // page.addInitScript to drive each scenario; we fall
+      // back to a baseline configured-but-not-connected response
+      // so unrelated tests don't see the disabled-button state.
+      if (url.includes('/api/spotify/status')) {
+        const stub = window.__chikaSpotifyStatus || {
+          authorized: false, client_id_set: true,
+          profile: 'default', shared: false, shared_setting: false,
+          overrides_share: false, profile_overrides: {},
+        }
+        return new Response(JSON.stringify(stub), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/spotify/connect')) {
+        const stub = window.__chikaSpotifyConnect || {
+          auth_url: 'https://accounts.spotify.com/authorize?client_id=test&state=zzz',
+          opened: true, client_id_set: true,
+        }
+        return new Response(JSON.stringify(stub), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/spotify/disconnect')) {
+        return new Response(JSON.stringify({ ok: true, tokens_clear: true }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/spotify/profile')) {
+        const stub = window.__chikaSpotifyProfile || null
+        return new Response(JSON.stringify(stub), {
+          status: stub ? 200 : 401,
+          headers: { 'Content-Type': 'application/json' },
+        })
       }
       if (url.includes('/api/')) {
         // Catch-all: return an empty 200 so unstubbed /api/* fetches

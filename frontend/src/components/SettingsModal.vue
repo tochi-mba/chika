@@ -204,6 +204,18 @@
           </div>
         </div>
       </section>
+
+      <!-- ── Integrations tab ──────────────────────────────────────── -->
+      <section v-else-if="tab === 'integrations'" class="panel integrations-panel">
+        <p class="hint">
+          Connect Chika to outside services. Each connection can be
+          per-profile (private) or shared across every profile.
+        </p>
+        <SpotifyConnectCard
+          :api-key="apiKey"
+          @patch-settings="(p) => emit('patch-settings', p)"
+        />
+      </section>
     </div>
   </div>
 </template>
@@ -211,6 +223,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useSystemStore } from '../stores/system'
+import SpotifyConnectCard from './SpotifyConnectCard.vue'
 
 const props = defineProps({
   open:        { type: Boolean, default: false },
@@ -227,6 +240,7 @@ const tabs = [
   { id: 'permissions', label: 'Permissions' },
   { id: 'behaviour',   label: 'Behaviour' },
   { id: 'pet',         label: 'Pet' },
+  { id: 'integrations', label: 'Integrations' },
 ]
 const tab = ref(props.initialTab || 'provider')
 watch(() => props.initialTab, (v) => { if (v) tab.value = v })

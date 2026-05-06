@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -26,7 +25,6 @@ from chika.skills.web_app_skill.scaffold_tool import (
     _run_sync,
     _scaffold_web_app,
 )
-
 
 # ── Built-in templates: real subprocess path is unused but env is set ───
 

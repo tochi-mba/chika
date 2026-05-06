@@ -41,6 +41,7 @@
  *   "extension_status" |
  *   "reset_done" |
  *   "approval_required" |
+ *   "spotify_auth_changed" |
  *   "shell_process_start" |
  *   "shell_output" |
  *   "shell_process_done" |
@@ -113,6 +114,15 @@
  */
 
 /**
+ * @typedef {Object} SpotifyAuthChangedEvent
+ * @property {string} type [optional]
+ * @property {boolean} authorized
+ * @property {string | null} display_name [optional]
+ * @property {string | null} product [optional]
+ * @property {string | null} error [optional]
+ */
+
+/**
  * @typedef {Object} StepDoneEvent
  * @property {string} type [optional]
  * @property {string} step_id
@@ -175,7 +185,7 @@
  */
 
 /**
- * @typedef {(CompactionEvent | ConditionEvalEvent | DoneEvent | ErrorEvent | LoopIterationEvent | MapItemEvent | MemoryUpdateEvent | RetryAttemptEvent | StepDoneEvent | StepStartEvent | TokenEvent | ToolCallEvent | ToolResultEvent | VariableSetEvent | WorkflowDoneEvent | WorkflowStartEvent)} EngineEvent
+ * @typedef {(CompactionEvent | ConditionEvalEvent | DoneEvent | ErrorEvent | LoopIterationEvent | MapItemEvent | MemoryUpdateEvent | RetryAttemptEvent | SpotifyAuthChangedEvent | StepDoneEvent | StepStartEvent | TokenEvent | ToolCallEvent | ToolResultEvent | VariableSetEvent | WorkflowDoneEvent | WorkflowStartEvent)} EngineEvent
  */
 
 // Module marker so this file can be imported as a side-effect

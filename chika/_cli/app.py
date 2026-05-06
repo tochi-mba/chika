@@ -107,6 +107,9 @@ def cli(argv: list[str] | None = None) -> None:
     if args and args[0] == "replay":
         from chika._cli import replay as replay_mod
         sys.exit(replay_mod.main(args[1:]))
+    if args and args[0] == "spotify":
+        from chika._cli import spotify as spotify_cmd
+        sys.exit(spotify_cmd.main(args[1:]))
 
     if not _have_rich():
         from chika._cli.fallback import run_plain

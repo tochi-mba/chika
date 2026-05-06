@@ -950,6 +950,42 @@ def _cmd_auto_update(ctx: CommandContext, args: list[str]) -> None:
     ))
 
 
+# ── /spotify ──────────────────────────────────────────────────────────────
+
+
+def _cmd_spotify(ctx: CommandContext, args: list[str]) -> None:
+    """Spotify integration — connect, disconnect, share toggle.
+
+    /spotify                  — show connection status
+    /spotify connect          — open browser to authorize
+    /spotify connect --no-open — print URL only (headless / SSH)
+    /spotify disconnect       — clear local tokens for this profile
+    /spotify share on|off     — share one connection across all profiles
+    """
+    from chika._cli import spotify as spotify_cmd
+    cmd = (args[0] if args else "status").lower()
+    if cmd == "connect":
+        spotify_cmd._connect(open_browser="--no-open" not in args[1:])
+        return
+    if cmd == "disconnect":
+        spotify_cmd._disconnect()
+        return
+    if cmd == "share":
+        if len(args) < 2 or args[1].lower() not in ("on", "off"):
+            ctx.console.print(Text("  /spotify share on|off", style=THEME.error))
+            return
+        spotify_cmd._share(args[1].lower())
+        return
+    if cmd in ("status", ""):
+        spotify_cmd._status()
+        return
+    ctx.console.print(Text(
+        f"  unknown subcommand {cmd!r}\n"
+        "  /spotify [status | connect [--no-open] | disconnect | share on|off]",
+        style=THEME.error,
+    ))
+
+
 # ── /doctor ───────────────────────────────────────────────────────────────
 
 
@@ -1093,6 +1129,10 @@ def _register_all() -> None:
                      "toggle the on-startup auto-update",
                      _cmd_auto_update, ("autoupdate",),
                      args_hint="[on|off]"))
+    register(Command("spotify",
+                     "connect / disconnect Spotify (open browser to authorize)",
+                     _cmd_spotify,
+                     args_hint="[connect [--no-open] | disconnect | share on|off]"))
     register(Command("doctor",
                      "verify the install (deps, extension, .env, etc.)",
                      _cmd_doctor))

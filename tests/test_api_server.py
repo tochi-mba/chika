@@ -312,15 +312,18 @@ def test_auth_parametrized(header, key, expected_status):
         cfg.CHIKA_API_KEY = original
 
 
-# ── /auth/spotify/status ─────────────────────────────────────────────────────
+# ── /api/spotify/status ─────────────────────────────────────────────────────
+# (renamed from /auth/spotify/status when the Settings UI flow shipped —
+# /auth/spotify/* now hosts only the OAuth redirect dance,
+# /api/spotify/* hosts the JSON status/connect/disconnect endpoints.)
 
 def test_spotify_status_returns_200():
-    resp = client.get("/auth/spotify/status")
+    resp = client.get("/api/spotify/status")
     assert resp.status_code == 200
 
 
 def test_spotify_status_includes_authorized_field():
-    resp = client.get("/auth/spotify/status")
+    resp = client.get("/api/spotify/status")
     data = resp.json()
     assert "authorized" in data
 

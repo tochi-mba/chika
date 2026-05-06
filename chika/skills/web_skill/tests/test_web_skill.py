@@ -4,8 +4,6 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from chika.skills.web_skill import _simplify_query, web_search
 
 

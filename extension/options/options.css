@@ -221,3 +221,98 @@ input[type="range"]::-webkit-slider-thumb {
   background: rgba(224, 92, 92, 0.1);
   border: 1px solid rgba(224, 92, 92, 0.2);
 }
+
+/* ── Integrations card ───────────────────────────────────────────────────── */
+
+.integration-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-top: 8px;
+  display: flex; flex-direction: column; gap: 12px;
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.integration-card:hover { border-color: var(--border-strong); }
+
+.integration-head {
+  display: flex; align-items: center; gap: 12px;
+}
+.integration-meta {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.integration-meta strong {
+  font-size: 13px; color: var(--text-1);
+  font-weight: 600; letter-spacing: -0.01em;
+}
+
+.dot {
+  flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-3);
+}
+.dot.ok  { background: #1DB954; box-shadow: 0 0 0 4px rgba(29, 185, 84, 0.18); }
+.dot.err { background: var(--red, #e05c5c); }
+.dot.off { background: var(--text-3); }
+
+.integration-actions {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.btn-primary.spotify-primary {
+  background: linear-gradient(135deg, #1DB954, #1ed760);
+  color: #0a0a0d;
+  box-shadow: 0 3px 10px rgba(29, 185, 84, 0.26);
+}
+.btn-primary.spotify-primary:hover { background: linear-gradient(135deg, #1ed760, #25e26a); }
+.btn-primary.spotify-primary:disabled {
+  opacity: 0.5; cursor: not-allowed; background: var(--surface-2); color: var(--text-3); box-shadow: none;
+}
+
+.integration-fallback {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.integration-fallback .input-row { display: flex; gap: 6px; align-items: center; }
+.integration-fallback input {
+  flex: 1; min-width: 0;
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 8px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11.5px; color: var(--text-1); outline: none;
+}
+
+.hint.error { color: var(--red, #e05c5c); }
+
+/* Share-row + switch — visual parity with the Vue Integrations tab. */
+.share-row {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border);
+}
+.share-text { flex: 1; min-width: 0; }
+.share-text strong {
+  display: block; font-size: 12.5px; color: var(--text-1);
+  font-weight: 600; letter-spacing: -0.005em;
+}
+.share-text .hint { margin-top: 4px; }
+
+.switch { position: relative; flex-shrink: 0; cursor: pointer; }
+.switch input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.switch .track {
+  display: block; width: 36px; height: 20px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  transition: background 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              border-color 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  position: relative;
+}
+.switch .thumb {
+  position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--text-3);
+  transition: transform 240ms cubic-bezier(0.32, 0.72, 0, 1),
+              background 240ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.switch input:checked + .track { background: rgba(108,99,255,0.30); border-color: var(--accent); }
+.switch input:checked + .track .thumb { transform: translateX(16px); background: var(--accent); }

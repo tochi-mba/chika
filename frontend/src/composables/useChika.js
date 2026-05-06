@@ -180,6 +180,17 @@ export function useChika(apiKey = '') {
         system.setExtensionConnected(!!event.connected)
         break
 
+      case 'spotify_auth_changed':
+        // Re-dispatched as a window CustomEvent so SettingsModal /
+        // SpotifyConnectCard / any other listener can refresh
+        // without each subscribing through the Pinia store. The
+        // SpotifyConnectCard listens for this and re-fetches
+        // /api/spotify/status to pull the latest display name.
+        try {
+          window.dispatchEvent(new CustomEvent('chika:spotify_auth_changed', { detail: event }))
+        } catch { /* old browsers — safe to ignore */ }
+        break
+
       case 'ext_chat_turn':
         // Extension popup started a new chat turn — mirror it to the main
         // frontend so it appears naturally in the conversation in real time.

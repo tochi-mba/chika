@@ -106,6 +106,30 @@ _AUTO_UPDATE_DEFAULTS = {
     "auto_update": "on",
 }
 
+# Spotify integration: three modes, in resolution order.
+#
+#   1. Per-profile override (highest precedence)
+#      ``spotify_profile_overrides[<profile>] = true`` → that profile
+#      uses its own bucket, even when global sharing is on. Useful for
+#      "everyone on this machine shares my Spotify, but my work
+#      profile uses the team account."
+#
+#   2. Global share
+#      ``spotify_share_across_profiles = "on"`` → every profile reads
+#      the special ``_shared`` bucket. One connection, every profile.
+#
+#   3. Per-profile (default)
+#      Each profile gets its own bucket. Switching profiles switches
+#      which Spotify account is active.
+#
+# Switching modes never migrates tokens — each bucket retains whatever
+# was last connected to it, so toggling preserves prior connections.
+_SPOTIFY_DEFAULTS = {
+    "spotify_share_across_profiles": "off",
+    "spotify_profile_overrides": {},
+}
+_VALID_SPOTIFY_SHARING = {"on", "off"}
+
 # ── Category definitions ──────────────────────────────────────────────────────
 
 CATEGORIES: dict[str, str] = {
@@ -209,6 +233,10 @@ def init(defaults: dict) -> None:
             _settings[k] = v
             changed = True
     for k, v in _AUTO_UPDATE_DEFAULTS.items():
+        if k not in _settings:
+            _settings[k] = v
+            changed = True
+    for k, v in _SPOTIFY_DEFAULTS.items():
         if k not in _settings:
             _settings[k] = v
             changed = True
@@ -316,8 +344,54 @@ def update(patch: dict) -> dict:
             )
         _settings["auto_update"] = val
 
+    if "spotify_share_across_profiles" in patch:
+        val = patch["spotify_share_across_profiles"]
+        if val not in _VALID_SPOTIFY_SHARING:
+            raise ValueError(
+                f"Invalid spotify_share_across_profiles: {val!r}. Use 'on' or 'off'."
+            )
+        _settings["spotify_share_across_profiles"] = val
+        _invalidate_spotify_cache()
+
+    if "spotify_profile_overrides" in patch:
+        # Three accepted shapes:
+        #   - {} or None → clear every override
+        #   - {"alice": True, "bob": False} → set explicitly
+        #   - any other type → reject
+        val = patch["spotify_profile_overrides"]
+        if val is None:
+            val = {}
+        if not isinstance(val, dict):
+            raise ValueError(
+                "spotify_profile_overrides must be a dict of "
+                "{profile_name: bool}"
+            )
+        for k, v in val.items():
+            if not isinstance(k, str) or not isinstance(v, bool):
+                raise ValueError(
+                    "spotify_profile_overrides keys must be str, "
+                    "values must be bool"
+                )
+        # False entries are equivalent to "no override" — drop them so
+        # the dict stays small and reads cleanly.
+        _settings["spotify_profile_overrides"] = {
+            k: True for k, v in val.items() if v
+        }
+        _invalidate_spotify_cache()
+
     _save()
     return dict(_settings)
+
+
+def _invalidate_spotify_cache() -> None:
+    """Drop the in-memory Spotify token cache so the next read picks
+    up the right bucket (per-profile / shared / override) without a
+    process restart. The on-disk tokens in any bucket are untouched."""
+    try:
+        from chika.skills.spotify_skill import oauth as _spotify_oauth
+        _spotify_oauth._cache.clear()
+    except Exception:
+        pass
 
 
 def _save() -> None:

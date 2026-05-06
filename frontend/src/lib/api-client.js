@@ -170,6 +170,26 @@ export function get_skills_api_skills_get({authorization} = {}) {
   return _request('GET', '/api/skills', { params: undefined, body: undefined });
 }
 
+// POST /api/spotify/connect
+export function spotify_connect_api_spotify_connect_post({open_browser} = {}) {
+  return _request('POST', '/api/spotify/connect', { params: {open_browser}, body: undefined });
+}
+
+// POST /api/spotify/disconnect
+export function spotify_disconnect_api_spotify_disconnect_post() {
+  return _request('POST', '/api/spotify/disconnect', { params: undefined, body: undefined });
+}
+
+// GET /api/spotify/profile
+export function spotify_profile_api_spotify_profile_get() {
+  return _request('GET', '/api/spotify/profile', { params: undefined, body: undefined });
+}
+
+// GET /api/spotify/status
+export function spotify_status_api_spotify_status_get() {
+  return _request('GET', '/api/spotify/status', { params: undefined, body: undefined });
+}
+
 // GET /api/tools
 export function get_tools_api_tools_get({authorization} = {}) {
   return _request('GET', '/api/tools', { params: undefined, body: undefined });
@@ -188,11 +208,6 @@ export function spotify_auth_start_auth_spotify_get() {
 // GET /auth/spotify/callback
 export function spotify_auth_callback_auth_spotify_callback_get({code, state, error} = {}) {
   return _request('GET', '/auth/spotify/callback', { params: {code, state, error}, body: undefined });
-}
-
-// GET /auth/spotify/status
-export function spotify_auth_status_endpoint_auth_spotify_status_get() {
-  return _request('GET', '/auth/spotify/status', { params: undefined, body: undefined });
 }
 
 // GET /health

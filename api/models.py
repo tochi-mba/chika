@@ -105,6 +105,18 @@ class ErrorEvent(BaseModel):
     step_id: str | None = None
 
 
+class SpotifyAuthChangedEvent(BaseModel):
+    """Broadcast whenever a profile's Spotify connection state flips
+    (auth completes, user disconnects, refresh fails). Surfaces use it
+    to swap their UI without polling the status endpoint. Never carries
+    raw tokens — only display-name + product tier."""
+    type: str = "spotify_auth_changed"
+    authorized: bool
+    display_name: str | None = None
+    product: str | None = None
+    error: str | None = None
+
+
 # ── REST response models ──────────────────────────────────────────────────────
 
 class SessionInfo(BaseModel):
@@ -200,6 +212,8 @@ class EventType(str, Enum):  # noqa: UP042 — keep multiple-inheritance form fo
     EXTENSION_STATUS = "extension_status"
     RESET_DONE = "reset_done"
     APPROVAL_REQUIRED = "approval_required"
+    # Integrations
+    SPOTIFY_AUTH_CHANGED = "spotify_auth_changed"
     # Shell
     SHELL_PROCESS_START = "shell_process_start"
     SHELL_OUTPUT = "shell_output"
@@ -234,6 +248,7 @@ _TYPED_MODELS: dict[str, type[BaseModel]] = {
     EventType.COMPACTION.value:      CompactionEvent,
     EventType.DONE.value:            DoneEvent,
     EventType.ERROR.value:           ErrorEvent,
+    EventType.SPOTIFY_AUTH_CHANGED.value: SpotifyAuthChangedEvent,
 }
 
 

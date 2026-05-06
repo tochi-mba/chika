@@ -1,10 +1,7 @@
 """Tests for browser-skill hardening: selector cascade + idempotency."""
 from __future__ import annotations
 
-import pytest
-
 from chika.skills.browser_skill import idempotency, selectors
-
 
 # ── Selector cascade ─────────────────────────────────────────────────
 

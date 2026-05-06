@@ -296,7 +296,7 @@ def test_install_failure_keeps_project_dir(mocked_npm, tmp_path: Path):
         return 1, "npm error: install failed"
 
     import chika.skills.web_app_skill.scaffold_tool as mod
-    mod._run = _seq_run
+    mod._run = _seq_run  # type: ignore[assignment]  # test monkeypatch — signature compatible at call-site
     out = _run(_scaffold_web_app(
         stack="vite-vue", name="demo", target_dir=str(tmp_path),
         install=True,

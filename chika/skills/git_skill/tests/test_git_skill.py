@@ -4,19 +4,17 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from chika.skills.git_skill import (
-    git_status,
-    git_diff,
-    git_log,
-    git_commit,
     git_branch,
     git_checkout,
-    git_push,
-    git_pull,
+    git_commit,
+    git_diff,
+    git_log,
     git_pr_create,
     git_pr_merge,
+    git_pull,
+    git_push,
+    git_status,
 )
 
 

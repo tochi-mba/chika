@@ -7,5 +7,7 @@
   "pet_speech_tokens": 40,
   "state_verbs": "on",
   "state_verbs_tokens": 80,
-  "auto_update": "on"
+  "auto_update": "on",
+  "spotify_share_across_profiles": "off",
+  "spotify_profile_overrides": {}
 }

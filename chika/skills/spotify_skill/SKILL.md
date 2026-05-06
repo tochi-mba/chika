@@ -1,11 +1,56 @@
 # Spotify skill
 
-OAuth-gated control over the user's Spotify account. The user must have set
-`CHIKA_SPOTIFY_CLIENT_ID` / `CHIKA_SPOTIFY_CLIENT_SECRET` and authorised at
-`/auth/spotify` before any tool here will work.
+Control the user's Spotify account from chat. **Connecting takes one
+click** — the user opens Settings → Integrations → Connect Spotify (or
+runs `chika spotify connect`), the browser pops up to Spotify's
+authorize page, they click Allow, and the connection is live.
 
-If a tool returns `{ "error": "not_authenticated" }`, tell the user to visit
-`/auth/spotify` in their browser and try again.
+If a tool returns `{ "error": "not_authenticated" }`, the user hasn't
+connected yet. Tell them to either:
+
+- **Vue UI**: Open Settings → Integrations → click **Connect Spotify**.
+- **Extension popup**: Settings page → Integrations → **Connect Spotify**.
+- **CLI**: Run `chika spotify connect` (or `/spotify connect` mid-chat).
+
+The OAuth flow is PKCE-based with a baked-in CLIENT_ID, so most users
+never have to register a Spotify Developer app. Power users who want
+their own app can override `CHIKA_SPOTIFY_CLIENT_ID` in the environment.
+
+## Connection storage modes
+
+Tokens are stored per-profile by default — every Chika profile has its
+own Spotify connection at `<data_dir>/spotify/<profile>/tokens.json`.
+Two opt-in variations:
+
+| Mode | Setting | Behaviour |
+|---|---|---|
+| Per-profile (default) | `spotify_share_across_profiles=off` | Each profile connects to its own Spotify account. |
+| Shared | `spotify_share_across_profiles=on` | Every profile reads/writes the `_shared` bucket — one account for the whole machine. |
+| Shared + override | `spotify_share_across_profiles=on` AND `spotify_profile_overrides[<profile>]=true` | Most profiles share one account, but the overriding profile uses its own. |
+
+Override resolution is per-call: when a profile is in
+`spotify_profile_overrides`, the resolver returns its name (own
+bucket) regardless of the global share flag. Useful for "everyone on
+this laptop shares my Spotify, except the work profile uses the
+team account."
+
+The `/api/spotify/status` response surfaces all three flags so every
+UI surface can render the right toggles:
+
+```json
+{
+  "authorized":      true,
+  "client_id_set":   true,
+  "display_name":    "Tochi",
+  "product":         "premium",
+  "profile":         "work",
+  "active_profile":  "work",
+  "shared":          false,
+  "shared_setting":  true,
+  "overrides_share": true,
+  "profile_overrides": {"work": true}
+}
+```
 
 ## Tools
 

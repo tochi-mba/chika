@@ -14,8 +14,6 @@ of hallucination:
 4. `fact_check` tool can look up whether a claim is supported by ledger.
 5. `verify_url` reports reachability without raising on network errors.
 """
-import sys; import os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
 import asyncio
 
 from chika.core.tool_registry import ToolDefinition, ToolRegistry

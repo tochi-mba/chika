@@ -2,23 +2,18 @@
 and the carry/clear flow on pet swaps."""
 from __future__ import annotations
 
-import os
-import sys
-from pathlib import Path
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
 import asyncio
+from pathlib import Path
 
 import pytest
 
 from chika.core.variable_store import VariableStore
 from chika.skills.pet_skill import (
+    _pet_memory_path,
+    _read_pet_memory,
     build_pet_skill,
     clear_pet_memory,
     copy_pet_memory,
-    _pet_memory_path,
-    _read_pet_memory,
 )
 
 

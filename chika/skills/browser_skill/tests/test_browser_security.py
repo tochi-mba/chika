@@ -7,7 +7,6 @@ import pytest
 
 from chika.skills.browser_skill import security as sec
 
-
 # ── is_write_blocked ──────────────────────────────────────────────────
 
 

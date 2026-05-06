@@ -38,6 +38,7 @@ export type EventTypeName =
   | "extension_status"
   | "reset_done"
   | "approval_required"
+  | "spotify_auth_changed"
   | "shell_process_start"
   | "shell_output"
   | "shell_process_done"
@@ -107,6 +108,15 @@ export interface RetryAttemptEvent {
   max: number;
 }
 
+/** Engine event: ``SpotifyAuthChangedEvent``. */
+export interface SpotifyAuthChangedEvent {
+  type?: string;
+  authorized: boolean;
+  display_name?: string | null;
+  product?: string | null;
+  error?: string | null;
+}
+
 /** Engine event: ``StepDoneEvent``. */
 export interface StepDoneEvent {
   type?: string;
@@ -170,5 +180,5 @@ export interface WorkflowStartEvent {
 }
 
 /** Discriminated union of every engine event. */
-export type EngineEvent = CompactionEvent | ConditionEvalEvent | DoneEvent | ErrorEvent | LoopIterationEvent | MapItemEvent | MemoryUpdateEvent | RetryAttemptEvent | StepDoneEvent | StepStartEvent | TokenEvent | ToolCallEvent | ToolResultEvent | VariableSetEvent | WorkflowDoneEvent | WorkflowStartEvent;
+export type EngineEvent = CompactionEvent | ConditionEvalEvent | DoneEvent | ErrorEvent | LoopIterationEvent | MapItemEvent | MemoryUpdateEvent | RetryAttemptEvent | SpotifyAuthChangedEvent | StepDoneEvent | StepStartEvent | TokenEvent | ToolCallEvent | ToolResultEvent | VariableSetEvent | WorkflowDoneEvent | WorkflowStartEvent;
 

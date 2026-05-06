@@ -4,10 +4,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
-from chika.skills.verify_skill import web_fetch, verify_url, _make_fact_check
 from chika.core.variable_store import VariableStore
+from chika.skills.verify_skill import _make_fact_check, verify_url, web_fetch
 
 
 def _make_mock_response(status=200, content_type="text/html", text="<html>body</html>",
