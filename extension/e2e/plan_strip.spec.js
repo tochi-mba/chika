@@ -1,22 +1,24 @@
 /**
- * Extension popup plan-strip — when a plan arrives via WS the popup
- * surfaces a compact strip with goal text + progress + action buttons.
- *
- * Coverage:
- *   - Strip renders goal + progress (X/Y) when plan_set fires.
- *   - Approve / Edit / Reject buttons are present and clickable.
- *   - Clicking Approve dispatches a chat message back through the WS.
- *   - Strip disappears (or empties) when the plan is cleared.
+ * Extension popup plan-strip — when a plan arrives the popup surfaces
+ * a compact strip with goal text + progress + action buttons.
  */
-import { test, expect, stubInit } from './_fixtures.js'
+import { test, expect, waitForChatView, standaloneStub } from './_standalone.js'
 
 
 function pushPlan(page, plan) {
+  // background.js publishes plan changes via state_update (the popup
+  // pulls plan from state.variables.plan.value, see applyFullState).
   return page.evaluate((p) => {
-    window.__chikaMockWS.pushEvent({
-      type:        'workflow_done',
-      workflow_id: 'wf',
-      variables:   { plan: p },
+    window.__chikaPushChrome({
+      type: 'state_update',
+      state: {
+        connected: true,
+        messages: [],
+        events: [],
+        pendingApprovals: [],
+        pendingQuestions: [],
+        variables: { plan: { value: p } },
+      },
     })
   }, plan)
 }
@@ -37,9 +39,9 @@ function samplePlan() {
 
 test.describe('extension popup — plan strip', () => {
   test('renders goal text when plan_set arrives', async ({ page, popupURL }) => {
-    await page.addInitScript({ content: stubInit })
+    await page.addInitScript({ content: standaloneStub })
     await page.goto(popupURL)
-    await page.waitForTimeout(200)
+    await waitForChatView(page)
     await pushPlan(page, samplePlan())
     await expect(
       page.locator('text=/Ship the demo/i').first(),
@@ -48,16 +50,14 @@ test.describe('extension popup — plan strip', () => {
 
 
   test('progress display shows tasks-done over total', async ({ page, popupURL }) => {
-    await page.addInitScript({ content: stubInit })
+    await page.addInitScript({ content: standaloneStub })
     await page.goto(popupURL)
-    await page.waitForTimeout(200)
+    await waitForChatView(page)
 
     const plan = samplePlan()
     plan.tasks[0].status = 'done'  // 1 of 2 done
     await pushPlan(page, plan)
 
-    // Strip displays "1/2" (or "50%" or similar) — the popup uses a
-    // small mono-text counter. Verify either pattern surfaces.
     const visible = await page
       .locator('text=/1\\s*\\/\\s*2|50%/i').first()
       .isVisible()
@@ -67,13 +67,11 @@ test.describe('extension popup — plan strip', () => {
 
 
   test('approve / edit / reject buttons render in the strip', async ({ page, popupURL }) => {
-    await page.addInitScript({ content: stubInit })
+    await page.addInitScript({ content: standaloneStub })
     await page.goto(popupURL)
-    await page.waitForTimeout(200)
+    await waitForChatView(page)
     await pushPlan(page, samplePlan())
 
-    // Buttons may use class hooks like .ext-plan-btn.accept/.edit/.reject
-    // or text-based hooks. Try both, accept whichever surfaces.
     const accept = page.locator(
       '.ext-plan-btn.accept, button:has-text("Approve"), button:has-text("Accept")',
     ).first()
@@ -90,10 +88,10 @@ test.describe('extension popup — plan strip', () => {
   })
 
 
-  test('clicking approve dispatches a follow-up message through the WS', async ({ page, popupURL }) => {
-    await page.addInitScript({ content: stubInit })
+  test('clicking approve dispatches an approval message to the SW', async ({ page, popupURL }) => {
+    await page.addInitScript({ content: standaloneStub })
     await page.goto(popupURL)
-    await page.waitForTimeout(200)
+    await waitForChatView(page)
     await pushPlan(page, samplePlan())
 
     const accept = page.locator(
@@ -103,16 +101,12 @@ test.describe('extension popup — plan strip', () => {
     await accept.click()
     await page.waitForTimeout(150)
 
-    const sent = await page.evaluate(() =>
-      (window.__chikaMockWS?.sentMessages || []).map((m) => {
-        try { return JSON.parse(m) } catch { return m }
-      }),
-    )
-    // Some kind of approval-related message went out — could be a
-    // chat message saying "looks good" or a structured payload.
+    // popup.js routes the approve action through
+    // chrome.runtime.sendMessage to the SW (which then forwards via WS).
+    const sent = await page.evaluate(() => window.__chikaSentToBg || [])
     const matches = sent.some((m) => {
       const txt = JSON.stringify(m || '').toLowerCase()
-      return /good|proceed|approve/.test(txt)
+      return /good|proceed|approve|accept/.test(txt)
     })
     expect(matches).toBe(true)
   })
