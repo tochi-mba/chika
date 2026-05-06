@@ -47,15 +47,23 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Install Playwright browsers
+      - name: Install extension deps
+        working-directory: extension
+        run: npm install
+
+      - name: Install Playwright browsers (frontend)
         working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright browsers (extension)
+        working-directory: extension
         run: npx playwright install --with-deps chromium
 
       - name: Build the frontend (preview server serves dist/)
         working-directory: frontend
         run: npm run build
 
-      - name: Regenerate Playwright snapshots
+      - name: Regenerate frontend Playwright snapshots
         working-directory: frontend
         run: npx playwright test --update-snapshots --reporter=line
         # Keep going even if some tests still fail after update —
@@ -63,12 +71,16 @@ jobs:
         # regenerated, so the next PR-build sees them.
         continue-on-error: true
 
+      - name: Regenerate extension Playwright snapshots
+        working-directory: extension
+        run: npx playwright test --update-snapshots --reporter=line
+        continue-on-error: true
+
       - name: Commit + push the regenerated baselines
-        working-directory: frontend
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add e2e/*-snapshots/
+          git add frontend/e2e/*-snapshots/ extension/e2e/*-snapshots/ 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No baseline changes to commit"
             exit 0
