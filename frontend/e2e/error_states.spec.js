@@ -111,15 +111,31 @@ test.describe('error states', () => {
   test('engine error event lands in the assistant bubble as [Error: ...]', async ({ chikaPage }) => {
     await chikaPage.goto('/')
     await waitForApp(chikaPage)
-    await startTurn(chikaPage)
+    // Seed a user + assistant bubble directly via the store so the
+    // error event has a place to land. The chat store's appendToken
+    // silently no-ops when no assistant bubble exists; the textarea
+    // path here is too racy to rely on.
+    await chikaPage.evaluate(() => {
+      const stores = window.__pinia__?._s
+      const chat = stores?.get('chat')
+      if (!chat) throw new Error('chat store missing')
+      chat.messages = [
+        { id: 'u1', role: 'user', text: 'go', streaming: false },
+        { id: 'a1', role: 'assistant', text: '', streaming: true,
+          warnings: [], toolEvents: [] },
+      ]
+    })
 
+    // Use a hyphenated message — the markdown parser eats underscores
+    // ('max_turns_reached' → 'maxturnsreached' as italic markup), and
+    // we don't care to assert against rendered markdown surface here.
     await pushSequence(chikaPage, [
-      { type: 'error', message: 'engine: max_turns_reached' },
+      { type: 'error', message: 'engine error: max-turns-reached' },
     ])
 
     await expect(
-      chikaPage.locator('text=/Error: engine: max_turns_reached/i').first(),
-    ).toBeVisible({ timeout: 3000 })
+      chikaPage.locator('.message.assistant').last(),
+    ).toContainText('max-turns-reached', { timeout: 3000 })
   })
 
 

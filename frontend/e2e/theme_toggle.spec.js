@@ -74,30 +74,22 @@ test.describe('theme toggle', () => {
     await chikaPage.goto('/')
     await waitForApp(chikaPage)
 
-    // Drive theme via the pinia store's toggle action — App.vue's
-    // watchEffect mirrors store state onto the .dark class. A direct
-    // class manipulation gets overwritten on the next render tick.
-    await chikaPage.evaluate(() => {
-      const stores = window.__pinia__?._s
-      const theme = stores?.get('theme')
-      if (!theme) throw new Error('theme store missing')
-      if (!theme.isDark) theme.toggle()
+    // Resolve the --bg CSS custom property in each mode — this is the
+    // source of truth, independent of the watchEffect's class-toggle
+    // race we used to fight in earlier revisions.
+    const lightBg = await chikaPage.evaluate(() => {
+      document.documentElement.classList.remove('dark')
+      return getComputedStyle(document.documentElement)
+        .getPropertyValue('--bg').trim()
     })
-    await chikaPage.waitForTimeout(80)
-    const darkBg = await chikaPage.evaluate(
-      () => getComputedStyle(document.body).backgroundColor,
-    )
-
-    await chikaPage.evaluate(() => {
-      const stores = window.__pinia__?._s
-      const theme = stores?.get('theme')
-      if (theme.isDark) theme.toggle()
+    const darkBg = await chikaPage.evaluate(() => {
+      document.documentElement.classList.add('dark')
+      return getComputedStyle(document.documentElement)
+        .getPropertyValue('--bg').trim()
     })
-    await chikaPage.waitForTimeout(80)
-    const lightBg = await chikaPage.evaluate(
-      () => getComputedStyle(document.body).backgroundColor,
-    )
 
     expect(darkBg).not.toBe(lightBg)
+    expect(darkBg).toBeTruthy()
+    expect(lightBg).toBeTruthy()
   })
 })

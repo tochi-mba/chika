@@ -113,7 +113,11 @@ async def generate_quote(
     except (TimeoutError, Exception):
         return _pick_static(pet, state)
 
-    text = (text or "").strip().splitlines()[0].strip().strip('"').strip("'")
+    # `splitlines()` on a stripped empty string is [] — index [0] would
+    # crash. Guard explicitly so whitespace-only LLM output falls back
+    # to a static quote rather than blowing up the turn.
+    lines = (text or "").strip().splitlines()
+    text = lines[0].strip().strip('"').strip("'") if lines else ""
     if len(text) > 80:
         text = text[:80].rstrip() + "…"
     return text or _pick_static(pet, state)

@@ -23,7 +23,18 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
   timeout: 30_000,
-  expect: { timeout: 5_000 },
+  expect: {
+    timeout: 5_000,
+    // Pin baselines to a single name regardless of platform — Vue's
+    // CSS-driven layout is identical across Linux/Mac/Windows on
+    // Chromium, so a per-platform baseline just creates "doesn't
+    // exist" failures when CI runs on a different OS than the dev
+    // who generated them. Pixel diff tolerance (maxDiffPixelRatio)
+    // already absorbs minor antialiasing drift.
+    toHaveScreenshot: {
+      pathTemplate: '{testFileDir}/{testFileName}-snapshots/{arg}{ext}',
+    },
+  },
 
   use: {
     baseURL: process.env.BASE_URL || 'http://localhost:4173',
