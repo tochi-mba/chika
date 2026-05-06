@@ -21,13 +21,27 @@
   <header class="header">
     <nav class="nav" aria-label="Primary">
       <a href="#" class="brand" aria-label="Chika home">
+        <!--
+          Each petal is wrapped in its own <g> that carries the
+          120°-spaced position rotation. The CSS thinking animation
+          targets the inner <path>'s transform (rotateY around its own
+          fill-box) so the per-leaf gesture doesn't clobber the
+          per-leaf position. Ported from mark-mock.html (the
+          ``.bloom.s-thinking`` reference).
+        -->
         <svg class="brand-mark" viewBox="-60 -60 120 120" aria-hidden="true">
-          <g stroke="currentColor" stroke-width="3.4" fill="none" stroke-linecap="round">
-            <path class="leaf leaf-1" d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z"/>
-            <path class="leaf leaf-2" d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z" transform="rotate(120)"/>
-            <path class="leaf leaf-3" d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z" transform="rotate(240)"/>
+          <g class="petals" stroke="currentColor" stroke-width="3.4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <g class="leaf-wrap leaf-wrap-1" transform="rotate(0)">
+              <path class="leaf leaf-1" d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z"/>
+            </g>
+            <g class="leaf-wrap leaf-wrap-2" transform="rotate(120)">
+              <path class="leaf leaf-2" d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z"/>
+            </g>
+            <g class="leaf-wrap leaf-wrap-3" transform="rotate(240)">
+              <path class="leaf leaf-3" d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z"/>
+            </g>
           </g>
-          <circle r="3.2" fill="currentColor"/>
+          <circle class="hub-dot" r="3.2" fill="currentColor"/>
         </svg>
         <span class="brand-text">chika</span>
       </a>
