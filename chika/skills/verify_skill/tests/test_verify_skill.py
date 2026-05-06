@@ -72,11 +72,15 @@ class TestWebFetch:
             result = asyncio.run(web_fetch("http://api.example.com"))
         assert result["content"] == '{"key": "val"}'
 
-    def test_ignored_kwargs_accepted(self):
+    def test_ignored_kwargs_accepted(self, tmp_path):
         resp = _make_mock_response()
         mock_client = _make_async_client(resp)
+        # tmp_path keeps the path platform-portable AND avoids
+        # bandit's hardcoded-/tmp/ warning. The httpx client is
+        # mocked so no file is actually written either way.
+        save_path = tmp_path / "x.html"
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result = asyncio.run(web_fetch("http://example.com", save_path="/tmp/x.html"))
+            result = asyncio.run(web_fetch("http://example.com", save_path=str(save_path)))
         assert result["_source"] == "web_fetch"
 
 
