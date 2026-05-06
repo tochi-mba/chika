@@ -1,2 +1,7 @@
+╭─ thinking ───────────────────────────────────────────────────────────────────────────────────────╮
+│ Let me think about this. The user wants a Netflix clone. That requires real video assets and a r │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 Okay, I'll start with the project setup.
+Okay, I'll start with the project setup.
+
 

@@ -1,0 +1,4 @@
+Here's the fix: use file_replace instead of writing a new file.
+
+The key insight is that editing in place preserves history.
+

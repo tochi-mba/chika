@@ -299,6 +299,21 @@ class Renderer:
                 self.console.print(Markdown(body, code_theme="monokai"))
             except Exception:
                 self.console.print(Text(body, style=THEME.text))
+        elif self._thinking_buf:
+            # Turn ended with thinking but no answer (model timeout, hard
+            # cancel, or explicit "thinking only" tool result). Surface
+            # the reasoning block so the user sees what the agent
+            # got to before bailing — otherwise the turn looks blank.
+            body = "".join(self._thinking_buf).rstrip()
+            if body:
+                self._print_block(Panel(
+                    Text(body, style=THEME.thinking),
+                    title="thinking (no answer)",
+                    title_align="left",
+                    border_style=THEME.dim,
+                    padding=(0, 1),
+                    expand=False,
+                ))
         # Pet returns to idle for the post-turn frame committed to scrollback.
         if self._pet_state not in ("celebrate", "sad"):
             self._pet_state = "idle"
@@ -661,10 +676,24 @@ class Renderer:
             self._live.update(self._render_view())
 
     def _on_thinking_end(self, _event: dict) -> None:
-        # Commit the thinking text to scrollback — close the live, reopen
-        # so subsequent answer/tool output starts beneath the thinking panel.
+        # Commit the thinking text to scrollback BEFORE clearing the
+        # buffer — the rich.Live region runs in transient mode, so its
+        # last frame is erased on stop. Without an explicit print here
+        # the panel disappears as soon as the next phase begins, and a
+        # turn that ends with thinking-only (model timeout, hard cancel)
+        # leaves no visible record at all.
         if self._phase == "thinking":
+            body = "".join(self._thinking_buf).rstrip()
             self._stop_live()
+            if body:
+                self.console.print(Panel(
+                    Text(body, style=THEME.thinking),
+                    title="thinking",
+                    title_align="left",
+                    border_style=THEME.dim,
+                    padding=(0, 1),
+                    expand=False,
+                ))
             self._thinking_buf = []
             self._phase = "idle"
             self._ensure_live(self._render_view())

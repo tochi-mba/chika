@@ -45,22 +45,6 @@ _BASELINES = Path(__file__).parent / "cli_baselines"
 _BASELINES.mkdir(exist_ok=True)
 
 
-# Baselines that are intentionally silent in the renderer. Each entry
-# documents the reason — keep this list short. Anything else with an
-# empty/whitespace baseline file fails ``test_no_empty_baselines``.
-_INTENTIONAL_SILENT = {
-    "empty_token_stream":   "no tokens emitted, just a `done` — nothing to render",
-    "token_streaming":      "rich Live region absorbs streaming tokens",
-    "tokens_no_space":      "rich Live region absorbs streaming tokens",
-    "token_emoji":          "rich Live region absorbs streaming tokens",
-    "token_with_list":      "rich Live region absorbs streaming tokens",
-    "token_with_link":      "rich Live region absorbs streaming tokens",
-    "token_code_block":     "rich Live region absorbs streaming tokens",
-    "markdown_styled_tokens": "rich Live region absorbs streaming tokens",
-    "thinking_only":        "thinking has no answer to flush; only header line",
-}
-
-
 def _render_events(events: list[dict], *, width: int = 100) -> str:
     """Drive a fresh Renderer with ``events`` and return captured text.
 
@@ -83,8 +67,14 @@ def _render_events(events: list[dict], *, width: int = 100) -> str:
     renderer = Renderer(console=console, show_thinking=True)
     for event in events:
         renderer.handle(event)
-    # Stop any in-progress Live region so the final frame is committed.
-    renderer._stop_live()  # type: ignore[attr-defined]
+    # ``end_turn`` is what the live CLI calls at end-of-turn — it commits
+    # buffered streaming tokens to scrollback (where ``export_text``
+    # picks them up) and stops the rich.Live region. Without this,
+    # token streams never make it into the captured text because Live
+    # is configured ``transient=True`` (its last frame is erased on
+    # stop). This was masking real renderer regressions: before the
+    # fix, every streaming-tokens baseline was empty.
+    renderer.end_turn()
     return console.export_text(clear=False)
 
 
@@ -835,12 +825,6 @@ def test_tool_call_with_none_result():
     _compare_or_update("tool_none_result", _render_events(events))
 
 
-def test_empty_token_stream():
-    """A done event with no preceding tokens just commits a blank line."""
-    events = [{"type": "done"}]
-    _compare_or_update("empty_token_stream", _render_events(events))
-
-
 def test_thinking_only_no_answer():
     """Thinking content without any subsequent token still renders."""
     events = [
@@ -1129,10 +1113,11 @@ def test_no_empty_baselines():
     """CI guard — fail if any baseline file is empty or pure whitespace
     (and not on the documented intentional-silence allowlist).
 
-    An empty baseline almost always means the renderer doesn't handle
-    that event type at all, so the agent's output is invisible to the
-    user. We prefer that to be a deliberate decision (added to
-    ``_INTENTIONAL_SILENT`` with a reason) rather than a silent gap.
+    An empty baseline means the renderer didn't surface anything for
+    that event type — the agent's output was invisible to the user.
+    Every event MUST produce visible UI: add an ``_on_<event_type>``
+    handler in ``chika/_cli/renderer.py`` (or extend ``end_turn`` to
+    flush whatever the new event leaves behind) and re-baseline.
     """
     offenders: list[tuple[str, int]] = []
     for path in sorted(_BASELINES.glob("*.txt")):
@@ -1141,19 +1126,14 @@ def test_no_empty_baselines():
         non_ws = "".join(text.split())
         if len(non_ws) >= 4:
             continue
-        if name in _INTENTIONAL_SILENT:
-            continue
         offenders.append((name, len(non_ws)))
 
     assert not offenders, (
-        "CLI baseline file(s) are empty or near-empty and NOT on the "
-        "intentional-silence allowlist:\n"
+        "CLI baseline file(s) are empty or near-empty:\n"
         + "\n".join(f"  - {name} ({n} non-ws chars)" for name, n in offenders)
-        + "\n\nFix options:\n"
-        "  1. The renderer should produce visible output for this event "
-        "— add an _on_<event_type> handler in chika/_cli/renderer.py.\n"
-        "  2. The silence is intentional — add the baseline name to "
-        "``_INTENTIONAL_SILENT`` in this file with a comment explaining why."
+        + "\n\nFix: add an `_on_<event_type>` handler in "
+        "``chika/_cli/renderer.py`` (or extend ``end_turn``) so the "
+        "event produces visible output, then regenerate the baseline."
     )
 
 
@@ -1165,21 +1145,11 @@ def test_no_duplicate_baselines_across_files():
     Allowlist exact pairs that are intentionally identical (e.g. two
     tests of disjoint event types both produce empty output).
     """
-    # Pairs whose identical output is documented + intentional. Each
-    # entry is a frozenset({name_a, name_b}). Add to this only with a
-    # comment explaining why the duplication is OK.
+    # Pairs whose identical output is documented + intentional. Empty
+    # by default — every test should produce distinct rendered output.
+    # If a duplicate slips through, fix the test fixture so the two
+    # renderings differ rather than allowlisting the dup here.
     _ALLOWED_DUPES: set[frozenset[str]] = set()
-    # Token-only baselines all produce empty text because rich's Live
-    # region absorbs streaming tokens (see _INTENTIONAL_SILENT). The
-    # files are intentionally allowed to be identical with each other.
-    _silent_token_tests = {
-        n for n in _INTENTIONAL_SILENT
-        if "token" in n or n == "empty_token_stream"
-    }
-    for a in _silent_token_tests:
-        for b in _silent_token_tests:
-            if a < b:
-                _ALLOWED_DUPES.add(frozenset({a, b}))
 
     by_content: dict[str, list[str]] = {}
     for path in sorted(_BASELINES.glob("*.txt")):
@@ -1277,25 +1247,6 @@ def _check_no_duplicate_binaries(
     )
 
 
-def test_intentional_silent_entries_actually_silent():
-    """Sanity: every name in ``_INTENTIONAL_SILENT`` should have a
-    matching baseline file AND that file should actually be near-empty.
-    Catches stale entries that point at no-longer-existing baselines.
-    """
-    for name in _INTENTIONAL_SILENT:
-        path = _BASELINES / f"{name}.txt"
-        assert path.exists(), (
-            f"_INTENTIONAL_SILENT lists {name!r} but no baseline file exists. "
-            "Either remove the allowlist entry or add the test."
-        )
-        text = path.read_text(encoding="utf-8")
-        non_ws = "".join(text.split())
-        assert len(non_ws) < 4, (
-            f"_INTENTIONAL_SILENT lists {name!r} as silent but the baseline "
-            f"file has {len(non_ws)} non-whitespace characters. Either the "
-            "renderer started producing output (good — drop the allowlist "
-            "entry) or the file got corrupted."
-        )
 
 
 # ── Additional tool baselines ──────────────────────────────────────────

@@ -47,7 +47,7 @@ jobs:
             --cov=chika --cov=api \
             --cov-report=term-missing \
             --cov-report=xml \
-            --cov-fail-under=60
+            --cov-fail-under=75
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
