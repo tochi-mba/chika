@@ -139,6 +139,32 @@ share the same `@keyframes` definitions. The CLI doesn't carry per-leaf
 animations (terminal grid resolution is too coarse); it uses the inline
 state-row indicator instead (see ADR-28).
 
+## Install / update / doctor CLI
+
+Three argv subcommands sit in front of the REPL — they exit before
+booting the engine, so they work even on a half-broken install:
+
+| Command                  | Purpose                                                     |
+|--------------------------|-------------------------------------------------------------|
+| `chika install-extension`| Copy the bundled extension to `~/.chika/extension/` and open `chrome://extensions/`. Re-run after every release. |
+| `chika update`           | `git pull --ff-only` + `pip install -e . --upgrade --no-deps` for clone installs; `pip install --upgrade chika` for pip installs. |
+| `chika update --check`   | Peek without applying. Prints `available`, `up_to_date`, or the failure reason (`offline`, `rate_limited`, `ci_red`, `not_on_main`, `working_tree_dirty`, …). |
+| `chika doctor`           | Verify the install (Python ≥3.11, every required import, extension intact, frontend built, `.env` present, `data/` writable, console script on PATH). Exit code 1 on `error`, 0 on `ok`/`warn`. |
+
+The same actions are slash commands inside the REPL: `/install-extension`, `/update`, `/update --check`, `/doctor`, `/auto-update [on|off]`.
+
+**Auto-update on startup.** When `auto_update == "on"` (the default — see `data/settings.json`), `_run_rich` spawns a daemon thread that runs `chika._cli.update.auto_update_on_startup`. It hits the GitHub API once per hour (throttled via `~/.chika/update_state.json`), and only auto-applies when **all** these are true:
+
+- The user is on `main` or `master` (not a feature branch — `git pull --ff-only` would pull the wrong ref).
+- The working tree is clean (no `git status --porcelain` output).
+- A newer commit exists on upstream main.
+- Every check-run on that commit has `status=completed` AND `conclusion ∈ {success, skipped, neutral}`.
+- We haven't already auto-applied this SHA (state file).
+
+Any failure → notice only, no apply. The full rationale is ADR-29.
+
+**When you add a new runtime dep**, update both `pyproject.toml` *and* `requirements.txt` and add the import to `chika._cli.doctor.REQUIRED_IMPORTS`. The `test_install_chika.py::test_requirements_txt_mirrors_pyproject_runtime` test will fail otherwise. Same goes for adding a top-level runtime file in `extension/` — list it in `chika._cli.install_extension._RUNTIME_TOP_LEVEL_FILES` (or its dir in `_RUNTIME_DIRS`), or `chika install-extension` will ship a broken extension.
+
 ## Visual snapshot baselines (Playwright)
 
 Visual baselines under `frontend/e2e/*-snapshots/` and

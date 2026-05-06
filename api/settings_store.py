@@ -43,6 +43,7 @@ _VALID_PERMISSION = {"ask", "skip"}
 _VALID_PET_SPEECH = {"on", "off"}
 _VALID_AUTO_CONTINUE = {"on", "off"}
 _VALID_STATE_VERBS = {"on", "off"}
+_VALID_AUTO_UPDATE = {"on", "off"}
 
 # Defaults for the pet companion. Each profile picks its own pet (handled by
 # ProfileManager); these settings control whether the pet says LLM-generated
@@ -70,6 +71,17 @@ _AUTO_CONTINUE_DEFAULTS = {
 _STATE_DEFAULTS = {
     "state_verbs":        "on",
     "state_verbs_tokens": 80,
+}
+
+# Auto-update: on startup, the CLI does a fire-and-forget check
+# against the upstream remote (GitHub for git clones, PyPI for pip
+# installs). When ``auto_update == "on"`` AND the new commit's CI is
+# green, we silently apply the update (``git pull`` + editable
+# refresh) and surface a one-line "restart to apply" notice. We never
+# auto-roll the user onto a red commit, and the network check is
+# throttled to once an hour to respect GitHub's unauthed rate limit.
+_AUTO_UPDATE_DEFAULTS = {
+    "auto_update": "on",
 }
 
 # ── Category definitions ──────────────────────────────────────────────────────
@@ -174,6 +186,10 @@ def init(defaults: dict) -> None:
         if k not in _settings:
             _settings[k] = v
             changed = True
+    for k, v in _AUTO_UPDATE_DEFAULTS.items():
+        if k not in _settings:
+            _settings[k] = v
+            changed = True
     if changed:
         _save()
 
@@ -269,6 +285,14 @@ def update(patch: dict) -> dict:
         if not isinstance(val, int) or val < 16 or val > 200:
             raise ValueError("state_verbs_tokens must be an int in [16, 200]")
         _settings["state_verbs_tokens"] = val
+
+    if "auto_update" in patch:
+        val = patch["auto_update"]
+        if val not in _VALID_AUTO_UPDATE:
+            raise ValueError(
+                f"Invalid auto_update: {val!r}. Use 'on' or 'off'."
+            )
+        _settings["auto_update"] = val
 
     _save()
     return dict(_settings)

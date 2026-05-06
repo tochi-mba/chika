@@ -861,6 +861,104 @@ def _cmd_kill(ctx: CommandContext, args: list[str]) -> None:
         ))
 
 
+# ── /install-extension ────────────────────────────────────────────────────
+
+
+def _cmd_install_extension(ctx: CommandContext, _args: list[str]) -> None:
+    """Copy the bundled browser extension to ``~/.chika/extension/`` and
+    open ``chrome://extensions/`` so the user can ``Load unpacked``."""
+    from chika._cli.install_extension import install_extension
+    try:
+        install_extension(console=ctx.console)
+    except FileNotFoundError as exc:
+        ctx.console.print(Text(f"  · {exc}", style=THEME.error))
+    except Exception as exc:
+        ctx.console.print(Text(
+            f"  · install-extension failed: {exc}", style=THEME.error,
+        ))
+
+
+# ── /update ───────────────────────────────────────────────────────────────
+
+
+def _cmd_update(ctx: CommandContext, args: list[str]) -> None:
+    """Pull the latest version of Chika.
+
+    /update              — apply the update right now
+    /update --check      — show whether an update is available, don't apply
+    """
+    from chika._cli import update as upd
+
+    if args and args[0] in ("--check", "-c", "check"):
+        info = upd.check_for_updates()
+        cur, lat = info.current, info.latest
+        if info.available:
+            line = Text("  · ", style=THEME.muted)
+            line.append("update available", style=f"bold {THEME.accent}")
+            line.append(f": {cur} → {lat}", style=THEME.text)
+            if not info.ci_green:
+                line.append(
+                    "  (ci not green — auto-update will skip)",
+                    style=THEME.warn,
+                )
+            ctx.console.print(line)
+        elif info.reason == "up_to_date":
+            ctx.console.print(Text(
+                f"  · already up to date  ({cur})", style=THEME.success,
+            ))
+        else:
+            ctx.console.print(Text(
+                f"  · couldn't determine update status ({info.reason})",
+                style=THEME.muted,
+            ))
+        return
+
+    upd.update_chika(console=ctx.console)
+
+
+# ── /auto-update ──────────────────────────────────────────────────────────
+
+
+def _cmd_auto_update(ctx: CommandContext, args: list[str]) -> None:
+    """Show or toggle the auto-update setting.
+
+    /auto-update            — show current
+    /auto-update on|off     — toggle
+    """
+    if not args:
+        cur = settings_store.get("auto_update", "on")
+        ctx.console.print(Text(
+            f"  auto-update: {cur}", style=THEME.text,
+        ))
+        ctx.console.print(Text(
+            "  on startup, Chika checks the upstream remote and "
+            "auto-applies updates whose CI is green.",
+            style=THEME.dim,
+        ))
+        ctx.console.print(Text(
+            "  /auto-update on|off",
+            style=THEME.dim,
+        ))
+        return
+    val = args[0].lower()
+    if val not in ("on", "off"):
+        ctx.console.print(Text("  /auto-update on|off", style=THEME.error))
+        return
+    settings_store.update({"auto_update": val})
+    ctx.console.print(Text(
+        f"  · auto-update → {val}", style=THEME.success,
+    ))
+
+
+# ── /doctor ───────────────────────────────────────────────────────────────
+
+
+def _cmd_doctor(ctx: CommandContext, _args: list[str]) -> None:
+    """Run install integrity checks (Python, deps, extension, frontend, .env)."""
+    from chika._cli.doctor import run_doctor
+    run_doctor(console=ctx.console)
+
+
 def _cmd_killall(ctx: CommandContext, _args: list[str]) -> None:
     """Kill every running background process."""
     from chika.tools.shell_tool import ProcessRegistry
@@ -955,6 +1053,20 @@ def _register_all() -> None:
     register(Command("killall",
                      "kill every running background shell",
                      _cmd_killall, ("kill-all",)))
+    register(Command("install-extension",
+                     "copy the browser extension to ~/.chika and open Chrome",
+                     _cmd_install_extension, ("install-ext",)))
+    register(Command("update",
+                     "pull the latest Chika (or --check to peek)",
+                     _cmd_update,
+                     args_hint="[--check]"))
+    register(Command("auto-update",
+                     "toggle the on-startup auto-update",
+                     _cmd_auto_update, ("autoupdate",),
+                     args_hint="[on|off]"))
+    register(Command("doctor",
+                     "verify the install (deps, extension, .env, etc.)",
+                     _cmd_doctor))
 
 
 _register_all()

@@ -6,5 +6,6 @@
   "pet_speech": "off",
   "pet_speech_tokens": 40,
   "state_verbs": "on",
-  "state_verbs_tokens": 80
+  "state_verbs_tokens": 80,
+  "auto_update": "on"
 }

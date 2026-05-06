@@ -70,10 +70,35 @@ def _enable_utf8_stdout() -> None:
             pass
 
 
-def cli() -> None:
-    """Entry point for the ``chika`` console script."""
+def cli(argv: list[str] | None = None) -> None:
+    """Entry point for the ``chika`` console script.
+
+    Without args (or with unrecognised args) drops into the REPL.
+    Recognised one-shot subcommands:
+
+        chika install-extension     — install the browser extension and
+                                      open chrome://extensions/, then exit
+        chika update                — pull the latest Chika and refresh
+                                      the editable install
+        chika update --check        — report whether an update is available
+                                      without applying it
+        chika doctor                — verify the install is healthy and
+                                      exit non-zero on broken environments
+    """
     _enable_utf8_stdout()
     _ensure_root_on_path()
+
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] in ("install-extension", "install-ext"):
+        _run_install_extension()
+        return
+    if args and args[0] == "update":
+        _run_update_subcommand(args[1:])
+        return
+    if args and args[0] == "doctor":
+        _run_doctor_subcommand()
+        return
+
     if not _have_rich():
         from chika._cli.fallback import run_plain
         print(
@@ -84,6 +109,127 @@ def cli() -> None:
         return
 
     asyncio.run(_run_rich())
+
+
+def _run_install_extension() -> None:
+    """One-shot ``chika install-extension`` handler.
+
+    Renders the install panel via rich when available; falls back to
+    plain ``print`` so users without rich still get clear next-steps.
+    """
+    from chika._cli.install_extension import (
+        CHROME_EXTENSIONS_URL,
+        install_extension,
+    )
+
+    if _have_rich():
+        from rich.console import Console
+        console = Console(highlight=False, soft_wrap=True)
+        try:
+            install_extension(console=console)
+        except FileNotFoundError as exc:
+            console.print(f"chika: {exc}")
+            sys.exit(1)
+        return
+
+    try:
+        dest = install_extension(console=None)
+    except FileNotFoundError as exc:
+        print(f"chika: {exc}")
+        sys.exit(1)
+        return
+    print(f"chika: extension installed to {dest}")
+    print(f"chika: open {CHROME_EXTENSIONS_URL}, toggle Developer mode,")
+    print("       click 'Load unpacked', then select the folder above.")
+
+
+def _run_update_subcommand(args: list[str]) -> None:
+    """``chika update [--check]`` handler."""
+    from chika._cli import update as upd
+
+    check_only = bool(args) and args[0] in ("--check", "-c", "check")
+
+    if _have_rich():
+        from rich.console import Console
+        from rich.text import Text
+
+        console = Console(highlight=False, soft_wrap=True)
+        if check_only:
+            info = upd.check_for_updates()
+            cur, lat = info.current, info.latest
+            if info.available:
+                line = Text("update available", style="bold")
+                line.append(f": {cur} → {lat}")
+                if not info.ci_green:
+                    line.append("  (ci not green — auto-update will skip)")
+                console.print(line)
+                return
+            if info.reason == "up_to_date":
+                console.print(Text(f"already up to date  ({cur})"))
+                return
+            console.print(Text(f"couldn't determine update status ({info.reason})"))
+            return
+        result = upd.update_chika(console=console)
+        if not result.success:
+            sys.exit(1)
+        return
+
+    # Plain-mode fallback (no rich)
+    if check_only:
+        info = upd.check_for_updates()
+        if info.available:
+            print(f"chika: update available {info.current} → {info.latest}")
+            if not info.ci_green:
+                print("chika: ci not green — auto-update would skip")
+        elif info.reason == "up_to_date":
+            print(f"chika: already up to date ({info.current})")
+        else:
+            print(f"chika: couldn't determine update status ({info.reason})")
+        return
+    result = upd.update_chika(console=None)
+    print(f"chika: {result.message}")
+    if result.restart_required:
+        print("chika: restart Chika to load the new code.")
+    if not result.success:
+        sys.exit(1)
+
+
+def _start_auto_update_thread(console) -> None:
+    """Kick off a background thread that runs the upstream update check.
+
+    Errors are swallowed at the boundary — a broken update check must
+    never crash the REPL. The check itself respects an hour-long
+    throttle (see ``chika._cli.update``) so back-to-back chika
+    invocations don't burn through GitHub's unauthed rate limit.
+    """
+    import threading
+
+    def _worker():
+        try:
+            from chika._cli.update import auto_update_on_startup
+            auto_update_on_startup(console=console)
+        except Exception:
+            pass
+
+    threading.Thread(
+        target=_worker, name="chika-auto-update", daemon=True,
+    ).start()
+
+
+def _run_doctor_subcommand() -> None:
+    """``chika doctor`` handler — exit non-zero on errors."""
+    from chika._cli.doctor import run_doctor
+
+    if _have_rich():
+        from rich.console import Console
+        console = Console(highlight=False, soft_wrap=True)
+        report = run_doctor(console=console)
+    else:
+        report = run_doctor(console=None)
+        for c in report.checks:
+            glyph = {"ok": "[ok]", "warn": "[warn]", "error": "[error]"}[c.severity]
+            print(f"{glyph} {c.name}  {c.detail}")
+    sys.exit(report.exit_code)
 
 
 # ── Rich REPL implementation ──────────────────────────────────────────────
@@ -114,6 +260,14 @@ async def _run_rich() -> None:
     # profile (mirrors the frontend / extension where the brand renders
     # before the gate, not after).
     render_banner(console, version=_chika_version(), provider=cfg.provider, model=cfg.model)
+
+    # Fire-and-forget background update check. Never blocks startup —
+    # if the network is down, GitHub is rate-limiting, or anything
+    # else fails, the function logs the reason in update_state.json
+    # and we move on. When auto_update is "on" and upstream CI is
+    # green it silently applies the update and prints a single-line
+    # notice; the user just needs to restart to pick up the new code.
+    _start_auto_update_thread(console)
 
     # Profile gate — never default-pick. Forces the user to identify
     # themselves and authenticate when their profile has a password.

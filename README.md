@@ -33,21 +33,51 @@ Then open **http://localhost:8000**
 
 The extension gives Chika hands in your browser — it can read tabs, navigate, screenshot, click, and monitor changes.
 
-**Load it once, works forever:**
+**One-command install:**
 
-| Step | Action |
-|---|---|
-| 1 | Open Chrome and go to **`chrome://extensions`** |
-| 2 | Enable **Developer mode** (toggle, top-right corner) |
-| 3 | Click **Load unpacked** |
-| 4 | Select the **`extension/`** folder inside the cloned repo |
-| 5 | Click the Chika icon in your toolbar → **Options** |
-| 6 | Server URL: **`http://localhost:8000`** (pre-filled) |
-| 7 | Click **Test connection** — should show ✓ Connected |
+```bash
+chika install-extension
+```
 
-> **Edge:** Same steps at `edge://extensions`
+That copies the bundled extension to `~/.chika/extension/` and opens `chrome://extensions/` for you. From there:
+
+1. Toggle **Developer mode** (top-right)
+2. Click **Load unpacked**
+3. Select the folder it printed (`~/.chika/extension/`)
+
+Re-run `chika install-extension` any time after an update to refresh your installed copy.
+
+> **Edge:** same flow at `edge://extensions`
 >
-> **Firefox:** `about:debugging` → This Firefox → Load Temporary Add-on → select `extension/manifest.json`
+> **Firefox:** `about:debugging` → This Firefox → Load Temporary Add-on → select `~/.chika/extension/manifest.json`
+
+---
+
+## Updating Chika
+
+Chika **auto-updates on startup** when its CI is green:
+
+- On every CLI launch, a background thread checks the upstream remote (GitHub for git clones, PyPI for pip installs)
+- If a newer commit exists *and* its CI is passing, Chika silently runs `git pull --ff-only && pip install -e . --upgrade --no-deps` and prints `· auto-updated abc1234 → def5678 (restart Chika to load the new code)`
+- The check is throttled to once an hour and writes its state to `~/.chika/update_state.json`
+- **Auto-update will NOT run** if you're on a feature branch, your working tree is dirty, the upstream CI is red/in-progress, or the network is unreachable — fail-safe by design
+
+Manual control:
+
+```bash
+chika update          # pull + refresh now (regardless of CI)
+chika update --check  # peek; don't apply
+chika doctor          # verify the install (Python, deps, extension, .env, …)
+```
+
+Inside the REPL, the same actions are slash commands: `/update`, `/update --check`, `/auto-update on|off`, `/doctor`.
+
+To opt out of the auto-update behaviour:
+
+```bash
+echo '{"auto_update": "off"}' >> data/settings.json   # or:
+chika  # then: /auto-update off
+```
 
 Once connected, Chika can see everything in your browser. Try:
 

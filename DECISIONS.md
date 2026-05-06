@@ -811,3 +811,70 @@ So in practice the indicator fills the dead air between user input and the first
 - *Cost*: one extra ~80-token LLM call per turn. With Anthropic Sonnet-4 pricing this is sub-penny per turn; users on tight budgets can flip `state_verbs` off and pay nothing for the feature.
 - *Tradeoff*: if the LLM call is slow, the contextual verbs may not arrive before the user has already seen the static defaults. We accept this — the swap is seamless and the static defaults are reasonable.
 - *Future*: cache the verb list per (user-message-hash) so re-asks reuse the same verbs without re-generating. Probably not worth the cache layer until users complain.
+
+---
+
+## ADR-29: One-command install + auto-update gated on upstream CI
+
+**Status:** Implemented (`chika/_cli/install_extension.py`, `chika/_cli/update.py`, `chika/_cli/doctor.py`, `chika/_cli/app.py`, `chika/_cli/commands.py`, `api/settings_store.py`)
+
+**Context**
+
+Two install pain-points kept showing up:
+
+1. **Loading the browser extension**: users had to find the cloned repo's `extension/` directory by hand, navigate Chrome's settings, toggle dev mode, click Load unpacked. We can't actually install Chrome extensions programmatically — Chrome MV3 has forbidden that since 2014, only the Web Store and "Load unpacked" remain — but we *can* automate everything except the final mouse clicks.
+2. **Updating Chika**: there was no obvious update path. `git pull` worked for clone installs, `pip install --upgrade chika` for pip installs, but nothing for someone who didn't know which they had. And nobody actually thinks to update — the new feature ships in main, the user keeps running last week's bits.
+
+**Decision**
+
+Three new entry points, each available both as an argv subcommand (`chika <name>`) and a slash command (`/<name>`):
+
+| Command            | Argv                       | Slash                       |
+|--------------------|----------------------------|-----------------------------|
+| install-extension  | `chika install-extension`  | `/install-extension`        |
+| update             | `chika update [--check]`   | `/update [--check]`         |
+| doctor             | `chika doctor`             | `/doctor`                   |
+| auto-update toggle | —                          | `/auto-update [on\|off]`    |
+
+**install-extension** copies the runtime subset of `extension/` (manifest + `popup/` + `lib/` + `content/` + `options/` + `icons/*.png`, excluding `node_modules/`, `e2e/`, `test-results/`, `package*.json`, `playwright.config.js`, `_render.*`, `generate_icons.js`) to `~/.chika/extension/`, opens `chrome://extensions/` via `webbrowser.open`, and prints a 3-step instruction Panel. Wipe-and-recopy on each run so a release that renames a file doesn't leave the old one behind.
+
+**update** detects install kind:
+- `git_clone` (`.git/` present) → `git pull --ff-only` + `pip install -e . --upgrade --no-deps`
+- `pip_pypi` (importable + has metadata, no `.git/`) → `pip install --upgrade chika`
+- `unknown` → print the manual command for both paths
+
+**Auto-update on startup** is the most opinionated piece. When `auto_update == "on"` (default), the CLI fires a background thread on REPL boot that:
+
+1. Hits the GitHub API for the latest commit on `main` plus its check-runs status (or PyPI's JSON API for pip installs).
+2. If a newer SHA exists *and* CI is green *and* the user is on `main`/`master` *and* the working tree is clean *and* we haven't already auto-applied this SHA, run `update_chika` silently and print one line: `· auto-updated abc1234 → def5678 (restart Chika to load the new code)`.
+3. Persist `last_check_at`, `last_remote_sha`, `last_applied_sha` to `~/.chika/update_state.json`. Throttle network checks to once per hour (GitHub's unauthed REST is 60 req/h).
+4. On any failure (offline, rate-limited, dirty tree, feature branch, CI red, non-GitHub remote), record the reason in state and surface a `· update available` notice if there's a new SHA we just can't auto-apply.
+
+The CI gate is the heart of this design. We never auto-roll the user onto a commit whose checks are still running, failing, cancelled, or absent — `_check_runs_all_green` requires every check-run to have `status=completed` and `conclusion ∈ {success, skipped, neutral}`. No CI configured at all → fail-safe, treat as not green.
+
+**doctor** prints a report with one row per check (Python version, every required import, bundled extension intact, frontend built, `.env` present, `data/` writable, console script on PATH). Returns severity `ok | warn | error`; the argv subcommand exits with code 0 for ok/warn and 1 for error so install scripts and CI can gate on it.
+
+**Why all four guards on auto-update**
+
+- *CI gate*: don't roll users onto broken main.
+- *Branch gate*: a `git pull --ff-only` on a feature branch would pull `origin/feature/x`, which has no relation to upstream main. Skip.
+- *Dirty-tree gate*: pip install -e is fine over a dirty tree, but a `git pull` could conflict with WIP. Belt-and-braces.
+- *Throttle*: two parallel chika launches could each fire a network call; the throttle absorbs that. GitHub's rate limit absolutely will bite users who don't have this.
+
+**Why no auto-restart**
+
+After update, the in-memory Python is still running last commit's bytecode. Restarting requires either re-execing or relaunching the shell — both fragile across IDEs, Docker, ssh sessions, prompt_toolkit's terminal grabs, etc. We tell the user "restart Chika" and exit. That's a worse UX in the abstract but a much more reliable one in practice.
+
+**Test surface**
+
+- `tests/test_install_extension.py` — 43 tests on the copy semantics, exclusions, idempotency, browser open, slash + argv commands, plus a real-extension smoke test that asserts every path the manifest references actually lands on disk.
+- `tests/test_update.py` — 86 tests covering URL parsing, install-kind detection, every CI conclusion the GitHub API returns, the dirty-tree and feature-branch guards, throttle logic, state file persistence under failure, and the slash + argv commands.
+- `tests/test_doctor.py` — 32 tests on each individual check + the orchestration + the cross-check that REQUIRED_IMPORTS doesn't drift from pyproject.toml's dependencies and `MIN_PYTHON` matches `requires-python`.
+- `tests/test_install_chika.py` — 34 install-structure assertions: console script registered, `requirements.txt` mirrors pyproject runtime deps, every path the Chrome manifest references is on disk, every settings init key is seeded, and the doctor itself runs clean against this repo.
+
+**Consequences**
+
+- A clean checkout is now `git clone … && python install.py && chika install-extension` and the user is fully set up.
+- Users no longer fall behind silently — Chika updates itself when it's safe to.
+- *Tradeoff*: one extra GitHub API call per chika launch (throttled to ~24/day at most). If Chika ever goes viral we'll hit GitHub's anonymous rate limit; the path forward is GitHub App auth or moving the SHA + CI status check to a tiny CDN-cached JSON file we publish from CI.
+- *Tradeoff*: PyPI publishing isn't gated on CI green at the registry level — a maintainer could push a broken release. We treat "newer version exists on PyPI" as `ci_green=True` because the publish step itself is in our CI workflow. If we ever change that, this assumption needs revisiting.
