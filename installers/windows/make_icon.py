@@ -92,12 +92,19 @@ def main() -> int:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else here / "chika.ico"
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    # Render each size from its own polygon math (sharper at 16/24px
+    # than letting Pillow downscale a 256px master), then save all
+    # of them as one multi-resolution ICO. The `sizes=` kwarg tells
+    # Pillow's ICO encoder which entries to write; we hand it the
+    # pre-rendered images via the largest as the base and the rest
+    # as `append_images` so each size gets its own crisp render.
     images = [_render_size(s) for s in SIZES]
-    images[0].save(
+    largest = images[-1]
+    largest.save(
         out,
         format="ICO",
         sizes=[(s, s) for s in SIZES],
-        append_images=images[1:],
+        append_images=images[:-1],
     )
     print(f"wrote {out} ({len(SIZES)} sizes: {SIZES})")
     return 0

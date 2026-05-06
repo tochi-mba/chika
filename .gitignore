@@ -81,3 +81,9 @@ logs/
 
 # Claude Code local config
 .claude/
+
+# Generated installer assets — chika.ico is rendered from
+# docs/favicon.svg by installers/windows/make_icon.py at build time,
+# so the canonical SVG and the installer icon never drift.
+installers/windows/chika.ico
+installers/dist/
