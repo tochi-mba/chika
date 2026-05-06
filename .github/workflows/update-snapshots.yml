@@ -110,7 +110,25 @@ jobs:
             exit 0
           fi
           git commit -m "chore: regenerate Playwright snapshots on Linux runner"
-          git push
+
+          # The push can race with concurrent commits to main (or to the
+          # PR branch). Rebase-then-retry up to 3 times before failing —
+          # any conflict on baseline files is impossible to merge by
+          # hand anyway, so we always favour our freshly-generated set
+          # via -X theirs.
+          BRANCH="${{ github.event.pull_request.head.ref || github.ref_name }}"
+          for attempt in 1 2 3; do
+            git fetch origin "$BRANCH"
+            git pull --rebase -X theirs origin "$BRANCH" || true
+            if git push origin HEAD:"$BRANCH"; then
+              echo "Pushed baselines on attempt $attempt"
+              exit 0
+            fi
+            echo "Push failed on attempt $attempt, retrying..."
+            sleep 3
+          done
+          echo "::error::Failed to push regenerated baselines after 3 attempts"
+          exit 1
 
       - name: Remove the trigger label
         if: github.event_name == 'pull_request'

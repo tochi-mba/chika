@@ -55,7 +55,7 @@ test.describe('tool event rendering', () => {
   })
 
 
-  test('tool_result on success shows success status dot', async ({ chikaPage }) => {
+  test('tool_result on success shows success status pill', async ({ chikaPage }) => {
     await pushSequence(chikaPage, [
       { type: 'workflow_start', workflow_id: 'wf' },
       { type: 'tool_call', step_id: 's1', tool: 'file_write', args: { path: 'a.txt' } },
@@ -65,15 +65,17 @@ test.describe('tool event rendering', () => {
       },
     ])
     await chikaPage.waitForTimeout(150)
-    // After a result lands the matching tool_call's pending flag is
-    // cleared and a sibling tool_result block renders. Either of those
-    // should carry the success state — locate by class.
-    const successDot = chikaPage.locator('.message-list .tool-block .status-dot.dot-success').first()
-    await expect(successDot).toBeVisible({ timeout: 3000 })
+    // After a result lands the tool_call's pending flag clears and the
+    // status pill flips to .state-success (icon + word "Done"). Locate
+    // by the per-state class on the pill itself — the redesign moved
+    // away from a bare success dot to an icon+label pill.
+    const successPill = chikaPage.locator('.message-list .tool-block .status-pill.state-success').first()
+    await expect(successPill).toBeVisible({ timeout: 3000 })
+    await expect(successPill).toContainText(/done/i)
   })
 
 
-  test('tool_result with error shows error status', async ({ chikaPage }) => {
+  test('tool_result with error shows error status pill', async ({ chikaPage }) => {
     await pushSequence(chikaPage, [
       { type: 'workflow_start', workflow_id: 'wf' },
       { type: 'tool_call', step_id: 's2', tool: 'shell_exec', args: { command: 'oops' } },
@@ -86,11 +88,12 @@ test.describe('tool event rendering', () => {
     await chikaPage.waitForTimeout(150)
     const errBlock = chikaPage.locator('.message-list .tool-block.is-error').first()
     await expect(errBlock).toBeVisible({ timeout: 3000 })
-    await expect(errBlock.locator('.status-dot.dot-error')).toBeVisible()
+    await expect(errBlock.locator('.status-pill.state-error')).toBeVisible()
+    await expect(errBlock.locator('.status-pill.state-error')).toContainText(/error/i)
   })
 
 
-  test('pending tool_call shows the pulsing accent dot + spinner', async ({ chikaPage }) => {
+  test('pending tool_call shows the pulsing accent dot', async ({ chikaPage }) => {
     await pushSequence(chikaPage, [
       { type: 'workflow_start', workflow_id: 'wf' },
       {
@@ -100,10 +103,13 @@ test.describe('tool event rendering', () => {
     ])
     // The chat store auto-marks tool_call events `pending: true` when
     // they arrive without a matching tool_result yet. Verify the
-    // pending-state pieces render: pulsing dot + mini spinner.
-    const pendingDot = chikaPage.locator('.message-list .tool-block .status-dot.dot-pending').first()
-    await expect(pendingDot).toBeVisible({ timeout: 3000 })
-    await expect(chikaPage.locator('.message-list .mini-spinner').first()).toBeVisible()
+    // pending-state pill renders: a pulsing dot + the word "Running".
+    // The old standalone .mini-spinner element was folded into the
+    // pulsing dot when the status-pill structure landed.
+    const pendingPill = chikaPage.locator('.message-list .tool-block .status-pill.state-pending').first()
+    await expect(pendingPill).toBeVisible({ timeout: 3000 })
+    await expect(pendingPill).toContainText(/running/i)
+    await expect(pendingPill.locator('.status-dot.dot-pending')).toBeVisible()
   })
 
 

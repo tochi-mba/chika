@@ -44,6 +44,14 @@ html {
   -moz-osx-font-smoothing: grayscale;
 }
 
+html {
+  /* Belt-and-braces with body's overflow-x:hidden — html itself must
+     also clamp to viewport so document.documentElement.scrollWidth
+     matches clientWidth (the no-horizontal-scroll Playwright assertion
+     measures html, not body). Without this, a single oversized child
+     pushes html.scrollWidth past clientWidth even when body clips. */
+  overflow-x: clip;
+}
 body {
   font-family: var(--font-sans);
   font-size: 16px;
@@ -145,6 +153,11 @@ img, svg { display: block; max-width: 100%; }
   gap: 5px;
   padding: 8px;
   margin: -8px;
+  /* Lift the toggle above any sibling that might intercept hit-tests
+     (the `.nav-links` mobile overlay sits at top:64px below the
+     header but still shares a stacking context with the toggle). */
+  position: relative;
+  z-index: 2;
 }
 .nav-toggle span {
   display: block;
@@ -170,12 +183,20 @@ img, svg { display: block; max-width: 100%; }
     border-top: 1px solid var(--border);
     opacity: 0;
     visibility: hidden;
+    /* pointer-events:none ensures the invisible overlay never
+       intercepts clicks meant for the toggle / hero CTAs underneath
+       it. visibility:hidden alone is not always enough across
+       Chromium versions when transitions are mid-frame. */
+    pointer-events: none;
     transform: translateY(-10px);
-    transition: all var(--duration) var(--ease);
+    transition: opacity var(--duration) var(--ease),
+                visibility var(--duration) var(--ease),
+                transform var(--duration) var(--ease);
   }
   .nav-links.active {
     opacity: 1;
     visibility: visible;
+    pointer-events: auto;
     transform: translateY(0);
   }
   .nav-links a { font-size: 18px; }
@@ -344,9 +365,22 @@ section { position: relative; padding: 100px 0; }
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.8;
+  /* Long monospace command strings (git log args, curl URLs etc.)
+     would otherwise overflow on narrow viewports. Allow horizontal
+     scroll within the terminal mock instead of pushing the whole
+     page wider than the viewport. */
+  overflow-x: auto;
+  min-width: 0;
 }
 
-.term-line { margin-bottom: 8px; }
+.term-line {
+  margin-bottom: 8px;
+  /* Break long single-token strings (URLs, monospace command
+     args without natural break points) so iphone-se doesn't get
+     a 910px scrollWidth on a 321px viewport. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .term-dim { color: var(--text-dim); }
 
 .term-state {

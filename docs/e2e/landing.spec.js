@@ -171,8 +171,14 @@ test('reduced-motion mode disables animations', async ({ page, browser }, testIn
     const el = document.querySelector('.leaf.leaf-1');
     return el ? getComputedStyle(el).animationDuration : '';
   });
-  // ``0s`` or ``0.01ms`` (CSS clamp) — both qualify as effectively off
-  expect(dur).toMatch(/(^0s$|0\.01ms)/);
+  // ``0s`` or ``0.01ms`` (CSS clamp). Different browsers serialise
+  // the same clamped value three different ways:
+  //   - "0s"        (Firefox)
+  //   - "0.01ms"    (some Chromium versions, literal CSS string)
+  //   - "1e-05s"    (Chromium 119+, getComputedStyle normalises ms→s
+  //                  in scientific notation when the value is sub-ms)
+  // All three mean "animation is effectively off."
+  expect(dur).toMatch(/(^0s$|0\.01ms|^1e-05s$)/);
   await context.close();
 });
 
