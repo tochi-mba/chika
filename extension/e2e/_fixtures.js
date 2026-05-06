@@ -24,18 +24,25 @@ function tmpUserDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'chika-ext-'))
 }
 
+// MV3 service workers do not reliably register under Playwright's headless
+// Chromium on Ubuntu CI: `headless: true` causes Playwright to pass
+// `--headless=old`, which boots Chrome without the SW host that MV3 needs,
+// and the popupURL fixture's `waitForEvent('serviceworker')` then times out
+// after 10s for every test. The fix is to run headed and provide a virtual
+// display in CI via `xvfb-run -a`. Devs who don't want Chrome windows
+// popping up locally can opt in to headless with CHIKA_E2E_HEADLESS=1.
+const HEADLESS = process.env.CHIKA_E2E_HEADLESS === '1'
+
 export const test = base.extend({
   context: async ({}, use) => {
     const userDataDir = tmpUserDir()
     const ctx = await chromium.launchPersistentContext(userDataDir, {
-      headless: true,
+      headless: HEADLESS,
       args: [
-        // MV3 extensions don't load in pure headless. Use new headless mode
-        // (chrome 109+) which supports them.
-        '--headless=new',
         `--disable-extensions-except=${EXT_PATH}`,
         `--load-extension=${EXT_PATH}`,
         '--no-sandbox',
+        '--disable-gpu',
       ],
     })
     await use(ctx)

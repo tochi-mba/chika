@@ -140,9 +140,16 @@ jobs:
         working-directory: extension
         run: npx playwright install --with-deps chromium
 
-      - name: Run extension Playwright e2e
+      # MV3 extensions need a real display: headless Chromium doesn't
+      # register the service worker, which makes the popupURL fixture
+      # (waitForEvent('serviceworker')) time out for every test. xvfb
+      # provides a virtual X server so Chrome runs headed.
+      - name: Install xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Run extension Playwright e2e (under xvfb)
         working-directory: extension
-        run: npm run test:e2e
+        run: xvfb-run -a npm run test:e2e
 
       - name: Upload Playwright report
         if: always()

@@ -59,6 +59,11 @@ jobs:
         working-directory: extension
         run: npx playwright install --with-deps chromium
 
+      # The extension suite runs headed (MV3 SWs don't register in
+      # headless Chromium); xvfb gives Chrome a virtual display.
+      - name: Install xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Build the frontend (preview server serves dist/)
         working-directory: frontend
         run: npm run build
@@ -71,9 +76,9 @@ jobs:
         # regenerated, so the next PR-build sees them.
         continue-on-error: true
 
-      - name: Regenerate extension Playwright snapshots
+      - name: Regenerate extension Playwright snapshots (under xvfb)
         working-directory: extension
-        run: npx playwright test --update-snapshots --reporter=line
+        run: xvfb-run -a npx playwright test --update-snapshots --reporter=line
         continue-on-error: true
 
       - name: Commit + push the regenerated baselines
