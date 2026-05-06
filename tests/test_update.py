@@ -850,6 +850,75 @@ def test_check_runs_all_green(payload, expected):
     assert upd._check_runs_all_green(payload) is expected
 
 
+# ── _http_get_json scheme guard ────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://github.com/foo",          # plain http
+        "file:///etc/passwd",              # file scheme — the SSRF case bandit warns about
+        "ftp://example.com/x",
+        "javascript:alert(1)",
+        "://invalid",
+        "",
+        "github.com/foo/bar",              # missing scheme
+    ],
+)
+def test_http_get_json_rejects_non_https_schemes(url):
+    """Defence in depth — even if a future caller passes a tainted URL
+    we refuse anything that isn't ``https://``. Closes the B310 SSRF
+    surface bandit warns about."""
+    with pytest.raises(upd._HttpError) as exc:
+        upd._http_get_json(url, timeout=1.0)
+    assert exc.value.code == "bad_scheme"
+
+
+def test_http_get_json_accepts_https(monkeypatch):
+    """Sanity: an https URL passes the scheme guard and reaches urlopen.
+
+    We mock urlopen so the test doesn't actually go to the network.
+    """
+    from io import BytesIO
+
+    class FakeResp:
+        def __init__(self, body):
+            self._body = body
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return self._body
+
+    captured: list[str] = []
+
+    def fake_urlopen(req, timeout):
+        captured.append(req.full_url)
+        return FakeResp(b'{"ok": true}')
+
+    monkeypatch.setattr(upd.urllib.request, "urlopen", fake_urlopen)
+    out = upd._http_get_json("https://api.github.com/test", timeout=1.0)
+    assert out == {"ok": True}
+    assert captured == ["https://api.github.com/test"]
+
+
+def test_http_get_json_https_case_insensitive(monkeypatch):
+    """``HTTPS://`` should be accepted (RFC says scheme is
+    case-insensitive)."""
+    class FakeResp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{}'
+
+    monkeypatch.setattr(
+        upd.urllib.request, "urlopen",
+        lambda req, timeout: FakeResp(),
+    )
+    # No exception
+    upd._http_get_json("HTTPS://api.github.com/x", timeout=1.0)
+
+
 # ── State file persistence ─────────────────────────────────────────────
 
 
