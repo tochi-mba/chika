@@ -153,6 +153,37 @@ $marker = @{
 } | ConvertTo-Json
 Set-Content -Path "$BuildDir\install_marker.json" -Value $marker -Encoding UTF8
 
+# ── Step 2.5: generate chika.ico from the trefoil SVG ────────────────────
+# chika.iss references SetupIconFile=chika.ico (relative to the .iss).
+# The icon is rendered programmatically from docs/favicon.svg's geometry
+# at every standard Windows size, so the canonical mark and the
+# installer icon never drift.
+
+$IconPath = Join-Path $InstallerDir 'chika.ico'
+$IconScript = Join-Path $InstallerDir 'make_icon.py'
+$IconStale = $true
+if (Test-Path $IconPath) {
+    $iconAge  = (Get-Item $IconPath).LastWriteTime
+    $scriptAge = (Get-Item $IconScript).LastWriteTime
+    if ($iconAge -gt $scriptAge) { $IconStale = $false }
+}
+if ($IconStale) {
+    Write-Host "  · generating chika.ico from trefoil mark..." -ForegroundColor DarkGray
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
+    if (-not $py) { throw "Python not on PATH; required to generate chika.ico" }
+
+    # Pillow is the only dep — install if missing. CI runners may not
+    # have it pre-installed.
+    & $py.Source -c "import PIL" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        & $py.Source -m pip install --quiet --user Pillow
+        if ($LASTEXITCODE -ne 0) { throw "Failed to install Pillow" }
+    }
+    & $py.Source $IconScript $IconPath
+    if ($LASTEXITCODE -ne 0) { throw "Icon generation failed" }
+}
+
 # ── Step 3: run Inno Setup ──────────────────────────────────────────────
 
 if (-not (Test-Path $ISCC)) {
