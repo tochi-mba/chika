@@ -1,4 +1,4 @@
-───────────────────────────────────────────────  wf  ───────────────────────────────────────────────
+──────────────────────────────────────────────  ▲ wf  ──────────────────────────────────────────────
   📚 skill_load  → extremely_long_skill_name_with_underscores
 ╭─ 📚 SKILL.md  extremely_long_skill_name_with_underscores ─╮
 │ path:                                                     │

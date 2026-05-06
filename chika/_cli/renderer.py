@@ -514,8 +514,10 @@ class Renderer:
         if plan_panel is not None:
             parts.append(plan_panel)
 
-        if self.pet is not None:
-            parts.append(self._render_pet_panel())
+        # Pet panel intentionally NOT rendered in the CLI — the pet
+        # was clogging the vertical space inside the Live block. The
+        # pet system still ships in the frontend (PetCompanion.vue);
+        # the CLI surface keeps it minimal: state row + plan + tools.
 
         if not parts:
             parts.append(Text("", style=THEME.dim))
@@ -844,11 +846,13 @@ class Renderer:
     def _on_workflow_start(self, event: dict) -> None:
         name = event.get("name") or event.get("workflow_id") or "workflow"
         self.update_pet_state("working", speech=self._pet_quote("working"))
-        self._print_block(Rule(
-            Text(f" {name} ", style=f"bold {THEME.accent}"),
-            style=THEME.dim,
-            characters="─",
-        ))
+        # Workflow header carries the chika brand: a small trefoil leaf
+        # glyph next to the name. Single ▲ (top leaf) keeps it
+        # readable without crowding the rule.
+        title = Text()
+        title.append(" ▲ ", style=f"bold {THEME.accent}")
+        title.append(f"{name} ", style=f"bold {THEME.accent}")
+        self._print_block(Rule(title, style=THEME.dim, characters="─"))
 
     def _on_workflow_done(self, _event: dict) -> None:
         if self._pet_state != "sad":
@@ -860,9 +864,12 @@ class Renderer:
         step_id = event.get("step_id", "")
         if step_type in ("sequential", "parallel", "pipeline", "fan_out",
                          "conditional", "loop", "map", "retry", "sub_workflow"):
+            # Chevron + step type in muted, id in dim — reads as a
+            # quiet structural marker, not a label.
             line = Text("  ", end="")
-            line.append(f"[{step_type}] ", style=f"bold {THEME.muted}")
-            line.append(step_id, style=THEME.dim)
+            line.append("▸ ", style=THEME.muted)
+            line.append(step_type, style=f"bold {THEME.muted}")
+            line.append(f"  {step_id}", style=THEME.dim)
             self._print_block(line)
 
     # ── Tools ──────────────────────────────────────────────────────────────
@@ -968,15 +975,21 @@ class Renderer:
                     body.append("\n     log: ", style=THEME.dim)
                     body.append(_shorten(str(log_tail), 240), style=THEME.muted)
         else:
-            preview = _fmt_result(result)
-            first, _, rest = preview.partition("\n")
-            body.append(first, style=THEME.text)
-            if rest:
-                # Indent additional lines so they line up under the glyph.
-                rest_text = Text("\n" + "\n".join(
-                    "    " + line for line in rest.splitlines()
-                ), style=THEME.muted)
-                body.append(rest_text)
+            # Per-tool compact summary first; fall back to JSON dump if
+            # no formatter is registered or the formatter declines.
+            from chika._cli import tool_summaries as _summaries
+            summary = _summaries.summarise(tool, result)
+            if summary:
+                body.append(summary, style=THEME.text)
+            else:
+                preview = _fmt_result(result)
+                first, _, rest = preview.partition("\n")
+                body.append(first, style=THEME.text)
+                if rest:
+                    rest_text = Text("\n" + "\n".join(
+                        "    " + line for line in rest.splitlines()
+                    ), style=THEME.muted)
+                    body.append(rest_text)
         if duration_ms:
             body.append(f"  ({duration_ms}ms)", style=THEME.dim)
         self._print_block(body)
@@ -1021,11 +1034,13 @@ class Renderer:
         name = event.get("name", "?")
         var_type = event.get("var_type", "?")
         size = event.get("size_bytes", 0)
+        # Visual hierarchy: chevron + $name in accent + type/size dim.
+        # Reads like a "stored" annotation, not a debug log line.
         line = Text("  ", end="")
-        line.append("$", style=THEME.muted)
-        line.append(name, style=f"bold {THEME.text}")
-        line.append(f" : {var_type} ", style=THEME.dim)
-        line.append(f"({size}B)", style=THEME.muted)
+        line.append("▸ ", style=f"bold {THEME.accent}")
+        line.append(f"${name}", style=f"bold {THEME.text}")
+        line.append(f"  {var_type}", style=THEME.muted)
+        line.append(f" · {size}B", style=THEME.dim)
         self._print_block(line)
 
     def _on_loop_iteration(self, event: dict) -> None:
@@ -1171,9 +1186,12 @@ class Renderer:
 
     def _on_cancelled(self, _event: dict) -> None:
         self._stop_live()
-        self.console.print(Text(
-            f"  {THEME.bullet_glyph} stopped", style=THEME.warn,
-        ))
+        # Filled square = stop, gives the cancel state real weight
+        # rather than a thin bullet that reads like normal output.
+        line = Text("  ", end="")
+        line.append("■ ", style=f"bold {THEME.warn}")
+        line.append("stopped", style=THEME.warn)
+        self.console.print(line)
 
     # ── Approvals / questions ─────────────────────────────────────────────
 
@@ -1183,7 +1201,13 @@ class Renderer:
         # Render as a notice for visibility.
         tool = event.get("tool", "?")
         msg = event.get("message", f"Approve {tool}?")
-        self._print_block(Text(f"  ? {msg}", style=THEME.warn))
+        # Diamond glyph + accent label gives approval prompts visual
+        # weight so the user immediately notices an action is needed.
+        line = Text("  ", end="")
+        line.append("◇ ", style=f"bold {THEME.accent}")
+        line.append("approval  ", style=f"bold {THEME.text}")
+        line.append(msg, style=THEME.muted)
+        self._print_block(line)
 
     # ── Browser / extension events ────────────────────────────────────────
 

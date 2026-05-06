@@ -51,14 +51,36 @@ def _truncate(v: Any, key: str | None = None) -> Any:
     return v
 
 
+class _SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """Rotation that survives Windows file-locking quirks.
+
+    On Windows, ``RotatingFileHandler.rotate()`` calls ``os.rename`` on
+    the open log file, which can fail with ``PermissionError [WinError 32]``
+    when another process (or even a sibling subprocess in the same chika
+    session) holds the file. Stock behaviour spams the user's terminal
+    with traceback every turn. We swallow the rotation error and keep
+    writing to the existing file — losing rotation but not log content.
+    """
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except (PermissionError, OSError):
+            # Reopen the original file so logging can continue.
+            if self.stream:
+                try: self.stream.close()
+                except Exception: pass
+            self.stream = self._open()
+
+
 class _ChikaLogger:
     def __init__(self) -> None:
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        handler = logging.handlers.RotatingFileHandler(
+        handler = _SafeRotatingFileHandler(
             LOG_PATH,
             maxBytes=_MAX_BYTES,
             backupCount=_BACKUP_COUNT,
             encoding="utf-8",
+            delay=True,        # don't open the file until first write
         )
         handler.setFormatter(logging.Formatter("%(message)s"))
         self._logger = logging.getLogger("chika.structured")

@@ -1,1 +1,1 @@
-  [sequential] s1
+  ▸ sequential  s1
