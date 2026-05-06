@@ -68,7 +68,7 @@ test('brand mark renders without broken SVG', async ({ page }) => {
 
 test('hero title is visible above the fold', async ({ page }) => {
   await page.goto('/');
-  const title = page.locator('h1.title');
+  const title = page.locator('h1.hero-title');
   await expect(title).toBeVisible();
   // Above-fold check: bounding box top < viewport height.
   const box = await title.boundingBox();
@@ -113,19 +113,21 @@ test('install cards expose the right OS', async ({ page }) => {
   await expect(page.locator('.install-card[data-os="windows"]')).toBeAttached();
   await expect(page.locator('.install-card[data-os="macos"]')).toBeAttached();
   await expect(page.locator('.install-card[data-os="linux"]')).toBeAttached();
-  // The shell-card variants live next to them
-  await expect(page.locator('.install-card--shell')).toHaveCount(3);
+  // The remaining three cards (universal curl, source, PyPI) carry copy
+  // snippets — verified via the .code-block locator below since they
+  // don't have an OS data-attribute.
+  await expect(page.locator('.install-card .code-block')).toHaveCount(3);
 });
 
 test('settings-can-change-anytime reassurance is visible', async ({ page }) => {
   await page.goto('/');
-  const reassure = page.locator('.reassure').first();
+  const reassure = page.locator('.hero-reassurance').first();
   await expect(reassure).toContainText(/anytime|any time/i);
 });
 
 test('terminal mock renders with state row', async ({ page }) => {
   await page.goto('/');
-  const stateRow = page.locator('.state').first();
+  const stateRow = page.locator('.term-state').first();
   await expect(stateRow).toBeAttached();
   // Verb should cycle through the predefined list.
   const verb = page.locator('#state-verb');
@@ -164,9 +166,9 @@ test('reduced-motion mode disables animations', async ({ page, browser }, testIn
   const p = await context.newPage();
   await mockGithubReleases(p);
   await p.goto('/');
-  // The mark__leaf--1 path's animation should have been neutered.
+  // The .leaf-1 path's animation should have been neutered.
   const dur = await p.evaluate(() => {
-    const el = document.querySelector('.mark__leaf--1 path');
+    const el = document.querySelector('.leaf.leaf-1');
     return el ? getComputedStyle(el).animationDuration : '';
   });
   // ``0s`` or ``0.01ms`` (CSS clamp) — both qualify as effectively off
