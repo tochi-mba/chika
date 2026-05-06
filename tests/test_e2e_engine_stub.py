@@ -366,3 +366,167 @@ async def test_cancel_mid_turn_emits_cancelled_then_done(engine):
         if ev["type"] == "done":
             break
     assert "cancelled" in seen_types or "done" in seen_types
+
+
+# ── Plan approval re-gate ────────────────────────────────────────────────
+#
+# Regression: if the user denies a plan, the agent often calls plan_edit
+# (or plan_set again) to revise it — and historically the engine then
+# silently let execution proceed without re-asking the user. The
+# ``_plan_awaiting_approval`` flag persists across turns; while it's
+# set, ANY plan_set / plan_edit / plan_add / plan_remove re-engages the
+# approval gate. Only an explicit "approve" lifts it.
+
+
+def _make_approval_handler(responses):
+    """Build an approval handler that returns each ``response`` in
+    sequence. Each response is the ``{action, ...}`` dict the engine
+    expects. Records every call's args on ``handler.calls``.
+    """
+    iterator = iter(responses)
+    calls: list[dict] = []
+
+    async def handler(*, request_id, tool_name, args, step_id, message,
+                      approval_type):
+        calls.append({
+            "request_id": request_id,
+            "tool_name":  tool_name,
+            "approval_type": approval_type,
+            "plan":       args.get("plan"),
+        })
+        try:
+            return next(iterator)
+        except StopIteration:
+            return {"action": "approve"}
+
+    handler.calls = calls
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_plan_deny_then_edit_re_engages_approval_gate(engine):
+    """User denies plan → agent calls plan_edit → engine MUST re-prompt
+    the user before execution. The bug we hit: edit slipped through.
+    """
+    handler = _make_approval_handler([
+        {"action": "deny", "reason": "wrong scope"},
+        {"action": "approve"},
+    ])
+    engine._workflow_engine.approval_handler = handler
+
+    install(engine, StubLLM([
+        # Turn 1: agent drafts a plan
+        StubLLM.workflow(wf_sequential(
+            step("plan_set", {"tasks": ["a", "b"]}),
+        )),
+        # Turn 2: after deny → agent revises with plan_edit
+        StubLLM.workflow(wf_sequential(
+            step("plan_edit", {
+                "operations": [
+                    {"op": "set_goal", "value": "narrower scope"},
+                ],
+            }),
+        )),
+        # Turn 3: after approval → final reply
+        StubLLM.text("Plan approved, ready to start."),
+    ]))
+
+    await _drain(engine, "draft a plan")
+
+    # Approval handler must have been called TWICE — once for the
+    # original plan_set, once for the revised plan_edit.
+    assert len(handler.calls) == 2, (
+        f"Expected 2 approval calls (initial + after edit), got "
+        f"{len(handler.calls)}.\nThis is the regression: plan_edit "
+        f"silently bypassed the approval gate after a denial."
+    )
+    # Both calls must be plan-review approvals.
+    assert handler.calls[0]["approval_type"] == "plan_review"
+    assert handler.calls[1]["approval_type"] == "plan_review"
+    # Second call sees the post-edit plan.
+    assert handler.calls[1]["plan"] is not None
+    assert handler.calls[1]["plan"].get("goal") == "narrower scope"
+    # After explicit approve, the flag must be cleared.
+    assert engine._plan_awaiting_approval is False
+
+
+@pytest.mark.asyncio
+async def test_plan_approve_clears_the_re_gate_flag(engine):
+    """Single happy path: approve on first ask → flag clear → no extra
+    approval calls in subsequent plan-modifying turns.
+    """
+    handler = _make_approval_handler([
+        {"action": "approve"},
+    ])
+    engine._workflow_engine.approval_handler = handler
+
+    install(engine, StubLLM([
+        StubLLM.workflow(wf_sequential(
+            step("plan_set", {"tasks": ["one", "two"]}),
+        )),
+        StubLLM.text("Got it."),
+    ]))
+    await _drain(engine, "draft")
+
+    assert len(handler.calls) == 1
+    assert engine._plan_awaiting_approval is False
+
+
+@pytest.mark.asyncio
+async def test_plan_edit_does_not_re_gate_when_no_approval_pending(engine):
+    """Sanity: plan_edit on an already-approved plan does NOT re-prompt.
+    The gate only re-fires when ``_plan_awaiting_approval`` is True.
+    """
+    handler = _make_approval_handler([
+        {"action": "approve"},
+    ])
+    engine._workflow_engine.approval_handler = handler
+
+    install(engine, StubLLM([
+        # Turn 1: plan_set + immediate approval
+        StubLLM.workflow(wf_sequential(
+            step("plan_set", {"tasks": ["a"]}),
+        )),
+        # Turn 2: plan_edit on the already-approved plan — no re-prompt
+        StubLLM.workflow(wf_sequential(
+            step("plan_edit", {
+                "operations": [
+                    {"op": "add_task", "task": "extra"},
+                ],
+            }),
+        )),
+        StubLLM.text("Done."),
+    ]))
+    await _drain(engine, "go")
+
+    # Only the initial plan_set triggered the gate; the post-approval
+    # plan_edit did NOT (because flag was cleared).
+    assert len(handler.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_plan_edit_with_edit_action_keeps_gate_engaged(engine):
+    """User picks "edit" → flag stays True → next plan_edit re-prompts."""
+    handler = _make_approval_handler([
+        {"action": "edit", "feedback": "tweak task 2"},
+        {"action": "approve"},
+    ])
+    engine._workflow_engine.approval_handler = handler
+
+    install(engine, StubLLM([
+        StubLLM.workflow(wf_sequential(
+            step("plan_set", {"tasks": ["a", "b"]}),
+        )),
+        StubLLM.workflow(wf_sequential(
+            step("plan_edit", {
+                "operations": [
+                    {"op": "set_goal", "value": "tighter scope"},
+                ],
+            }),
+        )),
+        StubLLM.text("Approved."),
+    ]))
+    await _drain(engine, "go")
+
+    assert len(handler.calls) == 2  # original + post-edit re-gate
+    assert engine._plan_awaiting_approval is False  # second call approved

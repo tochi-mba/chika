@@ -522,6 +522,75 @@ def test_cmd_auto_continue_max_validation_error(monkeypatch):
     assert "must be in" in ctx.console.export_text()
 
 
+# ── /state — inline state indicator settings ──────────────────────────
+
+
+def test_cmd_state_show(monkeypatch):
+    monkeypatch.setattr(
+        c.settings_store, "get",
+        lambda k, d=None: "on" if k == "state_verbs" else 80,
+    )
+    ctx = _ctx()
+    c._cmd_state(ctx, [])
+    out = ctx.console.export_text()
+    assert "state verbs" in out
+    assert "max tokens" in out
+
+
+def test_cmd_state_verbs_on(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(c.settings_store, "update",
+                        lambda d: captured.update(d))
+    ctx = _ctx()
+    c._cmd_state(ctx, ["verbs", "on"])
+    assert captured == {"state_verbs": "on"}
+
+
+def test_cmd_state_verbs_off(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(c.settings_store, "update",
+                        lambda d: captured.update(d))
+    ctx = _ctx()
+    c._cmd_state(ctx, ["verbs", "off"])
+    assert captured == {"state_verbs": "off"}
+
+
+def test_cmd_state_verbs_invalid_value():
+    ctx = _ctx()
+    c._cmd_state(ctx, ["verbs", "maybe"])
+    assert "/state verbs on|off" in ctx.console.export_text()
+
+
+def test_cmd_state_tokens(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(c.settings_store, "update",
+                        lambda d: captured.update(d))
+    ctx = _ctx()
+    c._cmd_state(ctx, ["tokens", "120"])
+    assert captured == {"state_verbs_tokens": 120}
+
+
+def test_cmd_state_tokens_non_integer():
+    ctx = _ctx()
+    c._cmd_state(ctx, ["tokens", "lots"])
+    assert "integer" in ctx.console.export_text()
+
+
+def test_cmd_state_tokens_validation_error(monkeypatch):
+    def raise_value_error(d):
+        raise ValueError("must be in [16, 200]")
+    monkeypatch.setattr(c.settings_store, "update", raise_value_error)
+    ctx = _ctx()
+    c._cmd_state(ctx, ["tokens", "999"])
+    assert "must be in" in ctx.console.export_text()
+
+
+def test_cmd_state_unknown_subcommand():
+    ctx = _ctx()
+    c._cmd_state(ctx, ["nonsense"])
+    assert "verbs on|off" in ctx.console.export_text()
+
+
 # ── /raw / /shells / /kill / /killall ─────────────────────────────────
 
 

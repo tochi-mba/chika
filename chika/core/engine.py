@@ -437,6 +437,11 @@ class ChikaEngine:
         # run on text the model produced AFTER tool calls (when the main
         # agentic loop ended without yielding any user-visible tokens).
         self._last_followup_text: str = ""
+        # True while a plan is awaiting user approval — set when plan_set
+        # fires, cleared only when the user explicitly approves. Survives
+        # turn boundaries so a denial → plan_edit → execute attempt
+        # re-engages the approval gate instead of slipping through.
+        self._plan_awaiting_approval: bool = False
 
     # ── Public ───────────────────────────────────────────────────────────────
 
@@ -794,6 +799,27 @@ class ChikaEngine:
                     # deny before the agent commits to executing it.
                     if isinstance(result, dict) and isinstance(result.get("plan"), dict):
                         pending_plan_for_approval = result["plan"]
+                        self._plan_awaiting_approval = True
+                elif tool == "plan_edit" and not event.get("error"):
+                    # If a plan is currently awaiting approval (i.e. user
+                    # already saw it and denied / asked for edits), the
+                    # revised plan ALSO needs explicit approval before
+                    # execution. Without this, the agent silently edits
+                    # the denied plan and starts running it — the bug
+                    # the user hit. Same for plan_add / plan_remove.
+                    if self._plan_awaiting_approval and isinstance(result, dict):
+                        rev_plan = result.get("plan")
+                        if isinstance(rev_plan, dict):
+                            pending_plan_for_approval = rev_plan
+                    if isinstance(result, dict) and result.get("_auto_reconcile"):
+                        auto_reconcile_pending = True
+                elif tool in ("plan_add", "plan_remove") and not event.get("error"):
+                    # Same re-gate logic for plan_add / plan_remove while
+                    # awaiting approval.
+                    if self._plan_awaiting_approval and isinstance(result, dict):
+                        rev_plan = result.get("plan")
+                        if isinstance(rev_plan, dict):
+                            pending_plan_for_approval = rev_plan
                 elif isinstance(result, dict) and result.get("_auto_reconcile"):
                     auto_reconcile_pending = True
             if etype == "workflow_done":
@@ -880,6 +906,13 @@ class ChikaEngine:
             approval_directive = await self._request_plan_approval(
                 pending_plan_for_approval,
             )
+            # Update the cross-turn flag based on the user's verdict.
+            # Only an explicit "approve" lifts the gate — "edit" and
+            # "deny" leave it engaged so the next plan_edit / plan_set
+            # re-prompts the user.
+            if approval_directive is not None:
+                action = (approval_directive.get("action") or "").lower()
+                self._plan_awaiting_approval = action != "approve"
             # Surface the approval outcome as a synthetic tool_result so
             # the renderer / frontend show the user's decision in the
             # conversation surface.
@@ -1027,9 +1060,13 @@ class ChikaEngine:
                 "before proceeding. Their feedback:\n\n"
                 f"{feedback}\n\n"
                 "Apply the edits with `plan_edit` (preserve task ids and "
-                "any 'done' progress that's still valid). Do NOT execute "
-                "the rest of the plan until the user approves the revised "
-                "version."
+                "any 'done' progress that's still valid). **The plan "
+                "will be re-presented for approval automatically after "
+                "your edits land — do NOT execute any task until the "
+                "user explicitly approves the revised version.** This is "
+                "enforced by the engine: any plan_set / plan_edit / "
+                "plan_add / plan_remove while approval is pending will "
+                "re-trigger the approval gate."
             )
         # action == "deny" or unknown
         reason = (directive.get("reason") or "").strip() or "(no reason given)"
@@ -1039,7 +1076,11 @@ class ChikaEngine:
             "Stop. Do NOT execute the plan. Re-read the user's original "
             "request and the rejection reason, then propose a different "
             "plan via `plan_set`. The user's feedback is the priority — "
-            "don't argue with it."
+            "don't argue with it. **The new plan will be re-presented "
+            "for approval — do NOT execute any task until the user "
+            "explicitly approves it.** This is enforced by the engine: "
+            "any plan_set / plan_edit while approval is pending re-triggers "
+            "the approval gate."
         )
 
     def _build_plan_nudge(self, tools_used: list[str],

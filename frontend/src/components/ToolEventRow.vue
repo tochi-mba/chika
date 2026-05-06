@@ -53,6 +53,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { summarise as summariseTool } from '../lib/toolSummaries.js'
 
 const props = defineProps({
   event: { type: Object, required: true },
@@ -206,6 +207,11 @@ const resultSummary = computed(() => {
   if (e.type !== 'tool_result') return null
   if (e.error) return truncate(e.error, 60)
   if (e.result == null) return 'ok'
+  // Per-tool compact summary first (web_fetch → "200 · 2400B",
+  // plan_set → "plan set · 1 task", etc). Falls back to a short
+  // JSON dump for tools without a registered formatter.
+  const summary = summariseTool(e.tool, e.result)
+  if (summary) return summary
   try { return truncate(JSON.stringify(e.result), 60) } catch { return 'ok' }
 })
 

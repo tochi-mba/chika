@@ -9,6 +9,7 @@
  */
 
 import { getSettings } from '../lib/storage.js'
+import { summarise as summariseTool } from '../lib/tool-summaries.js'
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -683,12 +684,19 @@ function buildToolEventsEl(events) {
 
     const icon = isRunning ? '◌' : isError ? '✗' : '✓'
 
-    // Build context hint: show selector/url arg for quick diagnosis
+    // Context hint preference order:
+    //   1. Per-tool summary on success ("200 · 2400B", "screenshot · 1280×720", …)
+    //   2. Selector / URL from args as a generic fallback
     let contextHint = ''
     if (!isRunning) {
-      const args = call?.args || {}
-      if (args.selector)  contextHint = args.selector
-      else if (args.url)  contextHint = args.url.replace(/^https?:\/\//, '').slice(0, 40)
+      const summary = !isError ? summariseTool(tool, result?.result ?? result) : null
+      if (summary) {
+        contextHint = summary
+      } else {
+        const args = call?.args || {}
+        if (args.selector)  contextHint = args.selector
+        else if (args.url)  contextHint = args.url.replace(/^https?:\/\//, '').slice(0, 40)
+      }
     }
 
     // Error detail: humanise common error codes
@@ -1126,14 +1134,28 @@ chrome.runtime.onMessage.addListener((msg) => {
             elapsedEl.textContent = _fmtElapsed(Date.now() - startedAt)
           }
         }
+        // Append per-tool summary on success — same treatment as the
+        // static renderer above. Skip on error since that path already
+        // surfaces ev.error.
+        if (!isError) {
+          const summary = summariseTool(ev.tool, ev.result)
+          if (summary && !callRow.querySelector('.tool-ctx')) {
+            const ctx = document.createElement('span')
+            ctx.className = 'tool-ctx'
+            ctx.textContent = summary
+            callRow.appendChild(ctx)
+          }
+        }
         return
       }
       // No matching call row — add a standalone result row
       const row = document.createElement('div')
       row.className = 'tool-row ' + (ev.error ? 'error' : 'done')
+      const summary = !ev.error ? summariseTool(ev.tool, ev.result) : null
       row.innerHTML =
         `<span class="tool-icon">${ev.error ? '✗' : '✓'}</span>` +
-        `<span class="tool-name">${escHtml(toolLabel(ev.tool))}</span>`
+        `<span class="tool-name">${escHtml(toolLabel(ev.tool))}</span>` +
+        (summary ? `<span class="tool-ctx">${escHtml(summary)}</span>` : '')
       toolEvents.appendChild(row)
     }
 
