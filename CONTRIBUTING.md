@@ -95,6 +95,50 @@ Examples:
 - `feat(workflow): add retry step type with backoff`
 - `test(variable_store): add concurrency + circular-ref tests`
 
+## Brand mark (the chika trefoil)
+
+Chika's mark is a stroke-only 3-leaf trefoil that renders on **four
+surfaces** with incompatible rendering models. There's no shared
+runtime that spans them all (Vue ≠ vanilla popup HTML ≠ Chrome MV3
+PNG ≠ terminal grid), so the same geometry lives in 4 places. See
+ADR-27 for the full rationale.
+
+**Canonical source of truth:** `frontend/src/components/ChikaMark.vue`.
+
+When you change the geometry (petal path, angles, hub radius, stroke
+width), update **all four** of these in one PR:
+
+| File | What it owns |
+|------|--------------|
+| `frontend/src/components/ChikaMark.vue` | The Vue component. Used by the SPA nav. |
+| `extension/popup/popup.html` + `popup.css` | Inline SVG in the popup header. Vanilla CSS, same animation keyframes. |
+| `extension/icons/_render.html` | The page Playwright screenshots to produce manifest PNGs. |
+| `chika/_cli/mark.py` | Python rasteriser — samples the same cubic bezier into half-block characters. |
+
+After editing all four, regenerate the manifest PNGs:
+
+```bash
+cd extension
+node icons/_render.mjs
+```
+
+This writes `icon16/32/48/128.png` from the SVG. Re-run after every
+geometry change so the toolbar icons stay in sync.
+
+Spot-check the CLI rasterisation:
+
+```bash
+PYTHONIOENCODING=utf-8 python -m chika._cli.mark
+```
+
+Should print a recognisable 3-leaf trefoil in half-block characters.
+
+If you change the **animation states** (idle / thinking / streaming /
+success / intro), update both `ChikaMark.vue` and `popup.css` — they
+share the same `@keyframes` definitions. The CLI doesn't carry per-leaf
+animations (terminal grid resolution is too coarse); it uses the inline
+state-row indicator instead (see ADR-28).
+
 ## Visual snapshot baselines (Playwright)
 
 Visual baselines under `frontend/e2e/*-snapshots/` and

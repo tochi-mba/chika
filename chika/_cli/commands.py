@@ -587,6 +587,61 @@ def _cmd_pet(ctx: CommandContext, args: list[str]) -> None:
     render_pet(ctx.console, pet, state="celebrate")
 
 
+# ── /state ───────────────────────────────────────────────────────────────
+
+
+def _cmd_state(ctx: CommandContext, args: list[str]) -> None:
+    """Show, toggle, or tune the inline state indicator (the
+    "◣ ▲ ◢   Thinking… 2.3s" row shown while a turn is in flight).
+
+    /state                  → show current settings
+    /state verbs on|off     → context-aware LLM verbs (off = static set)
+    /state tokens <int>     → token budget per LLM verb call
+    """
+    if not args:
+        verbs = settings_store.get("state_verbs", "on")
+        tokens = settings_store.get("state_verbs_tokens", 80)
+        ctx.console.print(Text(
+            f"  state verbs: {verbs}  ·  max tokens per call: {tokens}",
+            style=THEME.text,
+        ))
+        ctx.console.print(Text(
+            "  /state verbs on|off  ·  /state tokens <int>",
+            style=THEME.dim,
+        ))
+        return
+    head = args[0].lower()
+    if head == "verbs" and len(args) >= 2:
+        val = args[1].lower()
+        if val not in ("on", "off"):
+            ctx.console.print(Text("  /state verbs on|off", style=THEME.error))
+            return
+        settings_store.update({"state_verbs": val})
+        ctx.console.print(Text(
+            f"  · state verbs → {val}", style=THEME.success,
+        ))
+        return
+    if head == "tokens" and len(args) >= 2:
+        try:
+            n = int(args[1])
+        except ValueError:
+            ctx.console.print(Text("  expected an integer", style=THEME.error))
+            return
+        try:
+            settings_store.update({"state_verbs_tokens": n})
+        except ValueError as exc:
+            ctx.console.print(Text(f"  {exc}", style=THEME.error))
+            return
+        ctx.console.print(Text(
+            f"  · state_verbs_tokens → {n}", style=THEME.success,
+        ))
+        return
+    ctx.console.print(Text(
+        "  /state verbs on|off  ·  /state tokens <int>",
+        style=THEME.error,
+    ))
+
+
 # ── /auto-continue ───────────────────────────────────────────────────────
 
 
@@ -882,6 +937,10 @@ def _register_all() -> None:
                      "auto-fire another turn when agent promises more work",
                      _cmd_auto_continue, ("autocontinue", "ac"),
                      args_hint="[on|off | max <int>]"))
+    register(Command("state",
+                     "configure the inline state indicator (LLM verbs)",
+                     _cmd_state,
+                     args_hint="[verbs on|off | tokens <int>]"))
     register(Command("plan",
                      "show / accept / reject / edit the active task plan",
                      _cmd_plan,

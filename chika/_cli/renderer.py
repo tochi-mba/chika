@@ -249,6 +249,18 @@ class Renderer:
         self._thinking_buf: list[str] = []
         self._live: Live | None = None
 
+        # State indicator timestamps. ``_state_started_at`` is set when
+        # a turn opens; cleared when the first token/tool event arrives
+        # (so the inline ``◣ ▲ ◢   Thinking… 2.3s`` only appears in the
+        # dead air between user input and the first sign of life).
+        # Mirrors the in-line activity indicator pattern from Claude
+        # Code.
+        self._state_started_at: float = 0.0
+        # Optional context-aware verbs, populated by an LLM in a
+        # background thread (see ``state_verbs.py``). Empty list = use
+        # the static defaults from ``mark.INLINE_VERBS``.
+        self._state_verbs: list[str] = []
+
     # ── Pet API ────────────────────────────────────────────────────────────
 
     def set_pet(self, pet) -> None:
@@ -272,6 +284,50 @@ class Renderer:
         self._tick = 0
         self._pet_state = "working"
         self._pet_speech = ""
+        # Open the state-indicator window — inline indicator shown
+        # while we're between user input and first signal of activity.
+        self._state_started_at = time.time()
+        # Each new turn starts fresh — clear stale LLM-generated verbs
+        # from the previous turn. Caller may then call
+        # ``prime_state_verbs`` to kick off a fresh background fetch.
+        self._state_verbs = []
+
+    def prime_state_verbs(self, engine, user_text: str) -> None:
+        """Fire a background LLM call to fetch context-aware verbs for the
+        inline indicator. Result lands in ``self._state_verbs`` once
+        the call returns; until then the indicator uses static defaults.
+
+        Cosmetic — never blocks the turn, never raises. Respects the
+        ``state_verbs`` setting (off → never calls LLM) and uses
+        ``state_verbs_tokens`` as the per-call token budget.
+        """
+        # Settings gate — when off, leave _state_verbs empty and the
+        # indicator falls back to the static defaults.
+        try:
+            import api.settings_store as _settings
+            mode = _settings.get("state_verbs", "on")
+            if mode != "on":
+                return
+            tokens = int(_settings.get("state_verbs_tokens", 80))
+        except Exception:
+            tokens = 80
+
+        try:
+            from chika._cli import state_verbs as _sv
+        except Exception:
+            return
+        history_tail = list(getattr(engine, "_history", []) or [])[-6:]
+
+        def _on_done(verbs: list[str]) -> None:
+            # Only adopt the LLM list if it returned a sensible number of
+            # verbs — otherwise stay on the static defaults.
+            if verbs and len(verbs) >= 3:
+                self._state_verbs = verbs
+
+        _sv.fire_and_forget(
+            engine, user_text, history_tail, _on_done,
+            max_tokens=tokens,
+        )
         # Open a Live block immediately so the pet renders before any event
         # arrives. The renderable composes (thinking | answer) ABOVE the
         # animated pet panel; tool blocks print as scrollback above the Live.
@@ -285,6 +341,7 @@ class Renderer:
 
     def end_turn(self) -> None:
         """Stop the animator, close the Live, and clean up trailing whitespace."""
+        self._state_started_at = 0.0
         self._anim_stop.set()
         if self._anim_thread is not None:
             self._anim_thread.join(timeout=0.8)
@@ -445,6 +502,13 @@ class Renderer:
         spinner_row = self._render_running_tool_row()
         if spinner_row is not None:
             parts.append(spinner_row)
+        else:
+            # State indicator only when nothing else is taking visual
+            # responsibility — tool spinner (above) wins, streaming text
+            # wins, but otherwise the state row fills the dead air.
+            state_row = self._render_state_row()
+            if state_row is not None:
+                parts.append(state_row)
 
         plan_panel = self._render_plan_panel()
         if plan_panel is not None:
@@ -611,6 +675,61 @@ class Renderer:
         line.append(f"  · {elapsed_str}", style=THEME.dim)
         return line
 
+    def _render_state_row(self):
+        """Inline animated state indicator — Claude Code's activity-line pattern.
+
+        Renders a single line with the trefoil glyph (three triangle
+        leaves at the trefoil's three petal positions, one highlighted
+        per frame) followed by a present-continuous verb and an
+        elapsed-time counter:
+
+            ◣ ▲ ◢   Thinking…   2.3s
+
+        Only visible while ``_state_started_at`` is set — i.e. between
+        a user message and the first sign of activity (token, tool, or
+        thinking event). Once activity arrives, the relevant handler
+        clears the timestamp and this row disappears.
+        """
+        if not self._state_started_at:
+            return None
+        if self._answer_buf or self._thinking_buf:
+            return None
+        from chika._cli import mark as _mark
+
+        elapsed = time.time() - self._state_started_at
+        elapsed_str = (
+            f"{elapsed:0.1f}s" if elapsed < 60
+            else f"{int(elapsed) // 60}m {int(elapsed) % 60:02d}s"
+        )
+
+        # Inline trefoil — three triangle glyphs at the three leaf
+        # positions (lower-left ◣, top ▲, lower-right ◢) so the
+        # silhouette echoes the SVG mark.  Highlight rotates through
+        # the leaves the same way the SVG streaming wave does.
+        # ``_mark.inline_frame`` returns a logical leaf index 0..2
+        # (top / right / left); we map that to display slots.
+        _, _, _, hl_leaf = _mark.inline_frame(self._tick)
+        # Slot order on screen: ◣(left=2) ▲(top=0) ◢(right=1)
+        slot_to_leaf = {0: 2, 1: 0, 2: 1}
+        slot_glyph   = ("◣", "▲", "◢")
+        verbs = self._state_verbs or _mark.INLINE_VERBS
+        verb = verbs[(self._tick // 18) % len(verbs)]
+
+        line = Text("  ")
+        for slot in range(3):
+            leaf = slot_to_leaf[slot]
+            style = (
+                f"bold {THEME.accent}" if leaf == hl_leaf
+                else THEME.dim
+            )
+            line.append(slot_glyph[slot], style=style)
+            if slot < 2:
+                line.append(" ", style=THEME.dim)
+        line.append("   ", style=THEME.dim)
+        line.append(f"{verb}…", style=f"italic {THEME.text}")
+        line.append(f"   {elapsed_str}", style=THEME.dim)
+        return line
+
     def _render_pet_panel(self):
         """Pet panel with optional speech bubble and a bobbing offset.
 
@@ -653,6 +772,9 @@ class Renderer:
         text = event.get("text", "")
         if not text:
             return
+        # First sign of life — close the state-indicator window so it
+        # stops shadowing the streamed answer.
+        self._state_started_at = 0.0
         # Token streaming = "answer" phase. The Live is already open and the
         # animator will repaint within ~300ms; we also push an immediate
         # update so streaming feels responsive.
@@ -748,6 +870,10 @@ class Renderer:
     def _on_tool_call(self, event: dict) -> None:
         tool = event.get("tool", "?")
         args = event.get("args", {}) or {}
+
+        # Tool firing = activity — close the state-indicator window so
+        # the spinner row takes over visual responsibility.
+        self._state_started_at = 0.0
 
         # Pet narrates which tool is firing — short, in-character bubble.
         bubble = _TOOL_BUBBLES.get(tool, f"using {tool}…")
@@ -1095,7 +1221,18 @@ class Renderer:
 
 
 def render_banner(console: Console, *, version: str, provider: str, model: str) -> None:
-    """Welcome banner shown at startup."""
+    """Welcome banner shown at startup.
+
+    The chika brand mark renders at the top — same trefoil as the SVG
+    in ``frontend/src/components/ChikaMark.vue``, rasterised to
+    half-block characters by ``chika._cli.mark``. Single static frame:
+    terminal grids don't carry the SVG's per-leaf flip animation
+    meaningfully, but the static silhouette is in faithful parity.
+    """
+    from chika._cli.mark import get_frame as _mark_frame
+
+    mark = Text(_mark_frame("idle"), style=f"bold {THEME.accent}")
+
     title = Text()
     title.append("chika ", style=f"bold {THEME.accent}")
     title.append(f"v{version}", style=THEME.muted)
@@ -1115,7 +1252,7 @@ def render_banner(console: Console, *, version: str, provider: str, model: str) 
     body.append(model, style=THEME.text)
 
     console.print(Panel(
-        Group(title, body),
+        Group(mark, Text(""), title, body),
         border_style=THEME.accent,
         padding=(1, 2),
     ))

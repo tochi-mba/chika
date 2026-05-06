@@ -76,15 +76,84 @@ body {
   flex-shrink: 0;
 }
 
-.brand-mark {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: var(--accent-dim);
-  color: var(--accent);
-  display: grid;
-  place-items: center;
+/* ── Chika brand mark — trefoil
+     Canonical version is frontend/src/components/ChikaMark.vue.
+     Keep these styles in parity when the SVG changes there.       */
+.chika-mark {
+  display: block;
+  overflow: visible;
   flex-shrink: 0;
+}
+.chika-mark .petal {
+  fill: none;
+  stroke: var(--accent, #b3bdff);
+  stroke-width: 3.4;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  transform-origin: 50% 50%;
+  transform-box: fill-box;
+  vector-effect: non-scaling-stroke;
+}
+.chika-mark .hub-dot {
+  fill: var(--accent, #b3bdff);
+}
+.chika-mark .petals {
+  transform-origin: 50% 50%;
+  transform-box: view-box;
+}
+
+/* Idle — per-leaf prime-ratio breath. Three primes, no resync. */
+.chika-mark.s-idle .petal {
+  animation-name: chika-breath;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+  animation-direction: alternate;
+}
+.chika-mark.s-idle .petal-wrap-0 .petal { animation-duration: 2.3s; --amp: 1.045; }
+.chika-mark.s-idle .petal-wrap-1 .petal { animation-duration: 3.7s; --amp: 1.060; }
+.chika-mark.s-idle .petal-wrap-2 .petal { animation-duration: 5.3s; --amp: 1.052; }
+@keyframes chika-breath {
+  0%   { transform: scale(1.000); }
+  100% { transform: scale(var(--amp, 1.05)); }
+}
+
+/* Thinking — periodic unfurl gesture, mostly still. */
+.chika-mark.s-thinking .petal {
+  animation-name: chika-think-pulse;
+  animation-iteration-count: infinite;
+  animation-timing-function: cubic-bezier(0.16, 1.0, 0.3, 1);
+}
+.chika-mark.s-thinking .petal-wrap-0 .petal { animation-duration: 4.3s; animation-delay:  0.00s; }
+.chika-mark.s-thinking .petal-wrap-1 .petal { animation-duration: 5.1s; animation-delay: -1.70s; }
+.chika-mark.s-thinking .petal-wrap-2 .petal { animation-duration: 6.7s; animation-delay: -3.35s; }
+@keyframes chika-think-pulse {
+    0%  { transform: rotateY(180deg) scale(0); opacity: 0; }
+   18%  { transform: rotateY(0deg)   scale(1); opacity: 1; }
+   82%  { transform: rotateY(0deg)   scale(1); opacity: 1; }
+  100%  { transform: rotateY(-180deg) scale(0); opacity: 0; }
+}
+
+/* Streaming — sin wave on stroke-opacity + stroke-width. */
+.chika-mark.s-streaming .petal {
+  animation: chika-wave 1.6s linear infinite;
+}
+.chika-mark.s-streaming .petal-wrap-0 .petal { animation-delay:  0.000s; }
+.chika-mark.s-streaming .petal-wrap-1 .petal { animation-delay: -0.533s; }
+.chika-mark.s-streaming .petal-wrap-2 .petal { animation-delay: -1.067s; }
+@keyframes chika-wave {
+    0%   { stroke-opacity: 0.675; stroke-width: 2.6; }
+    8.3% { stroke-opacity: 0.838; stroke-width: 3.1; }
+   16.7% { stroke-opacity: 0.957; stroke-width: 3.5; }
+   25.0% { stroke-opacity: 1.000; stroke-width: 3.6; }
+   33.3% { stroke-opacity: 0.957; stroke-width: 3.5; }
+   41.7% { stroke-opacity: 0.838; stroke-width: 3.1; }
+   50.0% { stroke-opacity: 0.675; stroke-width: 2.6; }
+   58.3% { stroke-opacity: 0.513; stroke-width: 2.1; }
+   66.7% { stroke-opacity: 0.394; stroke-width: 1.7; }
+   75.0% { stroke-opacity: 0.350; stroke-width: 1.6; }
+   83.3% { stroke-opacity: 0.394; stroke-width: 1.7; }
+   91.7% { stroke-opacity: 0.513; stroke-width: 2.1; }
+  100%   { stroke-opacity: 0.675; stroke-width: 2.6; }
 }
 
 .brand-name {

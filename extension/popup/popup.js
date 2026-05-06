@@ -554,6 +554,16 @@ function setStatusDot(connected) {
   statusDot.title     = connected ? 'Connected to Chika' : 'Disconnected'
 }
 
+// Switch the brand mark's animation state. ``streaming`` is the
+// only state currently distinguishable from idle in this surface;
+// ``thinking`` could be wired in if/when the popup tracks it.
+function setMarkState(state) {
+  const mark = document.getElementById('chikaMark')
+  if (!mark) return
+  mark.classList.remove('s-idle', 's-thinking', 's-streaming', 's-success')
+  mark.classList.add(`s-${state}`)
+}
+
 function setSessionTitle(title) {
   sessionTitleEl.textContent  = title || ''
   sessionTitleEl.style.display = title ? '' : 'none'
@@ -564,6 +574,9 @@ function setSessionTitle(title) {
 function renderMessages(s) {
   msgList.innerHTML = ''
   streamingEl = null
+
+  // Sync the brand mark animation with the streaming state.
+  setMarkState(s.isStreaming ? 'streaming' : 'idle')
 
   const msgs = s.messages || []
 

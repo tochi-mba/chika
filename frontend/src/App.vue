@@ -9,11 +9,10 @@
   <div class="app" v-show="profileUnlocked">
     <header class="header">
       <div class="brand">
-        <div class="brand-mark" aria-hidden="true">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-          </svg>
-        </div>
+        <ChikaMark
+          :size="22"
+          :state="chat.isStreaming ? 'streaming' : 'idle'"
+        />
         <span class="brand-name">Chika</span>
       </div>
 
@@ -219,6 +218,7 @@ import SettingsModal      from './components/SettingsModal.vue'
 import PetCompanion       from './components/PetCompanion.vue'
 import PlanPanel          from './components/PlanPanel.vue'
 import ProfileGate        from './components/ProfileGate.vue'
+import ChikaMark          from './components/ChikaMark.vue'
 
 const chat   = useChatStore()
 const chats  = useChatsStore()

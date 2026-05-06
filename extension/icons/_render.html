@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body {
+    display: grid;
+    place-items: center;
+    width: var(--w, 128px);
+    height: var(--w, 128px);
+  }
+  /* Match ChikaMark.vue + popup.css */
+  .chika-mark { display: block; overflow: visible; }
+  .chika-mark .petal {
+    fill: none;
+    stroke: #b3bdff;
+    stroke-width: 3.4;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+  .chika-mark .hub-dot { fill: #b3bdff; }
+</style></head>
+<body>
+<svg class="chika-mark" id="m" viewBox="-60 -60 120 120">
+  <g class="petals">
+    <g transform="rotate(0)"><path class="petal" d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z"/></g>
+    <g transform="rotate(120)"><path class="petal" d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z"/></g>
+    <g transform="rotate(240)"><path class="petal" d="M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z"/></g>
+    <circle class="hub-dot" cx="0" cy="0" r="3.2"/>
+  </g>
+</svg>
+<script>
+  // Read ?size=N from URL. The body grid centres the mark.
+  const params = new URLSearchParams(location.search);
+  const size = parseInt(params.get('size') || '128', 10);
+  document.body.style.setProperty('--w', `${size}px`);
+  const svg = document.getElementById('m');
+  svg.style.width  = `${size}px`;
+  svg.style.height = `${size}px`;
+</script>
+</body></html>

@@ -35,6 +35,7 @@ _VALID_AUTONOMY = {"supervised", "autonomous"}
 _VALID_PERMISSION = {"ask", "skip"}
 _VALID_PET_SPEECH = {"on", "off"}
 _VALID_AUTO_CONTINUE = {"on", "off"}
+_VALID_STATE_VERBS = {"on", "off"}
 
 # Defaults for the pet companion. Each profile picks its own pet (handled by
 # ProfileManager); these settings control whether the pet says LLM-generated
@@ -52,6 +53,16 @@ _PET_DEFAULTS = {
 _AUTO_CONTINUE_DEFAULTS = {
     "auto_continue":     "on",
     "auto_continue_max": 10,   # bumped from 5 — most multi-step plans need ≥7
+}
+
+# State indicator: the inline ``◣ ▲ ◢   Thinking… 2.3s`` activity row
+# shown while the agent is between user input and first signal of life.
+# When ``state_verbs == "on"`` the engine fires a fire-and-forget LLM
+# call per turn asking for context-aware verbs ("Investigating",
+# "Sketching", etc.); when "off" the indicator cycles a static set.
+_STATE_DEFAULTS = {
+    "state_verbs":        "on",
+    "state_verbs_tokens": 80,
 }
 
 # ── Category definitions ──────────────────────────────────────────────────────
@@ -152,6 +163,10 @@ def init(defaults: dict) -> None:
         if k not in _settings:
             _settings[k] = v
             changed = True
+    for k, v in _STATE_DEFAULTS.items():
+        if k not in _settings:
+            _settings[k] = v
+            changed = True
     if changed:
         _save()
 
@@ -233,6 +248,20 @@ def update(patch: dict) -> dict:
         if not isinstance(val, int) or val < 1 or val > 50:
             raise ValueError("auto_continue_max must be an int in [1, 50]")
         _settings["auto_continue_max"] = val
+
+    if "state_verbs" in patch:
+        val = patch["state_verbs"]
+        if val not in _VALID_STATE_VERBS:
+            raise ValueError(
+                f"Invalid state_verbs: {val!r}. Use 'on' or 'off'."
+            )
+        _settings["state_verbs"] = val
+
+    if "state_verbs_tokens" in patch:
+        val = patch["state_verbs_tokens"]
+        if not isinstance(val, int) or val < 16 or val > 200:
+            raise ValueError("state_verbs_tokens must be an int in [16, 200]")
+        _settings["state_verbs_tokens"] = val
 
     _save()
     return dict(_settings)

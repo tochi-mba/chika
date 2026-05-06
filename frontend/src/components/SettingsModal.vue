@@ -126,6 +126,60 @@
         </div>
       </section>
 
+      <!-- ── Behaviour tab ───────────────────────────────────────────── -->
+      <section v-else-if="tab === 'behaviour'" class="panel">
+        <p class="hint">
+          Tune how chika behaves between turns — auto-continue, and the
+          inline state indicator shown while the agent is thinking.
+        </p>
+
+        <h3 class="subhead">Auto-continue</h3>
+        <div class="row">
+          <label class="row-label">Mode</label>
+          <div class="speech-toggle">
+            <button :class="{ active: autoContinue === 'off' }"
+              @click="updateAutoContinue('off')">Off</button>
+            <button :class="{ active: autoContinue === 'on' }"
+              @click="updateAutoContinue('on')">On</button>
+          </div>
+        </div>
+        <p class="hint">
+          When the agent ends a turn with "next, I'll …" and isn't asking a
+          question, fire another turn so it actually does the next thing.
+        </p>
+        <div class="row" v-if="autoContinue === 'on'">
+          <label class="row-label">Max hops per turn</label>
+          <input type="number" min="1" max="50"
+                 v-model.number="autoContinueMax"
+                 @change="updateAutoContinueMax"/>
+        </div>
+
+        <hr class="divider"/>
+
+        <h3 class="subhead">State indicator</h3>
+        <div class="row">
+          <label class="row-label">Context-aware verbs</label>
+          <div class="speech-toggle">
+            <button :class="{ active: stateVerbs === 'off' }"
+              @click="updateStateVerbs('off')">Off</button>
+            <button :class="{ active: stateVerbs === 'on' }"
+              @click="updateStateVerbs('on')">On</button>
+          </div>
+        </div>
+        <p class="hint">
+          When on, chika fires a tiny LLM call each turn to generate
+          verbs that fit the request ("Investigating", "Sketching", …)
+          for the inline <code>◣ ▲ ◢ Thinking…</code> indicator.
+          When off, a static rotation is used.
+        </p>
+        <div class="row" v-if="stateVerbs === 'on'">
+          <label class="row-label">Tokens per call</label>
+          <input type="number" min="16" max="200"
+                 v-model.number="stateVerbsTokens"
+                 @change="updateStateVerbsTokens"/>
+        </div>
+      </section>
+
       <!-- ── Permissions tab ─────────────────────────────────────────── -->
       <section v-else-if="tab === 'permissions'" class="panel">
         <p class="hint">
@@ -171,6 +225,7 @@ const tabs = [
   { id: 'provider',    label: 'Provider' },
   { id: 'env',         label: 'Environment' },
   { id: 'permissions', label: 'Permissions' },
+  { id: 'behaviour',   label: 'Behaviour' },
   { id: 'pet',         label: 'Pet' },
 ]
 const tab = ref(props.initialTab || 'provider')
@@ -360,6 +415,12 @@ const activePetId    = ref(null)
 const petSpeech      = ref('off')
 const petSpeechTokens = ref(40)
 
+// Behaviour tab — auto-continue + state-indicator settings.
+const autoContinue     = ref('on')
+const autoContinueMax  = ref(10)
+const stateVerbs       = ref('on')
+const stateVerbsTokens = ref(80)
+
 async function loadPets() {
   try {
     const res = await fetch(buildApiUrl('/api/pets'), { headers: authHeaders() })
@@ -385,6 +446,11 @@ async function loadPets() {
       const d = await res3.json()
       petSpeech.value = d.pet_speech || 'off'
       petSpeechTokens.value = d.pet_speech_tokens || 40
+      // Behaviour tab values.
+      autoContinue.value     = d.auto_continue       || 'on'
+      autoContinueMax.value  = d.auto_continue_max   || 10
+      stateVerbs.value       = d.state_verbs         || 'on'
+      stateVerbsTokens.value = d.state_verbs_tokens  || 80
     }
   } catch {/* silent */}
 }
@@ -414,6 +480,26 @@ function updatePetSpeechTokens() {
   const n = Math.max(8, Math.min(200, parseInt(petSpeechTokens.value) || 40))
   petSpeechTokens.value = n
   emit('patch-settings', { pet_speech_tokens: n })
+}
+
+// ── Behaviour tab handlers ─────────────────────────────────────────────
+function updateAutoContinue(val) {
+  autoContinue.value = val
+  emit('patch-settings', { auto_continue: val })
+}
+function updateAutoContinueMax() {
+  const n = Math.max(1, Math.min(50, parseInt(autoContinueMax.value) || 10))
+  autoContinueMax.value = n
+  emit('patch-settings', { auto_continue_max: n })
+}
+function updateStateVerbs(val) {
+  stateVerbs.value = val
+  emit('patch-settings', { state_verbs: val })
+}
+function updateStateVerbsTokens() {
+  const n = Math.max(16, Math.min(200, parseInt(stateVerbsTokens.value) || 80))
+  stateVerbsTokens.value = n
+  emit('patch-settings', { state_verbs_tokens: n })
 }
 
 watch(() => props.open, (v) => {

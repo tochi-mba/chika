@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>chika — mark</title>
+<style>
+  :root {
+    --bg:        #07080d;
+    --surface:   #0e0f17;
+    --line:      #1c1f2e;
+    --text:      #e6e7ee;
+    --muted:     #71728c;
+    --dim:       #43455a;
+
+    /* mark stroke colour */
+    --stroke:    #b3bdff;
+    --stroke-soft: rgba(179, 189, 255, 0.55);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Display", system-ui, sans-serif;
+    background:
+      radial-gradient(ellipse 800px 500px at 50% -10%, #0f1224 0%, transparent 60%),
+      var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 64px 32px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 1080px; margin: 0 auto; }
+
+  .top {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 48px;
+  }
+  .top .brand {
+    font-size: 13px; letter-spacing: 0.06em; color: var(--muted);
+    text-transform: uppercase;
+  }
+  .top .meta {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px; color: var(--dim);
+  }
+
+  section { margin-bottom: 24px; }
+  h2 {
+    font-weight: 500; font-size: 11px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 14px;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 28px;
+  }
+
+  /* ── HERO ─────────────────────────────── */
+  .hero {
+    background:
+      radial-gradient(circle at 50% 45%, rgba(102,121,255,0.06), transparent 55%),
+      var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    padding: 96px 32px 64px;
+    text-align: center;
+  }
+  .hero .bloom-host { display: inline-block; line-height: 0; }
+  .hero .name {
+    margin-top: 36px;
+    font-size: 44px; font-weight: 300; letter-spacing: -0.02em;
+    color: var(--text);
+  }
+  .hero .name em { font-style: normal; color: var(--stroke); }
+  .hero .tagline {
+    margin-top: 6px;
+    font-size: 14px; color: var(--muted);
+  }
+
+  /* ── STATES ────────────────────────────── */
+  .states {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  .state {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 24px 16px;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+  }
+  .state .bloom-host { line-height: 0; }
+  .state .label {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: var(--muted);
+    letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .state .descr {
+    font-size: 11px; color: var(--dim);
+    text-align: center; line-height: 1.5;
+  }
+
+  /* ── strips (animation comic-strips) ────── */
+  .strip {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 22px;
+  }
+  .strip .row {
+    display: flex; gap: 10px; align-items: center;
+    overflow-x: auto;
+  }
+  .strip .frame {
+    flex: 0 0 auto;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .strip .frame .bloom-host { line-height: 0; }
+  .strip .frame .t {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: var(--dim);
+  }
+
+  /* ── sizes ────────────────────────────── */
+  .sizes .row {
+    display: flex; align-items: center; gap: 36px;
+    padding: 8px 0;
+  }
+  .sizes .col {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+  }
+  .sizes .col .bloom-host { line-height: 0; }
+  .sizes .col span {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; color: var(--muted);
+  }
+
+  /* ── treatments ───────────────────────── */
+  .treatments {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  .treatments > div {
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 24px 16px;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    background: var(--surface);
+  }
+  .treatments .lightmode { background: #fafafa; border-color: #ececf1; }
+  .treatments .pure-black { background: #000; border-color: #1c1f2e; }
+  .treatments .label {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: var(--muted);
+    letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .treatments .lightmode .label { color: #6e6e80; }
+  .treatments .bloom-host { line-height: 0; }
+
+  /* light-mode override: swap stroke to deep ink */
+  .treatments .lightmode .bloom .petal { stroke: #1a1f5c !important; }
+  .treatments .lightmode .bloom .hub-dot { fill: #1a1f5c !important; }
+
+  /* filled fallback override (alt-treatment 'C' demo) */
+  .treatments .filled .bloom .petal {
+    fill: var(--stroke) !important;
+    stroke: var(--stroke);
+  }
+
+  /* mono override: pure white stroke */
+  .treatments .mono .bloom .petal { stroke: var(--text) !important; }
+  .treatments .mono .bloom .hub-dot { fill: var(--text) !important; }
+
+  /* ── context mocks ────────────────────── */
+  .contexts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .contexts > .full { grid-column: 1 / -1; }
+
+  .ctx-fe {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .ctx-fe .nav {
+    display: flex; align-items: center;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--line);
+  }
+  .ctx-fe .nav .bloom-host { line-height: 0; }
+  .ctx-fe .nav .name {
+    margin-left: 12px;
+    font-size: 15px; font-weight: 500; letter-spacing: -0.01em;
+  }
+  .ctx-fe .nav .links {
+    margin-left: auto; display: flex; gap: 24px;
+    font-size: 13px; color: var(--muted);
+  }
+  .ctx-fe .nav .links a { color: inherit; text-decoration: none; }
+  .ctx-fe .nav .links a:first-child { color: var(--text); }
+  .ctx-fe .body {
+    padding: 24px; color: var(--muted); font-size: 13px;
+    min-height: 80px;
+  }
+
+  .ctx-ext {
+    width: 380px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .ctx-ext .head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .ctx-ext .head .bloom-host { line-height: 0; }
+  .ctx-ext .head .name {
+    font-size: 13px; font-weight: 500;
+  }
+  .ctx-ext .head .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #4ade80;
+    margin-left: auto;
+    box-shadow: 0 0 8px rgba(74,222,128,0.5);
+  }
+  .ctx-ext .body {
+    padding: 16px; min-height: 160px;
+    color: var(--muted); font-size: 12px; line-height: 1.5;
+  }
+
+  .ctx-cli {
+    background: #050608;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 22px 26px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px; line-height: 1.55;
+    color: var(--text);
+    overflow: auto;
+  }
+  .ctx-cli .row1 { color: var(--stroke); }
+  .ctx-cli .row2 { color: var(--muted); }
+  .ctx-cli .meta { color: var(--dim); margin-top: 6px; }
+  .ctx-cli .meta b { color: var(--text); font-weight: 500; }
+  .ctx-cli .ascii {
+    color: var(--stroke);
+    white-space: pre;
+    line-height: 1.0;
+    margin-bottom: 14px;
+    font-size: 13px;
+  }
+
+  /* ─────────────────────────────────────────────────────────────── */
+  /*  THE MARK                                                       */
+  /*                                                                 */
+  /*  Three architectural leaves at 120° intervals. STROKE only,     */
+  /*  no fill — refined, geometric, spread out (no centre overlap).  */
+  /*  A tiny dot at origin acts as a geometric anchor binding the    */
+  /*  three petals into one composition.                             */
+  /* ─────────────────────────────────────────────────────────────── */
+
+  .bloom { overflow: visible; display: block; }
+
+  /* Default petal styling — stroke only.  stroke-width is in user
+     units (the viewBox is -60..60), so when the SVG renders at 24px
+     the stroke is scaled to ~24/120 × 2.6 = 0.52px; at 240px it's
+     about 5px — visually consistent across all sizes. */
+  .bloom .petal {
+    fill: none;
+    stroke: var(--stroke);
+    stroke-width: 3.4;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    transform-origin: 50% 50%;
+    transform-box: fill-box;
+    /* Vector-effect non-scaling-stroke gives a stroke that looks
+       consistent at every render size — at 16px the silhouette
+       still has presence; at 240px it doesn't get spaghetti-thin. */
+    vector-effect: non-scaling-stroke;
+  }
+  .bloom .hub-dot {
+    fill: var(--stroke);
+  }
+  .bloom .petals {
+    transform-origin: 50% 50%;
+    transform-box: view-box;
+  }
+
+  /* ── IDLE — per-petal prime-ratio breath ───────────────────────────
+     Each leaf scales at a different prime duration AND a slightly
+     different amplitude.  Pairwise non-commensurable durations
+     (2.3s / 3.7s / 5.3s) mean the petals never resync, so the
+     bloom looks alive but never random.                              */
+  .bloom.s-idle .petal {
+    animation-name: petal-breath;
+    animation-iteration-count: infinite;
+    animation-timing-function: ease-in-out;
+    animation-direction: alternate;
+  }
+  .bloom.s-idle .petal-wrap-0 .petal { animation-duration: 2.3s; --amp: 1.045; }
+  .bloom.s-idle .petal-wrap-1 .petal { animation-duration: 3.7s; --amp: 1.060; }
+  .bloom.s-idle .petal-wrap-2 .petal { animation-duration: 5.3s; --amp: 1.052; }
+  @keyframes petal-breath {
+    0%   { transform: scale(1.000); }
+    100% { transform: scale(var(--amp, 1.05)); }
+  }
+
+  /* ── THINKING — periodic unfurl, not continuous spinning ─────────
+     Each leaf does the unfurl gesture (rotateY 180° → 0° + scale
+     0 → 1) and then HOLDS in place. After a long settled pause,
+     it folds back and re-unfurls from the other side. The full
+     cycle is mostly STILL — only ~30% of the time is motion.
+     Cascaded delays per leaf mean the unfurl gestures ripple
+     around the bloom; at any moment usually 2 of 3 leaves are
+     settled and 1 is mid-gesture (or all settled).
+     No continuous spin.                                              */
+  .bloom.s-thinking .petal {
+    animation-name: petal-think-pulse;
+    animation-iteration-count: infinite;
+    animation-timing-function: cubic-bezier(0.16, 1.0, 0.3, 1);
+  }
+  /* Same prime durations as before, with cascaded delays so the
+     three gestures are spread evenly across each leaf's cycle.    */
+  .bloom.s-thinking .petal-wrap-0 .petal { animation-duration: 4.3s; animation-delay:  0.00s; }
+  .bloom.s-thinking .petal-wrap-1 .petal { animation-duration: 5.1s; animation-delay: -1.70s; }
+  .bloom.s-thinking .petal-wrap-2 .petal { animation-duration: 6.7s; animation-delay: -3.35s; }
+  @keyframes petal-think-pulse {
+    /* 0–18%: unfurl from edge-on into place
+       18–82%: HOLD settled (this is the bulk of the cycle)
+       82–100%: fold back out                                        */
+      0%  { transform: rotateY(180deg) scale(0); opacity: 0; }
+     18%  { transform: rotateY(0deg)   scale(1); opacity: 1; }
+     82%  { transform: rotateY(0deg)   scale(1); opacity: 1; }
+    100%  { transform: rotateY(-180deg) scale(0); opacity: 0; }
+  }
+
+  /* ── STREAMING — sin wave on stroke-opacity + width ──────────────
+     For leaf i ∈ {0,1,2}, opacity & width modulate as
+       m_i(t) = 1 + A·sin(2π·(t/T − i/3)).
+     animation-delay = -i/3 · T phase-offsets each leaf so the wave
+     rotates around the bloom exactly once per cycle T = 1.6s.
+     12-stop sin sample.                                              */
+  .bloom.s-streaming .petal {
+    animation: petal-wave 1.6s linear infinite;
+  }
+  .bloom.s-streaming .petal-wrap-0 .petal { animation-delay:  0.000s; }
+  .bloom.s-streaming .petal-wrap-1 .petal { animation-delay: -0.533s; }
+  .bloom.s-streaming .petal-wrap-2 .petal { animation-delay: -1.067s; }
+  /* sin samples mapped to (opacity, stroke-width):
+       opacity: 0.35..1.00     stroke-width: 1.6..3.6                  */
+  @keyframes petal-wave {
+      0%   { stroke-opacity: 0.675; stroke-width: 2.6; }
+      8.3% { stroke-opacity: 0.838; stroke-width: 3.1; }
+     16.7% { stroke-opacity: 0.957; stroke-width: 3.5; }
+     25.0% { stroke-opacity: 1.000; stroke-width: 3.6; }
+     33.3% { stroke-opacity: 0.957; stroke-width: 3.5; }
+     41.7% { stroke-opacity: 0.838; stroke-width: 3.1; }
+     50.0% { stroke-opacity: 0.675; stroke-width: 2.6; }
+     58.3% { stroke-opacity: 0.513; stroke-width: 2.1; }
+     66.7% { stroke-opacity: 0.394; stroke-width: 1.7; }
+     75.0% { stroke-opacity: 0.350; stroke-width: 1.6; }
+     83.3% { stroke-opacity: 0.394; stroke-width: 1.7; }
+     91.7% { stroke-opacity: 0.513; stroke-width: 2.1; }
+    100%   { stroke-opacity: 0.675; stroke-width: 2.6; }
+  }
+
+  /* ── SUCCESS — radial cascade pop ────────────────────────────── */
+  .bloom.s-success .petal {
+    animation: petal-pop 700ms cubic-bezier(0.34, 1.56, 0.64, 1) 1 both;
+  }
+  .bloom.s-success .petal-wrap-0 .petal { animation-delay:    0ms; }
+  .bloom.s-success .petal-wrap-1 .petal { animation-delay:   90ms; }
+  .bloom.s-success .petal-wrap-2 .petal { animation-delay:  180ms; }
+  @keyframes petal-pop {
+    0%   { transform: scale(1.000); }
+    35%  { transform: scale(1.140); }
+    65%  { transform: scale(0.955); }
+    100% { transform: scale(1.000); }
+  }
+  .bloom.s-success.loop .petal {
+    animation-iteration-count: infinite;
+  }
+
+  /* ── INTRO — leaves unfurl into place ──────────────────────────── */
+  .bloom.s-intro .petal {
+    animation: petal-unfurl 900ms cubic-bezier(0.16, 1.0, 0.3, 1) 1 both;
+  }
+  .bloom.s-intro .petal-wrap-0 .petal { animation-delay:   0ms; }
+  .bloom.s-intro .petal-wrap-1 .petal { animation-delay: 130ms; }
+  .bloom.s-intro .petal-wrap-2 .petal { animation-delay: 260ms; }
+  .bloom.s-intro .hub-dot {
+    animation: dot-bloom 700ms cubic-bezier(0.16, 1.0, 0.3, 1) 1 both;
+    animation-delay: 100ms;
+  }
+  @keyframes petal-unfurl {
+      0% { transform: rotateY(180deg) scale(0.0); opacity: 0; }
+     35% { opacity: 1; }
+    100% { transform: rotateY(0deg)   scale(1.0); opacity: 1; }
+  }
+  @keyframes dot-bloom {
+      0% { transform: scale(0); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <header class="top">
+    <div class="brand">chika · mark</div>
+    <div class="meta">stroke-only trefoil · prime-ratio breath · sin-wave streaming</div>
+  </header>
+
+  <!-- ── HERO ─────────────────────────────── -->
+  <section class="hero">
+    <div class="bloom-host" data-bloom data-state="idle" data-size="200"></div>
+    <div class="name"><em>chika</em></div>
+    <div class="tagline">the agentic AI assistant</div>
+  </section>
+
+  <!-- ── STATES ──────────────────────────── -->
+  <section>
+    <h2>States</h2>
+    <div class="states">
+      <figure class="state">
+        <div class="bloom-host" data-bloom data-state="idle" data-size="84"></div>
+        <div class="label">Idle</div>
+        <div class="descr">prime-ratio breath<br>2.3 / 3.7 / 5.3 s</div>
+      </figure>
+      <figure class="state">
+        <div class="bloom-host" data-bloom data-state="thinking" data-size="84"></div>
+        <div class="label">Thinking</div>
+        <div class="descr">per-leaf spin<br>+ 14s composition orbit</div>
+      </figure>
+      <figure class="state">
+        <div class="bloom-host" data-bloom data-state="streaming" data-size="84"></div>
+        <div class="label">Streaming</div>
+        <div class="descr">sin(2π(t/T − i/3))<br>opacity + stroke wave</div>
+      </figure>
+      <figure class="state">
+        <div class="bloom-host" data-bloom data-state="success loop" data-size="84"></div>
+        <div class="label">Done</div>
+        <div class="descr">cascade pop<br>90 ms stagger</div>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ── ANIMATION COMIC-STRIPS ───────────── -->
+  <section class="strip">
+    <h2>Intro · leaves unfurl into place</h2>
+    <div class="row" id="stripIntro"></div>
+  </section>
+
+  <section class="strip">
+    <h2>Thinking · leaves spin around their own axes (different speeds)</h2>
+    <div class="row" id="stripThinking"></div>
+  </section>
+
+  <section class="strip">
+    <h2>Streaming · sin wave rotates around the bloom</h2>
+    <div class="row" id="stripWave"></div>
+  </section>
+
+  <!-- ── SIZES ───────────────────────────── -->
+  <section class="panel sizes">
+    <h2>Reads at every size</h2>
+    <div class="row">
+      <div class="col"><div class="bloom-host" data-bloom data-size="16"></div><span>16</span></div>
+      <div class="col"><div class="bloom-host" data-bloom data-size="24"></div><span>24</span></div>
+      <div class="col"><div class="bloom-host" data-bloom data-size="32"></div><span>32</span></div>
+      <div class="col"><div class="bloom-host" data-bloom data-size="48"></div><span>48</span></div>
+      <div class="col"><div class="bloom-host" data-bloom data-size="64"></div><span>64</span></div>
+      <div class="col"><div class="bloom-host" data-bloom data-size="96"></div><span>96</span></div>
+      <div class="col"><div class="bloom-host" data-bloom data-size="128"></div><span>128</span></div>
+    </div>
+  </section>
+
+  <!-- ── TREATMENTS ──────────────────────── -->
+  <section>
+    <h2>Treatments</h2>
+    <div class="treatments">
+      <div>
+        <div class="bloom-host" data-bloom data-state="idle" data-size="80"></div>
+        <div class="label">Default</div>
+      </div>
+      <div class="mono">
+        <div class="bloom-host" data-bloom data-size="80"></div>
+        <div class="label">Mono · white</div>
+      </div>
+      <div class="lightmode">
+        <div class="bloom-host" data-bloom data-size="80"></div>
+        <div class="label">On light</div>
+      </div>
+      <div class="pure-black">
+        <div class="bloom-host" data-bloom data-state="idle" data-size="80"></div>
+        <div class="label">Pure black</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── CONTEXT MOCKS ───────────────────── -->
+  <section>
+    <h2>In context</h2>
+    <div class="contexts">
+      <div class="ctx-fe full">
+        <div class="nav">
+          <div class="bloom-host" data-bloom data-state="idle" data-size="26"></div>
+          <div class="name">chika</div>
+          <div class="links">
+            <a>Chat</a><a>Plan</a><a>Memory</a><a>Settings</a>
+          </div>
+        </div>
+        <div class="body">frontend nav · 26px mark beside the wordmark</div>
+      </div>
+
+      <div class="ctx-ext">
+        <div class="head">
+          <div class="bloom-host" data-bloom data-state="thinking" data-size="22"></div>
+          <div class="name">chika</div>
+          <div class="dot" title="connected"></div>
+        </div>
+        <div class="body">extension popup · 380px<br>mark animates to <code>thinking</code> while a turn streams</div>
+      </div>
+
+      <div class="ctx-cli">
+        <div class="ascii">
+   ╲     ╱
+    ╲   ╱
+     ╲ ╱
+   ───•───
+     ╱ ╲
+    ╱   ╲</div>
+        <div class="row1">chika v2.0.0</div>
+        <div class="row2">the agentic AI assistant — Chika CLI</div>
+        <div class="meta">type <b>/help</b> for commands · <b>/quit</b> to exit</div>
+        <div class="meta">provider: <b>anthropic</b>   model: <b>opus-4-7</b></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  // ─── Geometry ────────────────────────────────────────────────────
+  // Three architectural leaves at 120° intervals. Each leaf is a
+  // single mirror-symmetric cubic path:
+  //   M 0,-58            sharp outer tip
+  //   C 13,-44 19,-22 0,-6   right side: tip → shoulder → narrow base
+  //   C -19,-22 -13,-44 0,-58   mirror back to tip
+  //   Z
+  //
+  // Inner endpoints land at (0,-6), so the petals stop short of the
+  // bloom origin — there's no overlap at the centre. A tiny dot at
+  // the origin is the geometric anchor that ties them together.
+  const PETAL_D = "M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z";
+  const HUB_R   = 3.2;     // small geometric anchor dot
+  const ANGLES  = [0, 120, 240];
+  const SVGNS   = "http://www.w3.org/2000/svg";
+
+  function buildBloom() {
+    const svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("class", "bloom");
+    svg.setAttribute("viewBox", "-60 -60 120 120");
+
+    const g = document.createElementNS(SVGNS, "g");
+    g.setAttribute("class", "petals");
+
+    // Three petal-wraps, each rotates the leaf to its position via the
+    // SVG transform attribute on the wrapper <g>. The inner <path>'s
+    // CSS handles per-leaf animation without clobbering position.
+    ANGLES.forEach((a, i) => {
+      const wrap = document.createElementNS(SVGNS, "g");
+      wrap.setAttribute("class", `petal-wrap petal-wrap-${i}`);
+      wrap.setAttribute("transform", `rotate(${a})`);
+      const p = document.createElementNS(SVGNS, "path");
+      p.setAttribute("d", PETAL_D);
+      p.setAttribute("class", "petal");
+      p.style.setProperty("--i", i);
+      wrap.appendChild(p);
+      g.appendChild(wrap);
+    });
+
+    // Centre anchor dot — small filled circle. Drawn LAST so it sits
+    // on top of any petal edges that come close to the origin.
+    const dot = document.createElementNS(SVGNS, "circle");
+    dot.setAttribute("class", "hub-dot");
+    dot.setAttribute("cx", 0);
+    dot.setAttribute("cy", 0);
+    dot.setAttribute("r", HUB_R);
+    g.appendChild(dot);
+
+    svg.appendChild(g);
+    return svg;
+  }
+
+  function mountBloom(host) {
+    const svg = buildBloom();
+    const stateAttr = host.dataset.state || "";
+    stateAttr.split(/\s+/).filter(Boolean).forEach(s => svg.classList.add(`s-${s}`));
+    const size = host.dataset.size;
+    if (size) {
+      svg.style.width  = `${size}px`;
+      svg.style.height = `${size}px`;
+    }
+    host.replaceChildren(svg);
+    return svg;
+  }
+
+  document.querySelectorAll("[data-bloom]").forEach(mountBloom);
+
+  // ─── Animation comic-strips ──────────────────────────────────────
+  // Mount N bloom snapshots, each at a different animation phase
+  // (achieved via animation-delay + animationPlayState=paused).
+  function buildStrip(stripId, opts) {
+    const strip = document.getElementById(stripId);
+    if (!strip) return;
+    const { state, samples, label, perPetalAdjust } = opts;
+    samples.forEach(t => {
+      const frame = document.createElement("div");
+      frame.className = "frame";
+      const host = document.createElement("div");
+      host.className = "bloom-host";
+      host.dataset.bloom = "";
+      host.dataset.state = state;
+      host.dataset.size = "76";
+      frame.appendChild(host);
+      const labelEl = document.createElement("div");
+      labelEl.className = "t";
+      labelEl.textContent = label(t);
+      frame.appendChild(labelEl);
+      strip.appendChild(frame);
+      const svg = mountBloom(host);
+      svg.querySelectorAll(".petal").forEach((p, i) => {
+        p.style.animationDelay = `${perPetalAdjust(t, i)}s`;
+        p.style.animationPlayState = "paused";
+      });
+    });
+  }
+
+  // STREAMING wave: T=1.6s, captured every 0.27s through the cycle
+  buildStrip("stripWave", {
+    state: "streaming",
+    samples: [0.0, 0.27, 0.53, 0.80, 1.07, 1.33],
+    label: t => `t = ${t.toFixed(2)}s`,
+    perPetalAdjust: (t, i) => -(i / 3) * 1.6 - t,
+  });
+
+  // THINKING: continuous rotateY-flip per leaf at 3.7/5.1/6.7s
+  // with base delays 0 / -1.70 / -3.35. Capture 8 frames across 7s.
+  const THINKING_BASE_DELAYS = [0, -1.70, -3.35];
+  buildStrip("stripThinking", {
+    state: "thinking",
+    samples: [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+    label: t => `t = ${t.toFixed(0)}s`,
+    perPetalAdjust: (t, i) => THINKING_BASE_DELAYS[i] - t,
+  });
+
+  // INTRO: 900ms unfurl, captured every 130ms
+  buildStrip("stripIntro", {
+    state: "intro",
+    samples: [0.000, 0.130, 0.260, 0.390, 0.520, 0.650, 0.780, 0.910],
+    label: t => `${(t * 1000).toFixed(0)}ms`,
+    perPetalAdjust: (t, i) => -(t - i * 0.130),
+  });
+</script>
+</body>
+</html>

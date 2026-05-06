@@ -4,5 +4,7 @@
   "tool_permissions": {},
   "pet_speech": "on",
   "pet_speech_tokens": 200,
-  "auto_continue_max": 10
+  "auto_continue_max": 10,
+  "state_verbs": "on",
+  "state_verbs_tokens": 80
 }

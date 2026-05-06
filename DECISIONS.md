@@ -680,3 +680,134 @@ This pattern is what Vercel (Next.js), Microsoft (playwright-mcp) and others use
 - The CI-generated baselines are the ground truth. Local platform baselines (`-chromium-win32.png` etc.) are convenience artefacts for design review — CI never reads them.
 - *Tradeoff*: a malicious PR could push UI regressions and self-label to "rebaseline" them. Mitigation: maintainers gate the label, and `permissions: contents: write` is scoped to the head branch only — the workflow can't push to `main` directly.
 - *Future*: if Docker becomes a standard dev requirement, swap the workflow trigger for a local `npm run update-snapshots:docker` script so the dev cycle is self-contained.
+
+---
+
+## ADR-27: One brand mark, four surface tiers — geometry duplicated by hand because no shared rendering model spans them all
+
+**Status:** Implemented (`frontend/src/components/ChikaMark.vue`, `extension/popup/popup.html`, `extension/popup/popup.css`, `extension/icons/_render.html`, `extension/icons/_render.mjs`, `chika/_cli/mark.py`, `chika/_cli/renderer.py`)
+
+**Context**
+
+Chika's brand mark — a stroke-only 3-leaf trefoil with a centre anchor dot — needs to render consistently on four surfaces with completely incompatible rendering models:
+
+1. **Frontend (Vue 3 SPA)** — full SVG with CSS animations.
+2. **Extension popup (`popup.html`)** — vanilla HTML + CSS, no Vue runtime, no module imports across the manifest boundary. Inline SVG with the same CSS animations.
+3. **Chrome toolbar icon (manifest)** — Chrome MV3 hard constraint: only static PNGs at 16/32/48/128 px. **Cannot animate at all** — even Lottie / WebP-animated decode to a single static frame.
+4. **CLI banner (rich/Python)** — monospace terminal grid. No SVG support, no curves, no animation primitives below the rich.Live API.
+
+A single source of truth (one SVG file, imported everywhere) is impossible: Vue can't import into the popup's manifest context, Chrome's manifest only accepts PNG paths, and a terminal grid can't render SVG. The geometry must live in 4 places.
+
+The animation states (idle / thinking / streaming / success / intro) are similarly divergent — the Vue component's per-leaf flip animation can't survive PNG export, and the half-block character grid in the CLI can't carry per-leaf rotation either.
+
+**Decision**
+
+Accept the duplication. Codify a "geometry parity rule" so each downstream copy is recognisably the same mark.
+
+The **canonical** definition lives in `frontend/src/components/ChikaMark.vue`. It owns:
+
+- Petal cubic-bezier path: `M 0,-58 C 13,-44 19,-22 0,-6 C -19,-22 -13,-44 0,-58 Z`
+- Angles: `[0, 120, 240]`
+- Hub-dot radius: `3.2`
+- Stroke width: `3.4` (with `vector-effect: non-scaling-stroke`)
+- All five animation states (idle, thinking, streaming, success, intro)
+
+Three downstream copies must mirror those constants by hand:
+
+| Surface         | Source file                         | What it carries                                |
+|-----------------|-------------------------------------|-------------------------------------------------|
+| Popup HTML      | `extension/popup/popup.html`        | Inline SVG + matching CSS in `popup.css`       |
+| Manifest PNGs   | `extension/icons/_render.html`      | Same SVG, screenshot by `_render.mjs` to PNGs   |
+| CLI banner      | `chika/_cli/mark.py`                | Python rasteriser — same cubic, half-block out  |
+
+Each downstream file has a header comment pointing back at `ChikaMark.vue` as the source of truth.
+
+**Workflow when geometry changes**
+
+1. Edit `ChikaMark.vue` (canonical).
+2. Mirror the same numbers into `popup.html`, `popup.css`, `_render.html`, and `chika/_cli/mark.py`.
+3. Re-run `node extension/icons/_render.mjs` from `extension/` to regenerate manifest PNGs.
+4. Run `python -m chika._cli.mark` to spot-check the CLI rasterisation.
+
+**Animation state mapping per surface**
+
+Different surfaces drop down to a strict subset based on what their rendering model can carry:
+
+| State     | Vue / Popup           | Manifest PNG | CLI banner |
+|-----------|-----------------------|--------------|------------|
+| idle      | per-leaf prime breath | static       | static     |
+| thinking  | periodic unfurl pulse | n/a          | static (state-row indicator carries the activity feel — see ADR-28) |
+| streaming | sin-wave brightness   | n/a          | static (same) |
+| success   | cascade pop           | n/a          | static     |
+| intro     | rotateY-flip cascade  | n/a          | static     |
+
+The CLI doesn't attempt animation in the banner — half-block half-pixel grids don't carry rotation gracefully, and a one-shot startup banner doesn't need to. *During* a turn, the inline state-row indicator (ADR-28) carries the activity feel instead.
+
+**Consequences**
+
+- Geometry changes require 4 file edits + a regen command, not 1. We accept this cost in exchange for native rendering on every surface — nothing is a screenshot, nothing is a fallback.
+- Animation richness scales naturally with the surface. The mark still reads as the same trefoil everywhere because the silhouette is identical.
+- *Tradeoff*: the duplicated CSS/SVG in `popup.css` and `popup.html` could drift from `ChikaMark.vue` if a maintainer only edits one. The header comment + this ADR are the only guard.
+- *Future*: if/when the popup grows a Vite build pipeline, replace its inline SVG with an imported component from a shared package — that's the only path to deduplicate without losing native rendering.
+
+---
+
+## ADR-28: Inline state indicator with LLM-generated context-aware verbs (fire-and-forget)
+
+**Status:** Implemented (`chika/_cli/state_verbs.py`, `chika/_cli/mark.py`, `chika/_cli/renderer.py`, `api/settings_store.py`, `chika/_cli/commands.py`, `frontend/src/components/SettingsModal.vue`)
+
+**Context**
+
+Claude Code shows an inline activity row while a turn is in flight: `✸ Vibing… 2.3s`. It's a single line that conveys "the agent is doing something, here's roughly what" — much friendlier than a blank screen during a long LLM call. The pattern is small but high-impact for perceived responsiveness.
+
+We wanted the same in the chika CLI, with two upgrades:
+
+1. **Visual parity with our trefoil mark** — the glyph beside the verb should read as our 3-leaf trefoil, not a generic asterisk. ADR-27 owns the geometry; this ADR owns how that geometry compresses to one terminal row.
+2. **Context-aware verbs**, not a fixed rotation. "Vibing / Pondering / Cooking" works generically but "Investigating / Tracing / Diagnosing" is much better when the user just asked "why is this test failing" — the verbs match the *shape* of the request.
+
+**Decision**
+
+The indicator is a single inline row showing three triangle glyphs `◣ ▲ ◢` — one per trefoil leaf — with the highlighted leaf rotating each frame, then a verb and an elapsed-time counter:
+
+```
+  ◣ ▲ ◢   Investigating…   2.3s
+```
+
+Highlight rotation goes top → right → left, the same direction as the SVG's streaming wave (sin(2π(t/T − i/3))).
+
+**Verbs are generated per turn by an LLM call** in a fire-and-forget background task — same shape as `pet_speech.py`. Pattern:
+
+1. User submits a message → renderer opens the indicator window + kicks off the LLM call asking for 6-8 present-continuous verbs that fit *this specific* request.
+2. Until the call returns, the indicator cycles through static defaults (`mark.INLINE_VERBS`).
+3. When the call lands (~hundreds of ms later), `_state_verbs` is replaced with the contextual list and the indicator swaps in mid-cycle.
+4. If the call fails, times out, or `state_verbs == "off"`, the static list keeps showing — the feature degrades gracefully.
+
+**Settings (in `api.settings_store`)**
+
+| Key                   | Type           | Default | Description                                       |
+|-----------------------|----------------|---------|---------------------------------------------------|
+| `state_verbs`         | `"on" / "off"` | `"on"`  | Whether to fire the LLM call at all              |
+| `state_verbs_tokens`  | `int [16,200]` | `80`    | Token budget per LLM call                         |
+
+Surfaced in:
+
+- CLI: `/state verbs on|off`, `/state tokens <int>`
+- Frontend: Settings → Behaviour tab
+
+**Visibility window**
+
+The indicator is shown only when no other UI is taking visual responsibility:
+
+- Hidden when the tool spinner row is rendering (a tool is mid-execution).
+- Hidden once `_answer_buf` has any tokens (streaming text takes over).
+- Hidden once `_thinking_buf` has any reasoning (the thinking panel takes over).
+- Cleared at `end_turn`.
+
+So in practice the indicator fills the dead air between user input and the first sign of life, and again between tool completions if the LLM is rethinking.
+
+**Consequences**
+
+- The CLI feels alive between turns — same friendly responsiveness Claude Code has, with verbs tuned to the user's specific request.
+- *Cost*: one extra ~80-token LLM call per turn. With Anthropic Sonnet-4 pricing this is sub-penny per turn; users on tight budgets can flip `state_verbs` off and pay nothing for the feature.
+- *Tradeoff*: if the LLM call is slow, the contextual verbs may not arrive before the user has already seen the static defaults. We accept this — the swap is seamless and the static defaults are reasonable.
+- *Future*: cache the verb list per (user-message-hash) so re-asks reuse the same verbs without re-generating. Probably not worth the cache layer until users complain.

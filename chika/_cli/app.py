@@ -272,6 +272,10 @@ async def _run_rich() -> None:
         # renderer owns pet animation; we just track the final state so the
         # animator-driven panel finishes on the right frame.
         renderer.start_turn()
+        # Kick off a fire-and-forget LLM call for context-aware verbs
+        # in the inline state indicator. Lands in the renderer once it
+        # returns; falls back to static verbs if it fails or is off.
+        renderer.prime_state_verbs(engine, text)
         pet_state = "working"
         turn_events: list[dict] = []
         try:
