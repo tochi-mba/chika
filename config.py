@@ -158,3 +158,63 @@ def make_client():
         from openai import AsyncOpenAI
         # Ollama speaks the OpenAI API — no real key needed
         return AsyncOpenAI(base_url=cfg.extra["base_url"], api_key="ollama")
+
+
+def reload_from_env() -> None:
+    """Re-read ``.env`` and refresh every PROVIDER/MODEL/API-KEY global.
+
+    Hot-reload entry point: call after ``.env`` has been edited (via
+    ``/provider``, ``/model``, ``PATCH /api/provider``, or any path
+    that writes the .env file) so the next ``make_client()`` and the
+    engine's per-call provider checks see the new values without a
+    process restart.
+
+    Why we mutate module globals instead of computing per-call:
+    callers throughout the engine read ``config.PROVIDER`` /
+    ``config.ANTHROPIC_MODEL`` etc. directly — refactoring every
+    callsite to read through a function would touch dozens of files.
+    The module-globals + reload_from_env() pattern is one tight
+    function, no callsite churn, and the refresh is atomic enough
+    in practice (settings changes are rare; in-flight LLM calls
+    already captured the old values into local request kwargs by
+    the time they fire).
+    """
+    global PROVIDER
+    global AZURE_ENDPOINT, AZURE_API_KEY, AZURE_DEPLOYMENT, AZURE_API_VERSION
+    global ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+    global ANTHROPIC_MAX_TOKENS, ANTHROPIC_MAX_TOKENS_THINKING, ANTHROPIC_COMPLETE_MAX_TOKENS
+    global OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MAX_TOKENS
+    global OLLAMA_BASE_URL, OLLAMA_MODEL
+    global THINKING_ENABLED, THINKING_BUDGET_TOKENS
+    global GROUNDING_VALIDATE_RESPONSE, GROUNDING_MIN_LENGTH
+    global AUTONOMY_MODE
+
+    load_dotenv(Path(__file__).parent / ".env", override=True)
+
+    PROVIDER = os.getenv("CHIKA_PROVIDER", "anthropic").lower()
+
+    AZURE_ENDPOINT    = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+    AZURE_API_KEY     = os.getenv("AZURE_OPENAI_KEY", "")
+    AZURE_DEPLOYMENT  = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+    AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2024-10-21")
+
+    ANTHROPIC_API_KEY              = os.getenv("ANTHROPIC_API_KEY", "")
+    ANTHROPIC_MODEL                = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    ANTHROPIC_MAX_TOKENS           = _int_env("CHIKA_ANTHROPIC_MAX_TOKENS", 16384)
+    ANTHROPIC_MAX_TOKENS_THINKING  = _int_env("CHIKA_ANTHROPIC_MAX_TOKENS_THINKING", 32768)
+    ANTHROPIC_COMPLETE_MAX_TOKENS  = _int_env("CHIKA_ANTHROPIC_COMPLETE_MAX_TOKENS", 8192)
+
+    OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL      = os.getenv("OPENAI_MODEL", "gpt-4o")
+    OPENAI_MAX_TOKENS = _int_env("CHIKA_OPENAI_MAX_TOKENS", 16384)
+
+    OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "llama3.1")
+
+    THINKING_ENABLED       = _bool(os.getenv("CHIKA_THINKING"), default=True)
+    THINKING_BUDGET_TOKENS = _int_env("CHIKA_THINKING_BUDGET", 4000)
+
+    GROUNDING_VALIDATE_RESPONSE = _bool(os.getenv("CHIKA_VALIDATE_RESPONSE"), default=True)
+    GROUNDING_MIN_LENGTH        = _int_env("CHIKA_GROUNDING_MIN_LENGTH", 160)
+
+    AUTONOMY_MODE = os.getenv("CHIKA_AUTONOMY", "supervised")

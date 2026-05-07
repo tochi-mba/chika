@@ -334,3 +334,15 @@ def test_list_stacks_is_sorted_and_contains_all():
     listed = list_stacks()
     assert listed == sorted(listed), "list_stacks() must be sorted"
     assert set(listed) == set(_STACKS.keys())
+
+
+def test_scaffold_web_app_accepts_alias_kwargs(tmp_path: Path) -> None:
+    """``_scaffold_web_app`` accepts ``template`` for ``stack`` and
+    ``project_name`` for ``name`` — common LLM kwarg slips. Used to
+    live in ``tests/test_skill_gate.py``; moved here so the test sits
+    next to the code it exercises (skill-isolation contract)."""
+    out = asyncio.run(_scaffold_web_app(
+        template="vanilla", project_name="aliased",
+        target_dir=str(tmp_path),
+    ))
+    assert out.get("ok") is True, f"alias kwargs should resolve, got {out}"

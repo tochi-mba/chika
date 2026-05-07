@@ -105,16 +105,22 @@ class ErrorEvent(BaseModel):
     step_id: str | None = None
 
 
-class SpotifyAuthChangedEvent(BaseModel):
-    """Broadcast whenever a profile's Spotify connection state flips
-    (auth completes, user disconnects, refresh fails). Surfaces use it
-    to swap their UI without polling the status endpoint. Never carries
-    raw tokens — only display-name + product tier."""
-    type: str = "spotify_auth_changed"
-    authorized: bool
-    display_name: str | None = None
-    product: str | None = None
-    error: str | None = None
+class PlanArchivedEvent(BaseModel):
+    """Fired when ``plan_set`` auto-archives the previous plan, OR
+    when ``plan_archive`` is explicitly called. Lets every UI surface
+    show a brief "archived" chip + an updated history count without
+    polling. Carries summary fields only — never the full task list,
+    so the event stays small enough to broadcast cheaply."""
+    type: str = "plan_archived"
+    auto: bool = False
+    goal: str | None = None
+    reason: str | None = None
+    tasks_total: int = 0
+    tasks_done: int = 0
+    archived_at: float | None = None
+    superseded_by: str | None = None
+    history_count: int = 0
+    source: str | None = None
 
 
 # ── REST response models ──────────────────────────────────────────────────────
@@ -156,6 +162,12 @@ class SettingsPatch(BaseModel):
     pet_speech_tokens: int | None = None
     auto_continue: str | None = None
     auto_continue_max: int | None = None
+    # ``skills_disabled`` is the dynamic-skill toggle list — a flip
+    # here triggers session_manager.reload_skills() server-side so
+    # tool availability changes mid-session without a restart.
+    skills_disabled: list[str] | None = None
+    spotify_share_across_profiles: str | None = None
+    spotify_profile_overrides: dict[str, bool] | None = None
 
 
 # ── Event contract — single source of truth ──────────────────────────────────
@@ -212,8 +224,8 @@ class EventType(str, Enum):  # noqa: UP042 — keep multiple-inheritance form fo
     EXTENSION_STATUS = "extension_status"
     RESET_DONE = "reset_done"
     APPROVAL_REQUIRED = "approval_required"
-    # Integrations
-    SPOTIFY_AUTH_CHANGED = "spotify_auth_changed"
+    # Plan
+    PLAN_ARCHIVED = "plan_archived"
     # Shell
     SHELL_PROCESS_START = "shell_process_start"
     SHELL_OUTPUT = "shell_output"
@@ -248,8 +260,23 @@ _TYPED_MODELS: dict[str, type[BaseModel]] = {
     EventType.COMPACTION.value:      CompactionEvent,
     EventType.DONE.value:            DoneEvent,
     EventType.ERROR.value:           ErrorEvent,
-    EventType.SPOTIFY_AUTH_CHANGED.value: SpotifyAuthChangedEvent,
+    EventType.PLAN_ARCHIVED.value:        PlanArchivedEvent,
 }
+
+
+# Skill-contributed event models. The skill discovery walk yields
+# ``(event_name, model_class)`` pairs for every shipped skill that
+# exports ``SKILL_EVENTS``. We merge them into ``_TYPED_MODELS`` at
+# module import time so ``validate_event`` works for skill events
+# without any centralised registration. Wrapped in try/except so a
+# bootstrap failure (e.g. a syntax error in one skill) doesn't tank
+# the whole API server import.
+try:
+    from chika.skills import iter_skill_events  # type: ignore[attr-defined]
+    for _evt_name, _evt_model in iter_skill_events():
+        _TYPED_MODELS[_evt_name] = _evt_model  # type: ignore[assignment]
+except Exception:
+    pass
 
 
 class EventValidationError(ValueError):

@@ -8,6 +8,15 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     port: 5173,
+    // Skill UIs live under ../chika/skills/*_skill/ui/*.vue — outside
+    // the frontend root by design (each skill folder is the source of
+    // truth for its tools, routes, AND UI). Vite's default fs.allow
+    // restricts dev-server imports to the project root, so we widen
+    // it to the repo root so the SettingsModal's import.meta.glob can
+    // resolve those component files at build/dev time.
+    fs: {
+      allow: ['..'],
+    },
     proxy: {
       '/api': {
         target: API_URL,

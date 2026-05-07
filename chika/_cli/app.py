@@ -88,6 +88,28 @@ def cli(argv: list[str] | None = None) -> None:
     _enable_utf8_stdout()
     _ensure_root_on_path()
 
+    # Load .env BEFORE any skill module imports — skills read their
+    # env-var configuration (CHIKA_SPOTIFY_CLIENT_ID, etc.) at module
+    # import time, and the discovery walk for skill subcommands
+    # imports each skill package. Without this load, ``chika spotify
+    # connect`` would see an empty CLIENT_ID even when the user's
+    # ``.env`` is correctly populated.
+    #
+    # Searches both the user's CWD (the most common case — they ran
+    # the command from the repo root) AND the install location's
+    # parent (covers ``pip install -e .`` from a different folder).
+    try:
+        from dotenv import load_dotenv
+        _candidate_envs = [
+            Path.cwd() / ".env",
+            Path(__file__).resolve().parent.parent.parent / ".env",
+        ]
+        for _candidate in _candidate_envs:
+            if _candidate.is_file():
+                load_dotenv(_candidate, override=True)
+    except Exception:
+        pass
+
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("install-extension", "install-ext"):
         _run_install_extension()
@@ -107,9 +129,28 @@ def cli(argv: list[str] | None = None) -> None:
     if args and args[0] == "replay":
         from chika._cli import replay as replay_mod
         sys.exit(replay_mod.main(args[1:]))
-    if args and args[0] == "spotify":
-        from chika._cli import spotify as spotify_cmd
-        sys.exit(spotify_cmd.main(args[1:]))
+    if args and args[0] == "dev":
+        # One-shot dev stack: API server + Vite frontend in parallel,
+        # both with hot-reload, output multiplexed into this terminal.
+        # Saves the constant juggle of three terminals during dev.
+        import subprocess as _sp
+        from pathlib import Path as _P
+        sys.exit(_sp.call(
+            [sys.executable, str(_P(__file__).resolve().parent.parent.parent
+                                   / "scripts" / "dev.py")] + args[1:]
+        ))
+
+    # Skill-owned argv subcommands. Skills declare their own
+    # subcommands via ``register_cli()`` — the dispatch walks every
+    # shipped skill so a fresh skill folder = a fresh subcommand,
+    # no edits here required.
+    if args:
+        from chika.skills import iter_skill_cli
+        for _skill_name, table in iter_skill_cli():
+            argv_table = table.get("argv") or {}
+            handler = argv_table.get(args[0])
+            if callable(handler):
+                sys.exit(handler(args[1:]))
 
     if not _have_rich():
         from chika._cli.fallback import run_plain
@@ -344,7 +385,8 @@ async def _run_rich() -> None:
         #   - the plan-approval gate silently skips (agent runs the plan
         #     before the user has a chance to weigh in)
         #   - workspace-scope writes silently auto-grant
-        #   - ask_user / question_skill returns ``no_question_handler``
+        #   - ``ask_user`` (the question skill's tool) returns
+        #     ``no_question_handler``
         # The renderer is built below; we hand the handlers a small
         # late-binding proxy so they can pause/resume the Live region
         # at prompt time (otherwise the prompt is invisible behind it).
@@ -434,7 +476,7 @@ async def _run_rich() -> None:
             **{
                 "provider": cfg.provider,
                 "model":    cfg.model,
-                "profile":  p.name if p else "default",
+                "profile":  p.name if p else "unknown",
                 "mode":     autonomy,
             },
         )

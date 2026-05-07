@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import getpass
 import hashlib
 import json
+import os
+import re
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def _safe_getlogin() -> str:
+    """``os.getlogin`` raises in detached processes (no controlling
+    terminal). Wrap so the caller can chain through to the next
+    fallback without a try/except per call site."""
+    try:
+        return os.getlogin()
+    except Exception:
+        return ""
 
 
 @dataclass
@@ -94,6 +107,76 @@ class ProfileManager:
 
     def list_profiles(self) -> list[str]:
         return sorted(d.name for d in self._dir.iterdir() if d.is_dir())
+
+    # ── Bootstrap ────────────────────────────────────────────────────────────
+
+    @classmethod
+    def bootstrap_name(cls) -> str:
+        """Return the name to use for the FIRST-EVER profile when no
+        profile exists on disk yet.
+
+        Resolution order (first non-empty wins):
+          1. ``CHIKA_PROFILE`` env var — explicit override for power
+             users / installers / CI.
+          2. OS username (``os.getlogin``, ``getpass.getuser``,
+             ``USERNAME``/``USER`` env). Stripped + lowercased +
+             sanitised through :meth:`_sanitize_name`.
+          3. The string ``"user"`` as a final fallback when every
+             other source is empty (extremely rare — sandbox
+             environments).
+
+        We deliberately do NOT use the string ``"default"`` anywhere —
+        it's a useless label that conveys no identity. ``CHIKA_PROFILE``
+        + OS username give the user a real, recognisable handle from
+        the very first run; only deeply-anonymous environments (CI
+        with no user, sealed containers) ever land on ``"user"``.
+        """
+        # 1. Explicit env override.
+        explicit = os.environ.get("CHIKA_PROFILE", "").strip()
+        if explicit:
+            try:
+                return cls._sanitize_name(explicit)
+            except ValueError:
+                pass  # fall through
+
+        # 2. OS user identity. ``os.getlogin`` is the most reliable
+        # but raises in detached processes (no controlling terminal);
+        # ``getpass.getuser`` is the safer fallback.
+        for source in (_safe_getlogin, getpass.getuser):
+            try:
+                candidate = (source() or "").strip()
+            except Exception:
+                continue
+            if not candidate:
+                continue
+            # Username may legitimately contain spaces/dots/dashes —
+            # ``_sanitize_name`` lowercases + replaces spaces with
+            # underscores. Strip non-ascii via ``re`` first so an
+            # unusual locale doesn't break the path resolver.
+            cleaned = re.sub(r"[^A-Za-z0-9._\- ]+", "", candidate)
+            try:
+                return cls._sanitize_name(cleaned)
+            except ValueError:
+                continue
+
+        # 3. Last-resort fallback — sandboxed CI / Docker with no user.
+        return "user"
+
+    def bootstrap_initial(self) -> Profile:
+        """Idempotent: return the existing initial profile if there
+        already is one on disk, else create one from
+        :meth:`bootstrap_name`. Used by the engine at first boot in
+        place of the old hardcoded ``get_or_create("default")``."""
+        existing = self.list_profiles()
+        if existing:
+            # Most recently modified directory wins — the user's
+            # last-active profile across sessions.
+            picked = max(
+                existing,
+                key=lambda n: (self._dir / n).stat().st_mtime,
+            )
+            return self.get_or_create(picked)
+        return self.get_or_create(self.bootstrap_name())
 
     # ── Password helpers ──────────────────────────────────────────────────────
 

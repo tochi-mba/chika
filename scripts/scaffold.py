@@ -52,7 +52,7 @@ from __future__ import annotations
 #   from chika.skills.{name}_skill.{name}_tool import {pascal}_tool
 #   register_tool({pascal}_tool)
 #
-# See chika/skills/git_skill/__init__.py for a working example.
+# See any shipped skill's __init__.py for a working example.
 '''
 
 _SKILL_MD_TEMPLATE = '''# {title}
@@ -152,8 +152,9 @@ def scaffold_skill(name: str) -> int:
     print()
     print("Next steps:")
     print(f"  1. Edit chika/skills/{pkg_name}/SKILL.md")
-    print("  2. Add tools (see chika/skills/git_skill/ for the pattern)")
-    print("  3. Register tools in api/session_manager.py")
+    print("  2. Add tools (see any shipped skill folder for the pattern)")
+    print("  3. Skills auto-register via the discovery walk — no edits to "
+          "api/session_manager.py needed.")
     print(f"  4. python scripts/regenerate_skill_summaries.py --skill {pkg_name}")
     return 0
 

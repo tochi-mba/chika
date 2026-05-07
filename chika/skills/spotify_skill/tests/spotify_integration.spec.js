@@ -18,7 +18,14 @@
  *   - Per-profile override toggle only shown under share-on
  *   - Error message renders on connect failure
  */
-import { test, expect, waitForApp } from './_fixtures.js'
+// Spec lives inside the spotify skill folder per the drop-in skill
+// contract (ADR-38) but the shared Playwright fixtures still live at
+// ``frontend/e2e/_fixtures.js`` — they're cross-cutting test
+// infrastructure (mock WebSocket, mock fetch, ``chikaPage`` fixture)
+// shared by every skill's e2e suite. Resolved via relative path
+// rather than a path alias since Playwright doesn't read the Vite
+// ``resolve.alias`` config.
+import { test, expect, waitForApp } from '../../../../frontend/e2e/_fixtures.js'
 
 test.use({ viewport: { width: 1280, height: 800 } })
 
@@ -103,7 +110,7 @@ test.describe('Spotify Integrations tab', () => {
   })
 
 
-  test('not configured — connect button is disabled with helpful copy', async ({ chikaPage }) => {
+  test('not configured — shows inline setup guide + Client ID paste form', async ({ chikaPage }) => {
     await seedStatus(chikaPage, {
       authorized: false, client_id_set: false,
       profile: 'default', active_profile: 'default',
@@ -112,11 +119,57 @@ test.describe('Spotify Integrations tab', () => {
     })
     await openIntegrations(chikaPage)
     const card = spotifyCard(chikaPage)
-    await expect(card.locator('.btn-primary')).toBeDisabled()
-    await expect(card).toContainText(/CHIKA_SPOTIFY_CLIENT_ID|client_id/i)
+    // The setup guide (collapsible numbered list) is visible by default
+    await expect(card.locator('.client-id-steps')).toBeVisible()
+    await expect(card).toContainText(/Spotify Developer Dashboard/i)
+    // The inline Client-ID input is present and the Save button is
+    // disabled until the user types something
+    const idInput = card.locator('input#spotify-client-id')
+    await expect(idInput).toBeVisible()
+    await expect(idInput).toBeEditable()
+    const saveBtn = card.locator('.client-id-form .btn-primary')
+    await expect(saveBtn).toBeDisabled()
+    // The "Connect Spotify" button is HIDDEN until a Client ID is set —
+    // the inline Save & connect button replaces it.
+    await expect(card.locator('.actions .btn-primary')).toHaveCount(0)
     await expect(card).toHaveScreenshot('spotify-not-configured.png', {
       maxDiffPixelRatio: 0.05,
     })
+  })
+
+
+  test('typing a Client ID enables the Save & connect button', async ({ chikaPage }) => {
+    await seedStatus(chikaPage, {
+      authorized: false, client_id_set: false,
+      profile: 'default', active_profile: 'default',
+      shared: false, shared_setting: false,
+      overrides_share: false, profile_overrides: {},
+    })
+    await openIntegrations(chikaPage)
+    const card = spotifyCard(chikaPage)
+    const saveBtn = card.locator('.client-id-form .btn-primary')
+    await expect(saveBtn).toBeDisabled()
+    await card.locator('input#spotify-client-id').fill(
+      '0123456789abcdef0123456789abcdef',
+    )
+    await expect(saveBtn).toBeEnabled()
+  })
+
+
+  test('show/hide setup steps toggle', async ({ chikaPage }) => {
+    await seedStatus(chikaPage, {
+      authorized: false, client_id_set: false,
+      profile: 'default', active_profile: 'default',
+      shared: false, shared_setting: false,
+      overrides_share: false, profile_overrides: {},
+    })
+    await openIntegrations(chikaPage)
+    const card = spotifyCard(chikaPage)
+    await expect(card.locator('.client-id-steps')).toBeVisible()
+    await card.locator('.client-id-toggle').click()
+    await expect(card.locator('.client-id-steps')).toHaveCount(0)
+    await card.locator('.client-id-toggle').click()
+    await expect(card.locator('.client-id-steps')).toBeVisible()
   })
 
 

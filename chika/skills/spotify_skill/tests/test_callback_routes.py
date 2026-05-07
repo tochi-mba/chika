@@ -14,8 +14,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.routes.spotify import router as spotify_router
 from chika.skills.spotify_skill import connection, oauth
+from chika.skills.spotify_skill.routes import router as spotify_router
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def client(spotify_env, monkeypatch) -> TestClient:
     # Stub out the broadcast helper so route tests don't need the
     # live WS infrastructure to be healthy.
     monkeypatch.setattr(
-        "api.routes.spotify.push_to_all_frontend_sessions",
+        "chika.skills.spotify_skill.routes.push_to_all_frontend_sessions",
         AsyncMock(),
     )
     app = FastAPI()
@@ -88,7 +88,7 @@ def test_disconnect_clears_tokens_and_broadcasts(client, monkeypatch, spotify_en
         "expires_at":   int(time.time()) + 3600,
     })
     broadcast = AsyncMock()
-    monkeypatch.setattr("api.routes.spotify.push_to_all_frontend_sessions", broadcast)
+    monkeypatch.setattr("chika.skills.spotify_skill.routes.push_to_all_frontend_sessions", broadcast)
 
     res = client.post("/api/spotify/disconnect")
     data = res.json()

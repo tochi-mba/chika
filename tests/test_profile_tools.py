@@ -54,13 +54,18 @@ async def test_profile_list_returns_current_and_list():
 
 
 @pytest.mark.asyncio
-async def test_profile_list_uses_default_when_no_active():
+async def test_profile_list_falls_back_when_no_active():
+    """Defensive fallback — engine._active_profile is None only in
+    a brief window before bootstrap completes. Returns ``"unknown"``
+    (not the literal ``"default"`` — that label conveys no identity
+    and was removed when the system started bootstrapping initial
+    profiles from ``CHIKA_PROFILE`` env / OS username)."""
     engine = MagicMock()
     engine._active_profile = None
     pm = _pm([])
     tools = pt.make_profile_tools(engine, pm)
     out = await _tool(tools, "profile_list").handler()
-    assert out["current"] == "default"
+    assert out["current"] == "unknown"
 
 
 @pytest.mark.asyncio
@@ -75,13 +80,15 @@ async def test_profile_get_returns_active_profile_details():
 
 
 @pytest.mark.asyncio
-async def test_profile_get_returns_default_when_no_active():
+async def test_profile_get_falls_back_when_no_active():
+    """Defensive fallback — see the matching profile_list test for
+    the rationale on ``"unknown"`` rather than ``"default"``."""
     engine = MagicMock()
     engine._active_profile = None
     pm = _pm([])
     tools = pt.make_profile_tools(engine, pm)
     out = await _tool(tools, "profile_get").handler()
-    assert out["name"] == "default"
+    assert out["name"] == "unknown"
     assert out["workspace"] is None
 
 

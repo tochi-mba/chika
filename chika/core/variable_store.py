@@ -6,9 +6,19 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-# Matches $var, $var.field, $var.field.sub, $var[0], $var.field[0]
+# Matches:
+#   $var
+#   $var.field        $var.field.sub
+#   $var[0]           $var.field[0]
+#   $var[*]           $var.tracks[*].uri    (list projection)
+#
+# ``[*]`` is the projection operator: walk the list at that point
+# and pull the same sub-path from every item. Used for shapes like
+# ``$top_tracks.tracks[*].uri`` → ``["spotify:track:a", "...:b"]``.
+# Without it, agents had to hand-write each list index, which fails
+# the moment the result shape changes between turns.
 _VAR_RE = re.compile(
-    r"\$([a-zA-Z_][a-zA-Z0-9_]*(?:(?:\.[a-zA-Z_][a-zA-Z0-9_]*)|\[\d+\])*)"
+    r"\$([a-zA-Z_][a-zA-Z0-9_]*(?:(?:\.[a-zA-Z_][a-zA-Z0-9_]*)|\[\d+\]|\[\*\])*)"
 )
 
 
@@ -156,10 +166,22 @@ class VariableStore:
         """
         Resolve 'name.field[0]' (no leading $) from the store.
         Returns the resolved value, or the original '$ref' string if not found.
+
+        Supports a ``[*]`` projection operator: ``items[*].uri``
+        walks the list and pulls ``.uri`` from every entry, returning
+        a fresh list. Projections compose with deeper paths — e.g.
+        ``data.users[*].profile.email`` returns a flat list of
+        emails (skipping items that don't have the deeper path).
         """
-        parts = ref.replace("[", ".").replace("]", "").split(".")
-        # Try progressively longer dotted prefixes as the variable name
-        # e.g. for "profile.workspace" try "profile.workspace" before "profile"
+        # Tokenize: split on dots BUT preserve ``[*]`` and ``[N]``
+        # markers so we can branch the walker on them.
+        # Replace ``[N]`` → ``.N`` and ``[*]`` → ``.<*>`` (sentinel).
+        tokenised = ref.replace("[*]", ".<*>").replace("[", ".").replace("]", "")
+        parts = [p for p in tokenised.split(".") if p]
+
+        # Find the variable name — try progressively longer dotted
+        # prefixes (so ``profile.workspace`` resolves before falling
+        # back to ``profile``).
         var = None
         prefix_len = len(parts)
         while prefix_len > 0:
@@ -171,19 +193,39 @@ class VariableStore:
             prefix_len -= 1
         if var is None:
             return f"${ref}"  # unresolved — preserve original
-        result = var.value
-        for part in parts:
+
+        return self._walk_path(var.value, parts, ref)
+
+    def _walk_path(self, current: Any, parts: list[str], ref_for_error: str) -> Any:
+        """Walk ``current`` along ``parts``. Branches on ``<*>``
+        projection — when encountered, the rest of the path is
+        applied to every list element and the results collected."""
+        for i, part in enumerate(parts):
             if not part:
                 continue
+            if part == "<*>":
+                # Projection — apply remaining path to every item.
+                if not isinstance(current, list):
+                    return f"${ref_for_error}"
+                rest = parts[i + 1:]
+                projected: list = []
+                for item in current:
+                    sub = self._walk_path(item, rest, ref_for_error)
+                    # Skip items where the sub-path didn't resolve
+                    # (preserves the "best-effort projection" shape).
+                    if isinstance(sub, str) and sub.startswith("$"):
+                        continue
+                    projected.append(sub)
+                return projected
             try:
-                if isinstance(result, dict):
-                    result = result[part]
-                elif isinstance(result, list):
-                    result = result[int(part)]
-                elif hasattr(result, part):
-                    result = getattr(result, part)
+                if isinstance(current, dict):
+                    current = current[part]
+                elif isinstance(current, list):
+                    current = current[int(part)]
+                elif hasattr(current, part):
+                    current = getattr(current, part)
                 else:
-                    return f"${ref}"
+                    return f"${ref_for_error}"
             except (KeyError, IndexError, ValueError):
-                return f"${ref}"
-        return result
+                return f"${ref_for_error}"
+        return current

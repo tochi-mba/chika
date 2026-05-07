@@ -2,7 +2,7 @@
 // Source of truth: api/server.py (FastAPI route definitions).
 // Regenerate: python scripts/gen_openapi_client.py
 // CI guard:   python scripts/gen_openapi_client.py --check
-// Generated:  2026-05-06
+// Generated:  2026-05-07
 
 // ── Schema interfaces ────────────────────────────────────────
 
@@ -37,6 +37,9 @@ export interface SettingsPatch {
   pet_speech_tokens?: number | null;
   auto_continue?: string | null;
   auto_continue_max?: number | null;
+  skills_disabled?: string[] | null;
+  spotify_share_across_profiles?: string | null;
+  spotify_profile_overrides?: Record<string, boolean> | null;
 }
 
 /** OpenAPI schema: ValidationError. */

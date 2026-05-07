@@ -5,11 +5,33 @@ frontend's Workflow tab.
 
 ## Tools
 
-| Tool          | Purpose                                                |
-|---------------|--------------------------------------------------------|
-| `plan_set`    | Replace the plan with a fresh list of steps.           |
-| `plan_update` | Mark a step as `done`, `in_progress`, or `failed`.     |
-| `plan_get`    | Read the current `$plan` (also exposed as variable).   |
+| Tool             | Purpose                                                |
+|------------------|--------------------------------------------------------|
+| `plan_set`       | Replace the plan with a fresh list of steps. **Auto-archives** the previous plan (if any) into `$plan_archive` before installing the new one — no manual `plan_archive` needed first. |
+| `plan_update`    | Mark a step as `done`, `in_progress`, or `failed`.     |
+| `plan_get`       | Read the current `$plan` (also exposed as variable).   |
+| `plan_add`       | Append a task / subtask to the existing plan.          |
+| `plan_remove`    | Delete a task by id.                                   |
+| `plan_edit`      | Surgical edits — set goal, set requirement, replace text within a task — without losing status/progress. |
+| `plan_reconcile` | LLM-driven reconcile of plan vs work-so-far when the agent has drifted from its plan. |
+| `plan_archive`   | Explicit retire — moves the active plan to `$plan_archive` AND clears `$plan`. Use when work is genuinely done; otherwise just call `plan_set` with the next plan and let auto-archive do this for you. |
+| `plan_history`   | Read past archived plans (newest first). |
+| `plan_clear`     | Drop the active plan WITHOUT archiving. Rare — use only when the user says "scrap that plan, never mind" AND nothing is worth keeping. |
+
+## Auto-archive behaviour
+
+`plan_set` is the canonical "start a new plan" call. When it runs and
+an existing plan is already in `$plan`, the prior plan is automatically
+moved to `$plan_archive` with a stamp explaining why (`shipped`,
+`abandoned`, or `superseded by plan_set (<n>/<m> tasks done)`). The
+old plan's `in_progress` task is marked `interrupted` so retrospectives
+know where work paused. A one-line summary lands in the profile's
+`memory.md` so the agent can see snippets of past plans across future
+sessions.
+
+Skip the auto-archive only when:
+- Old plan was empty (no tasks → nothing to retain).
+- New plan is **content-identical** to the old one (re-issue / retry).
 
 ## When to plan
 
@@ -132,7 +154,7 @@ is in_progress, the next pending leaf auto-promotes to in_progress.
 
 ## Tool reference
 
-_9 tools registered with the `plan` skill._
+_10 tools registered with the `plan` skill._
 
 ### `plan_add`
 
@@ -150,6 +172,12 @@ Retire the current plan to ``$plan_archive`` (a per-session list of past plans).
 **Args**:
 
 - `reason` (string, optional) — Why this plan is being archived ('shipped', 'abandoned', 'superseded').
+
+### `plan_clear`
+
+Drop the active plan WITHOUT archiving it. Rare — plan_set already auto-archives any prior plan, and plan_archive is the explicit retire. Use this only when the user says 'scrap the plan, never mind' AND the plan has no tasks worth keeping in history.
+
+*No parameters.*
 
 ### `plan_edit`
 

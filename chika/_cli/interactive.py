@@ -4,7 +4,7 @@ The web-app (api/server.py) wires ``approval_handler`` and
 ``question_handler`` to a WebSocket so the frontend can show modals.
 The CLI never had its own equivalents, which broke three flows:
 
-- ``ask_user`` (question_skill) — returned ``no_question_handler``
+- ``ask_user`` (the question skill's tool) — returned ``no_question_handler``
 - workspace-scope writes — silently auto-granted because no handler
 - the new plan-approval gate — silently no-op'd
 

@@ -56,7 +56,7 @@ CLI_EVENTS: frozenset[str] = frozenset({
     EventType.SESSION_INFO.value,
     EventType.CHAT_LIST.value,
     EventType.EXTENSION_STATUS.value,
-    EventType.SPOTIFY_AUTH_CHANGED.value,
+    EventType.PLAN_ARCHIVED.value,
 })
 
 # Events the Vue frontend handles. Lives in
@@ -85,7 +85,7 @@ EXTENSION_EVENTS: frozenset[str] = frozenset({
     EventType.EXT_CHAT_ERROR.value,
     EventType.EXT_CHAT_DONE.value,
     EventType.EXTENSION_STATUS.value,
-    EventType.SPOTIFY_AUTH_CHANGED.value,
+    EventType.PLAN_ARCHIVED.value,
     EventType.PING.value,
     EventType.PONG.value,
 })
@@ -117,6 +117,31 @@ EXTENSION_DROPS_ON_PURPOSE: frozenset[str] = frozenset({
     EventType.SHELL_OUTPUT.value,
     EventType.SHELL_PROCESS_DONE.value,
 })
+
+
+# ── Skill-contributed event routing ────────────────────────────────────
+#
+# Skills declare the surfaces their events reach via
+# ``SKILL_EVENT_ROUTING`` (set of {"cli","frontend","extension"}). The
+# discovery walk extends the static sets above so this module never
+# names a specific skill's events.
+def _augment_with_skill_routing() -> tuple[frozenset[str], frozenset[str]]:
+    cli = set(CLI_EVENTS)
+    ext = set(EXTENSION_EVENTS)
+    try:
+        from chika.skills import iter_skill_routed_events
+        for _skill, event_name, surfaces in iter_skill_routed_events():
+            if "cli" in surfaces or "frontend" in surfaces:
+                cli.add(event_name)
+            if "extension" in surfaces:
+                ext.add(event_name)
+    except Exception:
+        pass
+    return frozenset(cli), frozenset(ext)
+
+
+CLI_EVENTS, EXTENSION_EVENTS = _augment_with_skill_routing()
+FRONTEND_EVENTS = CLI_EVENTS  # Vue handles the same set as the CLI.
 
 
 def all_routed_events() -> frozenset[str]:

@@ -40,10 +40,15 @@ def test_every_skill_folder_has_a_skill_md(skill_dir):
 # ── 2. _has_skill_doc resolves both naming conventions ────────────────────
 
 def test_has_skill_doc_resolves_name_with_or_without_suffix():
-    # We use 'git' as the skill name; folder is 'git_skill'.
-    assert _has_skill_doc("git") is True
-    assert _has_skill_doc("web") is True
-    assert _has_skill_doc("plan") is True
+    """The resolver accepts either the canonical skill name (e.g.
+    ``"foo"``) or the folder name (``"foo_skill"``). We discover real
+    skill names via the public discovery API rather than hardcoding,
+    so this test stays valid as the universe of skills evolves."""
+    from chika.skills import list_known_skill_names
+    names = list_known_skill_names()
+    assert names, "no skills shipped — discovery is broken"
+    for name in names:
+        assert _has_skill_doc(name) is True, f"missing SKILL.md for {name!r}"
     # An unknown skill returns False, not a crash.
     assert _has_skill_doc("definitely-not-real") is False
 
@@ -112,23 +117,25 @@ def test_skill_without_doc_still_injects_workflow_examples(tmp_path):
 # ── 4. The prompt no longer contains skill-specific big blocks ───────────
 
 @pytest.mark.parametrize("phrase", [
-    # These were duplicated between _REFERENCE_SECTIONS and SKILL.md.
-    # If they reappear in _CORE, the dedup invariant is broken.
-    "MANDATORY after any HTML/JS build",   # web_app_skill/SKILL.md owns this
-    "Build the real thing, not sketches",  # web_app_skill/SKILL.md owns this
+    # These phrases were duplicated between ``_REFERENCE_SECTIONS`` and
+    # the shipped SKILL.md docs. If they reappear in ``_CORE``, the
+    # dedup invariant is broken.
+    "MANDATORY after any HTML/JS build",
+    "Build the real thing, not sketches",
 ])
 def test_core_prompt_does_not_duplicate_skill_content(phrase):
     assert phrase not in _CORE, (
-        f"system prompt contains {phrase!r} which now lives in "
-        "web_app_skill/SKILL.md. Don't duplicate context."
+        f"system prompt contains {phrase!r} which now lives in a "
+        "skill's SKILL.md. Don't duplicate context."
     )
 
 
 def test_web_reference_section_removed():
-    """The dedicated 'web' reference section was migrated to web/SKILL.md."""
+    """The dedicated 'web' reference section was migrated to a
+    skill's SKILL.md and dropped from _REFERENCE_SECTIONS."""
     assert "web" not in _REFERENCE_SECTIONS, (
-        "_REFERENCE_SECTIONS['web'] was removed because web_skill/SKILL.md "
-        "is now the canonical reference. Don't add it back."
+        "_REFERENCE_SECTIONS['web'] was removed because the web skill's "
+        "SKILL.md is now the canonical reference. Don't add it back."
     )
 
 

@@ -19,10 +19,44 @@ import time
 from typing import Any, cast
 
 import httpx
+from pydantic import BaseModel
 
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
 from chika.skills.spotify_skill import oauth as _oauth
+
+# Canonical name used by the engine's skill registry.
+SKILL_NAME = "spotify"
+
+
+# ── Skill-contributed event model ─────────────────────────────────────
+#
+# Lives here (not in ``api/models.py``) so the spotify skill stays
+# fully self-contained. ``api/models.py`` picks it up via the skill
+# discovery walk (``iter_skill_events``).
+
+
+class SpotifyAuthChangedEvent(BaseModel):
+    """Broadcast whenever a profile's Spotify connection state flips
+    (auth completes, user disconnects, refresh fails). Surfaces use
+    it to swap their UI without polling the status endpoint. Never
+    carries raw tokens — only display-name + product tier."""
+    type: str = "spotify_auth_changed"
+    authorized: bool
+    display_name: str | None = None
+    product: str | None = None
+    error: str | None = None
+
+
+SKILL_EVENTS: dict = {
+    "spotify_auth_changed": SpotifyAuthChangedEvent,
+}
+
+
+# Which surfaces should receive this event. Walked by event_routing.
+SKILL_EVENT_ROUTING: dict = {
+    "spotify_auth_changed": {"cli", "frontend", "extension"},
+}
 
 # ── Env ───────────────────────────────────────────────────────────────────────
 CLIENT_ID     = os.getenv("CHIKA_SPOTIFY_CLIENT_ID", "")
@@ -115,6 +149,52 @@ async def _req(
 
 # ── Tool implementations ──────────────────────────────────────────────────────
 
+def _to_id_list(value: Any) -> list[str]:
+    """Normalise a multi-id arg to a list of stripped strings.
+
+    The LLM legitimately emits any of these shapes for the same tool:
+
+      - ``"abc,def"``                 — comma-separated string
+      - ``"  abc , def  "``           — whitespace forgiveness
+      - ``["abc", "def"]``            — JSON list (Python list at dispatch time)
+      - ``'["abc", "def"]'``          — JSON-encoded string (rare; some
+                                        models emit literal JSON in a
+                                        string field)
+      - ``""`` / ``None``             — empty (caller decides what to do)
+
+    Returns a list[str] in every case. Empty inputs return ``[]`` —
+    the caller is responsible for treating that as "skip this body
+    field" rather than "send an empty list to Spotify" (which would
+    400 most endpoints).
+
+    Used by every spotify tool that takes a multi-id arg —
+    ``spotify_play``, ``spotify_save_tracks``, ``spotify_follow_artist``,
+    etc. The previous implementation called ``.split(',')`` directly
+    on the arg, which crashed with ``AttributeError: 'list' object
+    has no attribute 'split'`` whenever the LLM emitted a JSON list.
+    """
+    if value is None or value == "":
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        s = value.strip()
+        # Defensive: handle ``'["a","b"]'`` — some models emit a
+        # JSON-encoded list as a string. Try to parse it; fall back
+        # to comma-split if it isn't JSON.
+        if s.startswith("[") and s.endswith("]"):
+            try:
+                import json as _json
+                parsed = _json.loads(s)
+                if isinstance(parsed, list):
+                    return [str(v).strip() for v in parsed if str(v).strip()]
+            except Exception:
+                pass
+        return [p.strip() for p in s.split(",") if p.strip()]
+    # Unknown type — coerce to string and try once.
+    return [p.strip() for p in str(value).split(",") if p.strip()]
+
+
 # SEARCH
 async def spotify_search(query: str, type: str = "track", limit: int = 10, offset: int = 0, market: str = "") -> dict:
     params = {"q": query, "type": type, "limit": min(limit, 50), "offset": offset}
@@ -187,13 +267,13 @@ async def spotify_create_playlist(user_id: str, name: str, description: str = ""
     return await _req("POST", f"/users/{user_id}/playlists", user_auth=True,
                       json_body={"name": name, "description": description, "public": public})
 
-async def spotify_add_to_playlist(playlist_id: str, uris: str, position: int | None = None) -> dict:
-    body: dict = {"uris": uris.split(",")}
+async def spotify_add_to_playlist(playlist_id: str, uris: Any, position: int | None = None) -> dict:
+    body: dict = {"uris": _to_id_list(uris)}
     if position is not None: body["position"] = position
     return await _req("POST", f"/playlists/{playlist_id}/tracks", user_auth=True, json_body=body)
 
-async def spotify_remove_from_playlist(playlist_id: str, uris: str) -> dict:
-    tracks = [{"uri": u.strip()} for u in uris.split(",")]
+async def spotify_remove_from_playlist(playlist_id: str, uris: Any) -> dict:
+    tracks = [{"uri": u} for u in _to_id_list(uris)]
     return await _req("DELETE", f"/playlists/{playlist_id}/tracks", user_auth=True, json_body={"tracks": tracks})
 
 async def spotify_featured_playlists(country: str = "", limit: int = 10) -> dict:
@@ -234,11 +314,11 @@ async def spotify_get_saved_tracks(limit: int = 20, offset: int = 0, market: str
     if market: params["market"] = market
     return await _req("GET", "/me/tracks", user_auth=True, params=params)
 
-async def spotify_save_tracks(ids: str) -> dict:
-    return await _req("PUT", "/me/tracks", user_auth=True, json_body={"ids": ids.split(",")})
+async def spotify_save_tracks(ids: Any) -> dict:
+    return await _req("PUT", "/me/tracks", user_auth=True, json_body={"ids": _to_id_list(ids)})
 
-async def spotify_remove_saved_tracks(ids: str) -> dict:
-    return await _req("DELETE", "/me/tracks", user_auth=True, json_body={"ids": ids.split(",")})
+async def spotify_remove_saved_tracks(ids: Any) -> dict:
+    return await _req("DELETE", "/me/tracks", user_auth=True, json_body={"ids": _to_id_list(ids)})
 
 async def spotify_check_saved_tracks(ids: str) -> dict:
     return await _req("GET", "/me/tracks/contains", user_auth=True, params={"ids": ids})
@@ -246,17 +326,17 @@ async def spotify_check_saved_tracks(ids: str) -> dict:
 async def spotify_get_saved_albums(limit: int = 20, offset: int = 0) -> dict:
     return await _req("GET", "/me/albums", user_auth=True, params={"limit": limit, "offset": offset})
 
-async def spotify_save_albums(ids: str) -> dict:
-    return await _req("PUT", "/me/albums", user_auth=True, json_body={"ids": ids.split(",")})
+async def spotify_save_albums(ids: Any) -> dict:
+    return await _req("PUT", "/me/albums", user_auth=True, json_body={"ids": _to_id_list(ids)})
 
 # FOLLOW
-async def spotify_follow_artist(ids: str) -> dict:
+async def spotify_follow_artist(ids: Any) -> dict:
     return await _req("PUT", "/me/following", user_auth=True, params={"type": "artist"},
-                      json_body={"ids": ids.split(",")})
+                      json_body={"ids": _to_id_list(ids)})
 
-async def spotify_unfollow_artist(ids: str) -> dict:
+async def spotify_unfollow_artist(ids: Any) -> dict:
     return await _req("DELETE", "/me/following", user_auth=True, params={"type": "artist"},
-                      json_body={"ids": ids.split(",")})
+                      json_body={"ids": _to_id_list(ids)})
 
 async def spotify_get_followed_artists(limit: int = 20) -> dict:
     return await _req("GET", "/me/following", user_auth=True, params={"type": "artist", "limit": limit})
@@ -279,9 +359,10 @@ async def spotify_get_devices() -> dict:
 async def spotify_transfer_playback(device_id: str, play: bool = True) -> dict:
     return await _req("PUT", "/me/player", user_auth=True, json_body={"device_ids": [device_id], "play": play})
 
-async def spotify_play(uris: str = "", context_uri: str = "", device_id: str = "", offset: int | None = None) -> dict:
+async def spotify_play(uris: Any = "", context_uri: str = "", device_id: str = "", offset: int | None = None) -> dict:
     body: dict = {}
-    if uris:        body["uris"] = uris.split(",")
+    uri_list = _to_id_list(uris)
+    if uri_list:    body["uris"] = uri_list
     if context_uri: body["context_uri"] = context_uri
     if offset is not None: body["offset"] = {"position": offset}
     params = {"device_id": device_id} if device_id else {}
@@ -504,3 +585,158 @@ SPOTIFY_SKILL = Skill(
         "spotify_note": "Spotify URIs look like spotify:track:4iV5W9uYEdYUVa79Axb7Rh. Use spotify_search first to resolve names to IDs/URIs.",
     },
 )
+
+
+def build_skill(_context):
+    """Auto-discovery entry point. The spotify skill is stateless —
+    it returns the module-level ``SPOTIFY_SKILL`` constant unchanged."""
+    return SPOTIFY_SKILL
+
+
+def register_routes():
+    """Mount the spotify-specific REST + OAuth-callback routes. The
+    server's skill walker calls this at boot; the routes file lives
+    inside the skill folder so the entire HTTP surface stays
+    self-contained."""
+    from chika.skills.spotify_skill.routes import router
+    return router
+
+
+def register_cli():
+    """Expose ``/spotify`` slash + ``chika spotify`` argv subcommands
+    via the CLI dispatcher's skill walk. Implementation lives in the
+    sibling ``cli`` module."""
+    from chika.skills.spotify_skill.cli import argv_factory, slash_handler
+    return {
+        "slash": {"spotify": slash_handler},
+        "argv":  {"spotify": argv_factory},
+    }
+
+
+# Settings keys this skill owns. Settings_store seeds defaults,
+# accepts these keys without lookup, and validates via the optional
+# ``validate`` callable — no parallel validators in the core store.
+SKILL_SETTINGS: dict = {
+    "spotify_share_across_profiles": {
+        "default":  "off",
+        "validate": lambda v: v in ("on", "off"),
+    },
+    "spotify_profile_overrides": {
+        "default":  {},
+        "validate": lambda v: isinstance(v, dict) and all(
+            isinstance(k, str) and isinstance(val, bool)
+            for k, val in v.items()
+        ),
+    },
+}
+
+
+def on_setting_changed(key: str, new_value, _old_value) -> None:
+    """Settings-store fires this for every change. We invalidate
+    the skill's token cache when the share flag flips so the next
+    read picks up the right bucket without a process restart."""
+    if key in ("spotify_share_across_profiles", "spotify_profile_overrides"):
+        try:
+            from chika.skills.spotify_skill import oauth as _oauth_mod
+            _oauth_mod._cache.clear()
+        except Exception:
+            pass
+
+
+def on_env_changed(name: str, new_value, _old_value) -> None:
+    """Env-router fires this for every patched env var. We reload
+    the OAuth client config when CHIKA_SPOTIFY_CLIENT_ID changes so
+    a fresh CLIENT_ID flows through without restarting the server."""
+    if name in ("CHIKA_SPOTIFY_CLIENT_ID",):
+        try:
+            from chika.skills.spotify_skill import oauth as _oauth_mod
+            _oauth_mod.reload_from_env()
+        except Exception:
+            pass
+
+
+# Planning-intent test fixtures contributed back to the central
+# heuristic test (``tests/test_intent_heuristic.py``). The central
+# test walks every shipped skill via ``iter_skill_intent_cases`` so
+# the strings stay isolated to this folder.
+INTENT_CASES: dict = {
+    # ── Plan dimension: when to call ``plan_set`` first ────────────
+    "plan": {
+        "positive": [
+            "build me a playlist generator that mixes my top tracks with new releases",
+            "create a daily mix from sza + frank ocean + lauv with smooth transitions",
+            "make me a tool that pulls my saved albums and groups them by mood",
+        ],
+        "negative": [
+            "are there any tests for the spotify_skill",
+            "what's playing right now",
+            "skip to the next track",
+            "show me my recently played",
+        ],
+    },
+    # ── Ask dimension: when to ``ask_user`` for clarification ──────
+    "ask": {
+        "positive": [
+            "play something good",
+            "queue up something I'd like",
+            "make me a playlist",
+        ],
+        "negative": [
+            "play SZA Snooze",
+            "skip to the next track",
+            "shuffle my Liked Songs",
+            "queue Frank Ocean Pink + White next",
+        ],
+    },
+    # Memory dimension — Spotify is one of the few skills with durable
+    # user preferences worth persisting (favourite genres, mood
+    # presets, friends' devices).
+    "memory": {
+        "positive": [
+            "remember that I like SZA + Frank Ocean for late-night listens",
+            "my workout playlist should always be high-tempo electronic",
+            "remember my AirPods are called 'Tochi's Pods'",
+        ],
+        "negative": [
+            "play something",
+            "what's playing now",
+            "skip this track",
+        ],
+    },
+    # Research dimension — Spotify deals with external catalogue data;
+    # specific lookups belong in the grounding flow.
+    "research": {
+        "positive": [
+            "tell me about the album cover for SZA's SOS",
+            "summarise the latest Pitchfork review of Frank Ocean's Endless",
+            "how many monthly listeners does Bad Bunny have",
+        ],
+        "negative": [
+            "skip to the next track",
+            "show me my saved tracks",
+            "what's playing right now",
+        ],
+    },
+}
+
+
+# UI manifest — settings tab the frontend renders dynamically.
+SKILL_UI: dict = {
+    "settings_tab": {
+        "label": "Spotify",
+        "order": 50,
+        "frontend": {
+            # Path relative to this skill folder. The /api/skills/<name>/asset
+            # endpoint reads it; SettingsModal's import.meta.glob picks it up
+            # at build time.
+            "component": "ui/SettingsCard.vue",
+        },
+        "extension": {
+            # Loaded dynamically by extension/options/options.js — fetched
+            # via /api/skills/spotify/asset/ui/<file>. Drop the skill,
+            # the section disappears.
+            "html": "ui/section.html",
+            "js":   "ui/section.js",
+        },
+    },
+}

@@ -12,7 +12,16 @@ import { defineConfig, devices } from '@playwright/test'
  * `BASE_URL=http://localhost:5173 npx playwright test --ui`.
  */
 export default defineConfig({
-  testDir: './e2e',
+  // Two-rooted spec discovery:
+  //   - ``frontend/e2e/*.spec.js``: cross-cutting Vue-app tests
+  //   - ``../chika/skills/*/tests/*.spec.js``: skill-owned e2e
+  //     specs (per the drop-in skill contract — a skill's full
+  //     test surface lives inside its folder).
+  testDir: '..',
+  testMatch: [
+    'frontend/e2e/**/*.spec.js',
+    'chika/skills/*/tests/**/*.spec.js',
+  ],
   // The CLI/extension/backend-stub layers parallelise fine, but the Vue
   // frontend tests share one vite preview server and a global
   // window.__chikaMockWS — running them concurrently produces phantom

@@ -43,80 +43,26 @@ SKILLS_DIR = REPO_ROOT / "chika" / "skills"
 # justification)``. New entries require sign-off — the rule of thumb is
 # "could this code live INSIDE the skill folder instead?" If yes, move
 # it; only if no, allowlist it.
-ALLOWED_CROSS_IMPORTS: set[tuple[str, str]] = {
-    # ── Spotify ────────────────────────────────────────────────────
-    # The OAuth callback endpoint is an HTTP-server-level route — has
-    # to live in api/routes/ to be mounted on the FastAPI app. It pulls
-    # the skill's connection + oauth helpers to drive the flow. Moving
-    # this into the skill folder would require the skill to register
-    # its own routes (a bigger architectural change).
-    ("api/routes/spotify.py",      "chika.skills.spotify_skill.connection"),
-    ("api/routes/spotify.py",      "chika.skills.spotify_skill.oauth"),
-
-    # The settings-store invalidates the in-memory token cache when
-    # the share-across-profiles flag flips, so the next read picks up
-    # the right bucket without a process restart. Importing the
-    # cache directly is the simplest path; alternatives (event
-    # subscriptions, signals) would be heavier for one cache clear.
-    ("api/settings_store.py",      "chika.skills.spotify_skill.oauth"),
-
-    # ── Browser ────────────────────────────────────────────────────
-    # The extension's session manager is per-tab + cross-cut state —
-    # the API extension router calls into it to reflect tab state and
-    # forward heartbeats. Moving the singleton into api/ would split
-    # the browser skill's runtime; leaving it in the skill keeps that
-    # module's contract intact.
-    ("api/routes/extension.py",    "chika.skills.browser_skill.extension_manager"),
-    ("api/routes/extension.py",    "chika.skills.browser_skill.extension_manager.extension_manager"),
-
-    # ── Pet ────────────────────────────────────────────────────────
-    # The /api/profile/<name>/pet endpoints reset / copy per-profile
-    # pet memory when the user switches pets. The two helpers live
-    # next to the rest of the pet-state logic in the skill; the
-    # alternative (event-driven invalidation) would require a heavier
-    # bus subscription for two one-shot ops.
-    ("api/routes/pets.py",         "chika.skills.pet_skill.clear_pet_memory"),
-    ("api/routes/pets.py",         "chika.skills.pet_skill.copy_pet_memory"),
-
-    # ── CLI subcommands ────────────────────────────────────────────
-    # ``chika spotify connect|status|disconnect|share`` and
-    # ``/spotify`` slash command live in chika/_cli/ because they're
-    # part of the global CLI dispatch table. They drive the same
-    # connection.py the Vue / extension UIs do; importing it directly
-    # is the only way to share that logic.
-    ("chika/_cli/spotify.py",      "chika.skills.spotify_skill.connection"),
-
-    # ── Engine wiring ──────────────────────────────────────────────
-    # The session manager + server know about every skill because
-    # they HOST the skill registry — this is the canonical
-    # registration site. A registry-pattern refactor (skills
-    # auto-register via entry points) would remove these, but until
-    # then the engine wiring has to import each skill builder
-    # explicitly.
-    ("api/server.py",              "chika.skills.browser_skill.extension_manager"),
-    ("api/server.py",              "chika.skills.browser_skill.extension_manager.extension_manager"),
-    ("api/server.py",              "chika.skills.browser_skill.set_frontend_push"),
-    ("api/session_manager.py",     "chika.skills.browser_skill.BROWSER_SKILL"),
-    ("api/session_manager.py",     "chika.skills.git_skill.GIT_SKILL"),
-    ("api/session_manager.py",     "chika.skills.pet_skill.build_pet_skill"),
-    ("api/session_manager.py",     "chika.skills.plan_skill.build_plan_skill"),
-    ("api/session_manager.py",     "chika.skills.question_skill.build_question_skill"),
-    ("api/session_manager.py",     "chika.skills.shell_skill.build_shell_skill"),
-    ("api/session_manager.py",     "chika.skills.spotify_skill.SPOTIFY_SKILL"),
-    ("api/session_manager.py",     "chika.skills.verify_skill.build_verify_skill"),
-    ("api/session_manager.py",     "chika.skills.web_app_skill.WEB_APP_SKILL"),
-    ("api/session_manager.py",     "chika.skills.web_skill.WEB_SKILL"),
-
-    # ── Cross-skill integration tests ──────────────────────────────
-    # These tests genuinely exercise multiple skills together (the
-    # skill-gate enforces a contract across every skill, the e2e
-    # engine stub drives the plan + browser + shell skills as one).
-    # Both stay at the top level by design.
-    ("tests/test_skill_gate.py",      "chika.skills.plan_skill._make_plan_tools"),
-    ("tests/test_skill_gate.py",      "chika.skills.web_app_skill.scaffold_tool"),
-    ("tests/test_skill_gate.py",      "chika.skills.web_app_skill.scaffold_tool._scaffold_web_app"),
-    ("tests/test_e2e_engine_stub.py", "chika.skills.plan_skill.build_plan_skill"),
-}
+ALLOWED_CROSS_IMPORTS: set[tuple[str, str]] = set()
+# Intentionally empty. The drop-in skill contract (see
+# ``chika/skills/_context.py``) means every per-skill surface — routes,
+# websockets, CLI, settings keys, UI components, hot-reload hooks —
+# lives inside the skill folder and plugs in via discovery. If you
+# find yourself wanting to add an entry here, that's a signal to
+# refactor the consumer to use one of the discovery APIs in
+# ``chika/skills/__init__.py`` instead:
+#
+#   - ``register_routes()``       ← server walks for HTTP routes
+#   - ``register_websocket(app)`` ← server walks for WS endpoints
+#   - ``register_cli()``          ← CLI dispatch walks
+#   - ``SKILL_SETTINGS``          ← settings_store walks
+#   - ``on_setting_changed`` / ``on_env_changed`` ← subscription bus
+#   - ``SKILL_UI``                ← frontend / extension walk for tabs
+#   - ``get_skill_module(name)``  ← test-side public lookup helper
+#
+# Skill-specific tests (kwarg aliases, scaffold dispatch, etc.) live
+# INSIDE the skill folder so they're naturally exempt — the test
+# walker only flags imports from OUTSIDE the skill folder.
 
 
 def _all_skill_dirs() -> list[Path]:

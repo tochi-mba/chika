@@ -12,6 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import secrets as _secrets
 from pathlib import Path
+from typing import Any
+from collections.abc import Callable
 
 from chika.core.chat_store import ChatStore
 from chika.core.device_store import DeviceStore
@@ -30,18 +32,33 @@ _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 # all persistent state is under one folder (easier to gitignore, back up, etc.)
 _PROFILES_DIR = Path(__file__).parent.parent / "data" / "profiles"
 _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _get_disabled_skills() -> list[str]:
+    """Read the current ``skills_disabled`` list from settings, fail-soft.
+
+    Wrapped so a missing/corrupt settings file doesn't crash engine
+    construction — we just register every skill (the safe default).
+    """
+    try:
+        from api import settings_store
+        return list(settings_store.get("skills_disabled", []) or [])
+    except Exception:
+        return []
 import config
 from chika.core.profile_manager import ProfileManager
-from chika.skills.browser_skill import BROWSER_SKILL
-from chika.skills.git_skill import GIT_SKILL
-from chika.skills.pet_skill import build_pet_skill
-from chika.skills.plan_skill import build_plan_skill
-from chika.skills.shell_skill import build_shell_skill
-from chika.skills.question_skill import build_question_skill
-from chika.skills.spotify_skill import SPOTIFY_SKILL
-from chika.skills.verify_skill import build_verify_skill
-from chika.skills.web_app_skill import WEB_APP_SKILL
-from chika.skills.web_skill import WEB_SKILL
+# Skills are NOT imported individually here. The session manager walks
+# ``chika/skills/*_skill/`` at build time via
+# :func:`chika.skills.iter_skill_modules` and calls each module's
+# ``build_skill(context)`` entry point. Adding a new skill is a
+# drop-in: create the folder, declare ``SKILL_NAME`` + ``build_skill``,
+# and the engine picks it up automatically. See
+# ``chika/skills/_context.py`` for the contract.
+from chika.skills import (
+    PHASE_POST_ENGINE,
+    SkillBuildContext,
+    iter_skill_modules,
+)
 from chika.tools.apps_tool import APP_OPEN_TOOL
 from chika.tools.file_tools import FILE_TOOLS
 from chika.tools.live_server_tool import LIVE_SERVER_TOOL
@@ -97,6 +114,108 @@ class SessionManager:
             })
         return result
 
+    def reload_skills(self) -> dict[str, object]:
+        """Apply the current ``skills_disabled`` setting to every active engine.
+
+        For each engine, compares the registered skill set against the
+        target (``builders.keys() - disabled``) and:
+
+          - **Unregisters** any skill that's now disabled (its tools
+            disappear from the next turn's tool list).
+          - **Re-registers** any skill that's now enabled (rebuilds via
+            the cached builder thunk).
+
+        No-op for skills that haven't changed state. Soft-fails per
+        engine — a single broken builder doesn't stop the rest.
+
+        Returns ``{disabled, enabled, sessions, errors}``.
+        """
+        target_disabled = set(_get_disabled_skills())
+        errors: list[str] = []
+        affected_sessions = 0
+
+        for sid, engine in self._sessions.items():
+            builders = getattr(engine, "_skill_builders", None)
+            if not builders:
+                continue
+            registry = engine._skills  # SkillRegistry instance
+            currently_registered = set(registry._skills.keys())
+            target_registered = set(builders.keys()) - target_disabled
+
+            to_remove = currently_registered & target_disabled
+            to_add    = target_registered - currently_registered
+
+            if not to_remove and not to_add:
+                continue
+            affected_sessions += 1
+
+            for name in to_remove:
+                try:
+                    registry.unregister(name)
+                except Exception as exc:
+                    errors.append(f"{sid}.unregister({name}): {exc}")
+            for name in to_add:
+                try:
+                    registry.register(builders[name]())
+                except Exception as exc:
+                    errors.append(f"{sid}.register({name}): {exc}")
+
+        return {
+            "disabled":          sorted(target_disabled),
+            "sessions_affected": affected_sessions,
+            "sessions_total":    len(self._sessions),
+            "errors":            errors,
+        }
+
+    def reload_clients(self) -> dict[str, object]:
+        """Fan reload_client out to every active engine.
+
+        Returns a summary the caller can surface to the user:
+
+            {
+              "provider": "openai",
+              "model":    "gpt-4o",
+              "sessions": 3,
+              "changed":  true,
+              "errors":   [],
+            }
+
+        If any individual engine fails to rebuild (e.g. missing API
+        key), it's caught and reported in ``errors`` — other engines
+        still get the new client.
+        """
+        # Always refresh the global config first — even if no engines
+        # are active, future engines built lazily by get_or_create
+        # need to see the fresh values.
+        import config as _config  # type: ignore[import-not-found]
+        _config.reload_from_env()
+
+        if not self._sessions:
+            cfg = _config.get_provider_config()
+            return {
+                "provider": cfg.provider, "model": cfg.model,
+                "sessions": 0, "changed": True, "errors": [],
+            }
+
+        provider = ""
+        model = ""
+        any_changed = False
+        errors: list[str] = []
+        for sid, engine in self._sessions.items():
+            try:
+                result = engine.reload_client()
+                provider = result["provider"]
+                model    = result["model"]
+                if result["changed"] == "true":
+                    any_changed = True
+            except Exception as exc:
+                errors.append(f"{sid}: {exc}")
+        return {
+            "provider": provider, "model": model,
+            "sessions": len(self._sessions),
+            "changed":  any_changed, "errors": errors,
+        }
+
     def get_device_session(self, device_id: str) -> tuple[ChikaEngine, str]:
         """Get the current session for a device, creating one if it doesn't exist."""
         session_id = self._device_store.get_session(device_id)
@@ -123,22 +242,28 @@ class SessionManager:
         tool_registry = ToolRegistry()
         variable_store = VariableStore()
 
-        # Start on the default profile
-        default_profile = self._profile_manager.get_or_create("default")
+        # Bootstrap the initial profile. ``bootstrap_initial`` returns
+        # the most-recently-active profile if any exist; otherwise it
+        # creates one from ``CHIKA_PROFILE`` env / OS username (never
+        # the literal string ``"default"`` — that label conveys no
+        # identity and confuses the agent's prompt-section context).
+        # See ``ProfileManager.bootstrap_name`` for the resolution
+        # order.
+        initial_profile = self._profile_manager.bootstrap_initial()
         memory_manager = MemoryManager(
-            path=default_profile.memory_path,
+            path=initial_profile.memory_path,
             max_tokens=config.MAX_MEMORY_TOKENS,
         )
 
         prompt_builder = PromptBuilder()
         skill_registry = SkillRegistry(tool_registry, memory_manager, prompt_builder)
 
-        # Shell tools live behind a Skill so the dynamic "active shells"
-        # block contributes from the skill's own prompt_section instead
-        # of being hard-coded in PromptBuilder. Registering the skill
-        # handles tool registration too.
-        skill_registry.register(build_shell_skill())
-        # Register built-in tools
+        # Resolve the disabled set once up front so every skill registration
+        # below honours it.
+        disabled = set(_get_disabled_skills())
+
+        # Register built-in tools (NOT skills — these live in
+        # chika/tools/ rather than chika/skills/).
         tool_registry.register(APP_OPEN_TOOL)
         tool_registry.register(LIVE_SERVER_TOOL)
         tool_registry.register(WAIT_TOOL)
@@ -154,51 +279,75 @@ class SessionManager:
         for t in make_variable_tools(variable_store):
             tool_registry.register(t)
 
-        # Register skills
-        skill_registry.register(GIT_SKILL)
-        skill_registry.register(WEB_SKILL)
-        skill_registry.register(WEB_APP_SKILL)
-        skill_registry.register(SPOTIFY_SKILL)
-        skill_registry.register(BROWSER_SKILL)
-        # verify_skill is session-scoped because fact_check needs a live reference
-        # to this session's variable store (the $facts ledger lives there)
-        skill_registry.register(build_verify_skill(variable_store))
-        # plan_skill is session-scoped too — stores the live plan in $plan.
-        # plan_reconcile needs the engine for LLM access; late-bind via a
-        # getter that resolves the engine after the engine is constructed.
+        # ── Auto-discovery skill registration ─────────────────────────
+        #
+        # The session manager doesn't know which skills exist until it
+        # walks ``chika/skills/*_skill/`` via :func:`iter_skill_modules`.
+        # Each module exports a ``build_skill(context)`` entry point —
+        # the loop below calls it with a SkillBuildContext whose
+        # getters resolve to the engine's live state once it exists.
+        #
+        # Every skill is wrapped in a "builder" thunk on
+        # ``engine._skill_builders`` so :meth:`reload_skills` can rebuild
+        # any one of them later without re-running the whole engine
+        # construction path — that's how the Settings UI hot-reloads
+        # toggles without a restart.
         _engine_holder: dict[str, ChikaEngine | None] = {"engine": None}
-        skill_registry.register(
-            build_plan_skill(
-                variable_store,
-                engine_getter=lambda: _engine_holder["engine"],
-                memory_getter=lambda: (
-                    _engine_holder["engine"]._memory
-                    if _engine_holder["engine"] else None
-                ),
+
+        ctx = SkillBuildContext(
+            variable_store=variable_store,
+            engine_getter=lambda: _engine_holder["engine"],
+            memory_getter=lambda: (
+                _engine_holder["engine"]._memory
+                if _engine_holder["engine"] else None
+            ),
+            workflow_engine_getter=lambda: (
+                _engine_holder["engine"]._workflow_engine
+                if _engine_holder["engine"] else None
+            ),
+            profile_getter=lambda: (
+                _engine_holder["engine"]._active_profile.pet_id
+                if _engine_holder["engine"] and _engine_holder["engine"]._active_profile
+                else None
+            ),
+            workspace_getter=lambda: (
+                _engine_holder["engine"]._active_profile.workspace
+                if _engine_holder["engine"] and _engine_holder["engine"]._active_profile
+                else ""
             ),
         )
-        # pet_skill is session-scoped — its mood lives in $pet_mood, its
-        # active companion is the profile's ``pet_id``. Late-bound to the
-        # engine's profile so /pet switches flow through automatically.
-        skill_registry.register(
-            build_pet_skill(
-                variable_store,
-                profile_getter=lambda: (
-                    _engine_holder["engine"]._active_profile.pet_id
-                    if _engine_holder["engine"] and _engine_holder["engine"]._active_profile
-                    else None
-                ),
-                workspace_getter=lambda: (
-                    _engine_holder["engine"]._active_profile.workspace
-                    if _engine_holder["engine"] and _engine_holder["engine"]._active_profile
-                    else ""
-                ),
-            ),
-        )
-        # question_skill's ask_user tool looks up engine.question_handler at
-        # call time — server.py sets that per-WebSocket. In CLI/test mode it
-        # stays None and the tool returns a structured error instead of hanging.
-        # Register after engine is built so we can pass the workflow_engine.
+
+        # Build the per-skill builder thunks. Each thunk closes over
+        # the SAME ctx + module so reload_skills() can rebuild any one
+        # in isolation. The phases dict captures pre/post engine
+        # ordering — most skills are pre_engine; any skill declaring
+        # ``SKILL_PHASE = "post_engine"`` registers after the engine
+        # constructor runs (rare; the lazy context getters handle
+        # most needs without forcing post-engine).
+        skill_builders: dict[str, Callable[[], Any]] = {}
+        skill_phases: dict[str, str] = {}
+
+        def _make_builder(mod: Any, c: SkillBuildContext) -> Callable[[], Any]:
+            # Wrapped in a helper so each closure captures its OWN module
+            # binding — using a bare lambda inside the loop would have all
+            # closures share the loop variable.
+            return lambda: mod.build_skill(c)
+
+        for mod in iter_skill_modules():
+            name = mod.SKILL_NAME
+            phase = getattr(mod, "SKILL_PHASE", None) or "pre_engine"
+            skill_builders[name] = _make_builder(mod, ctx)
+            skill_phases[name] = phase
+
+        # First pass: register every pre-engine skill that isn't in the
+        # disabled list. Post-engine skills wait until after the engine
+        # constructor runs.
+        for name, build in skill_builders.items():
+            if name in disabled:
+                continue
+            if skill_phases.get(name) == PHASE_POST_ENGINE:
+                continue
+            skill_registry.register(build())
 
         engine = ChikaEngine(
             tool_registry=tool_registry,
@@ -209,11 +358,16 @@ class SessionManager:
         )
         engine.session_id = session_id
         engine._chat_store = self._chat_store
-        # Patch the late-bound engine reference into the closure shared
-        # with build_plan_skill / build_pet_skill above. Now their
-        # getters resolve to this concrete engine instance and any
-        # tool that needs LLM access (plan_reconcile) or live profile
-        # state (pet_skill prompt section) wires up cleanly.
+        # Stash the builder thunks on the engine so reload_skills() can
+        # rebuild a previously-disabled skill without re-running the
+        # whole engine construction path.
+        engine._skill_builders = skill_builders  # type: ignore[attr-defined]
+        # Patch the late-bound engine reference into the shared
+        # ``SkillBuildContext`` getters. Skills that captured the
+        # context now resolve their engine_getter / memory_getter /
+        # workflow_engine_getter / profile_getter to the live engine —
+        # which is how plan_reconcile reaches the LLM client and how
+        # the pet skill's prompt section reads profile state.
         _engine_holder["engine"] = engine
 
         # Register memory tools now — they look up engine._memory dynamically
@@ -228,9 +382,16 @@ class SessionManager:
         # the agent can ask targeted questions without paying for the
         # full doc each time.
         tool_registry.register(SKILL_QUERY_TOOL)
-        # Register question_skill now that the engine exists — ask_user reads
-        # engine._workflow_engine.question_handler at call time.
-        skill_registry.register(build_question_skill(engine._workflow_engine))
+        # Second-pass registration: any skill whose SKILL_PHASE is
+        # ``"post_engine"`` registers now that the engine + workflow
+        # engine exist. ``ask_user`` reads
+        # ``engine._workflow_engine.question_handler`` at call time.
+        for name, build in skill_builders.items():
+            if name in disabled:
+                continue
+            if skill_phases.get(name) != PHASE_POST_ENGINE:
+                continue
+            skill_registry.register(build())
 
         # All skills are registered now. Refresh the workflow engine's
         # skill-gate index so it can map every skill tool back to its skill
@@ -240,9 +401,9 @@ class SessionManager:
         engine._workflow_engine.set_skill_registry(skill_registry)
 
         # Wire up active profile (profile tools need engine reference, so registered after)
-        engine._active_profile = default_profile
-        variable_store.set("profile.name", default_profile.name, description="Active profile name")
-        variable_store.set("profile.workspace", default_profile.workspace, description="Profile workspace directory")
+        engine._active_profile = initial_profile
+        variable_store.set("profile.name", initial_profile.name, description="Active profile name")
+        variable_store.set("profile.workspace", initial_profile.workspace, description="Profile workspace directory")
 
         # Chika's own repo root — used for self-modification workflows
         repo_root = str(Path(__file__).parent.parent.resolve())
@@ -276,21 +437,12 @@ class SessionManager:
         for t in make_profile_tools(engine, self._profile_manager):
             tool_registry.register(t)
 
-        # set_profile_password is only available when NOT on the default profile.
-        # A profile-switch hook handles register/unregister on every switch.
-        _pm = self._profile_manager
-
-        def _update_password_tool(profile) -> None:
-            if profile.name == "default":
-                tool_registry.unregister("set_profile_password")
-            elif not tool_registry.get("set_profile_password"):
-                tool_registry.register(make_set_password_tool(_pm))
-
-        engine._profile_switch_hooks.append(_update_password_tool)
-
-        # Default profile → tool NOT registered initially (by design).
-        # If a session is restored to a non-default profile the hook fires
-        # via switch_profile(), so no extra registration needed here.
+        # ``set_profile_password`` is now always available — every
+        # profile is the user's actual identity (env / OS username
+        # bootstrap), so locking down a "generic default" profile no
+        # longer applies. Register once + leave it; the profile-switch
+        # hook is no longer needed for this tool.
+        tool_registry.register(make_set_password_tool(self._profile_manager))
 
         return engine
 

@@ -13,7 +13,7 @@ def make_profile_tools(engine: ChikaEngine, profile_manager: ProfileManager) -> 
     """Return profile tools with a closure over the engine and profile manager."""
 
     async def profile_list() -> dict:
-        current = engine._active_profile.name if engine._active_profile else "default"
+        current = engine._active_profile.name if engine._active_profile else "unknown"
         return {
             "profiles": profile_manager.list_profiles(),
             "current": current,
@@ -22,7 +22,7 @@ def make_profile_tools(engine: ChikaEngine, profile_manager: ProfileManager) -> 
     async def profile_get() -> dict:
         p = engine._active_profile
         if p is None:
-            return {"name": "default", "workspace": None}
+            return {"name": "unknown", "workspace": None}
         return {
             "name": p.name,
             "workspace": p.workspace,

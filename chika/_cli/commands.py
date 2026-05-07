@@ -236,13 +236,21 @@ def _cmd_provider(ctx: CommandContext, args: list[str]) -> None:
         ))
         return
     env_file.write_env({"CHIKA_PROVIDER": target})
+    # Hot-swap the engine's LLM client so the very next turn uses the
+    # new provider — no restart needed. The previous client object
+    # stays alive for any in-flight stream until that stream returns.
+    try:
+        result = ctx.engine.reload_client()
+    except RuntimeError as exc:
+        ctx.console.print(Text(
+            f"  · CHIKA_PROVIDER → {target}  (.env updated)",
+            style=THEME.warn,
+        ))
+        ctx.console.print(Text(f"  ! {exc}", style=THEME.error))
+        return
     ctx.console.print(Text(
-        f"  · CHIKA_PROVIDER → {target}  (.env updated)",
+        f"  ✓ provider switched live → {result['provider']} · {result['model']}",
         style=THEME.success,
-    ))
-    ctx.console.print(Text(
-        "  restart Chika so the engine picks up the new provider.",
-        style=THEME.dim,
     ))
 
 
@@ -264,8 +272,20 @@ def _cmd_model(ctx: CommandContext, args: list[str]) -> None:
                                style=THEME.error))
         return
     env_file.write_env({key: target})
+    # Hot-swap so the next turn uses the new model. Model-only
+    # changes don't strictly need a new SDK client, but reload_client
+    # handles both cases uniformly.
+    try:
+        result = ctx.engine.reload_client()
+    except RuntimeError as exc:
+        ctx.console.print(Text(
+            f"  · {key} → {target}  (.env updated)",
+            style=THEME.warn,
+        ))
+        ctx.console.print(Text(f"  ! {exc}", style=THEME.error))
+        return
     ctx.console.print(Text(
-        f"  · {key} → {target}  (.env updated, restart to apply)",
+        f"  ✓ model switched live → {result['model']}",
         style=THEME.success,
     ))
 
@@ -323,13 +343,33 @@ def _cmd_env(ctx: CommandContext, args: list[str]) -> None:
         ctx.console.print(Text(f"  {key}={display}", style=THEME.text))
         return
 
-    env_file.write_env({key.strip(): value.strip().strip('"').strip("'")})
-    ctx.console.print(Text(f"  · {key.strip()} updated in .env",
+    cleaned_key = key.strip()
+    env_file.write_env({cleaned_key: value.strip().strip('"').strip("'")})
+    ctx.console.print(Text(f"  · {cleaned_key} updated in .env",
                            style=THEME.success))
-    ctx.console.print(Text(
-        "  some changes (provider, model) require restart.",
-        style=THEME.dim,
-    ))
+    # Provider/model/API-key changes hot-reload live; everything else
+    # may still need a restart. Try a reload and surface the result.
+    hot_reloadable = {
+        "CHIKA_PROVIDER",
+        "ANTHROPIC_MODEL", "ANTHROPIC_API_KEY",
+        "OPENAI_MODEL", "OPENAI_API_KEY",
+        "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_KEY",
+        "AZURE_OPENAI_DEPLOYMENT", "AZURE_API_VERSION",
+        "OLLAMA_BASE_URL", "OLLAMA_MODEL",
+        "CHIKA_THINKING", "CHIKA_THINKING_BUDGET",
+        "CHIKA_AUTONOMY",
+    }
+    if cleaned_key in hot_reloadable:
+        try:
+            ctx.engine.reload_client()
+            ctx.console.print(Text("  ✓ applied live", style=THEME.success))
+        except RuntimeError as exc:
+            ctx.console.print(Text(f"  ! {exc}", style=THEME.error))
+    else:
+        ctx.console.print(Text(
+            "  · this key is read at boot — restart for it to take effect.",
+            style=THEME.dim,
+        ))
 
 
 # ── /profile, /profiles ───────────────────────────────────────────────────
@@ -463,7 +503,7 @@ def _cmd_status(ctx: CommandContext, _args: list[str]) -> None:
     rows: list[tuple[str, str]] = [
         ("provider",   cfg.provider),
         ("model",      cfg.model),
-        ("profile",    p.name if p else "default"),
+        ("profile",    p.name if p else "unknown"),
         ("workspace",  p.workspace if p else ""),
         ("session",    eng.session_id or "cli"),
         ("messages",   str(len(eng._history))),
@@ -950,42 +990,6 @@ def _cmd_auto_update(ctx: CommandContext, args: list[str]) -> None:
     ))
 
 
-# ── /spotify ──────────────────────────────────────────────────────────────
-
-
-def _cmd_spotify(ctx: CommandContext, args: list[str]) -> None:
-    """Spotify integration — connect, disconnect, share toggle.
-
-    /spotify                  — show connection status
-    /spotify connect          — open browser to authorize
-    /spotify connect --no-open — print URL only (headless / SSH)
-    /spotify disconnect       — clear local tokens for this profile
-    /spotify share on|off     — share one connection across all profiles
-    """
-    from chika._cli import spotify as spotify_cmd
-    cmd = (args[0] if args else "status").lower()
-    if cmd == "connect":
-        spotify_cmd._connect(open_browser="--no-open" not in args[1:])
-        return
-    if cmd == "disconnect":
-        spotify_cmd._disconnect()
-        return
-    if cmd == "share":
-        if len(args) < 2 or args[1].lower() not in ("on", "off"):
-            ctx.console.print(Text("  /spotify share on|off", style=THEME.error))
-            return
-        spotify_cmd._share(args[1].lower())
-        return
-    if cmd in ("status", ""):
-        spotify_cmd._status()
-        return
-    ctx.console.print(Text(
-        f"  unknown subcommand {cmd!r}\n"
-        "  /spotify [status | connect [--no-open] | disconnect | share on|off]",
-        style=THEME.error,
-    ))
-
-
 # ── /doctor ───────────────────────────────────────────────────────────────
 
 
@@ -1129,10 +1133,23 @@ def _register_all() -> None:
                      "toggle the on-startup auto-update",
                      _cmd_auto_update, ("autoupdate",),
                      args_hint="[on|off]"))
-    register(Command("spotify",
-                     "connect / disconnect Spotify (open browser to authorize)",
-                     _cmd_spotify,
-                     args_hint="[connect [--no-open] | disconnect | share on|off]"))
+    # Skill-owned slash commands. Each shipped skill exports an
+    # optional ``register_cli()`` returning ``{"slash": {<name>: handler}}``;
+    # the dispatcher walks every skill so adding a new skill =
+    # automatically gets a new /<name> command (when the skill
+    # declares one). Handlers receive ``(args)`` like the argv path.
+    from chika.skills import iter_skill_cli as _iter_skill_cli
+    for _skill_name, _table in _iter_skill_cli():
+        for _cmd_name, _handler in (_table.get("slash") or {}).items():
+            def _make_wrapper(name=_cmd_name, handler=_handler):
+                def _slash_wrapper(ctx: CommandContext, args: list[str]) -> None:
+                    rc = handler(args)
+                    if rc and rc != 0:
+                        ctx.console.print(Text(
+                            f"  · /{name} exited {rc}", style=THEME.dim,
+                        ))
+                return _slash_wrapper
+            register(Command(_cmd_name, f"{_skill_name} skill", _make_wrapper()))
     register(Command("doctor",
                      "verify the install (deps, extension, .env, etc.)",
                      _cmd_doctor))

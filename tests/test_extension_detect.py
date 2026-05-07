@@ -393,17 +393,22 @@ def test_all_three_installers_use_same_marker_filename():
     assert marker in lin
 
 
-# ── Heartbeat hook in api/server.py ──────────────────────────────────
+# ── Heartbeat hook (lives inside whichever skill owns the extension WS) ─
 
 
 def test_server_writes_heartbeat_on_extension_connect():
-    """``api/server.py``'s extension status callback must invoke
-    ``write_heartbeat()`` when an extension WS connects. We assert
-    the contract via static text — full WS integration is exercised
-    by ``tests/test_ws_e2e.py``."""
-    text = (REPO_ROOT / "api" / "server.py").read_text(encoding="utf-8")
+    """The skill that owns the extension WebSocket must invoke
+    ``write_heartbeat()`` when an extension connects. We resolve the
+    path via the public ``chika.skills.skill_folder`` helper rather
+    than hardcoding it — the contract is "wherever the browser skill
+    lives, its websocket module calls write_heartbeat in the
+    connected branch."""
+    from chika.skills import skill_folder
+    folder = skill_folder("browser")
+    assert folder is not None, "browser skill must be shipped"
+    ws_path = folder / "websocket.py"
+    text = ws_path.read_text(encoding="utf-8")
     assert "write_heartbeat" in text
-    # The call should be inside the ``if connected:`` branch
     idx_connected = text.find("if connected:")
     idx_write = text.find("write_heartbeat")
     assert idx_connected != -1 and idx_write != -1

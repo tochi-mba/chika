@@ -253,17 +253,33 @@ place.
   Good: "Fetches pages, extracts main-article text, and verifies
          URLs return non-error responses"
 
-WHEN_TO_USE - exactly 3 bullets. Each a concrete agent-facing
-scenario where THIS skill is the right tool. Start each bullet with
-a verb. No filler ("when you need to..."). Show breadth - three
-different shapes of task, not three rephrasings of the same one.
+WHEN_TO_USE - exactly 3 bullets. Each describes a CONCRETE TASK +
+the TOOL-CALL SEQUENCE that solves it. Format:
+``<task verb-phrase>: tool_a -> tool_b(key_kwarg=...)``. Use the
+EXACT tool names + EXACT required-kwarg names from SKILL.md so the
+agent can copy-paste-shape into its workflow JSON. Start with a
+verb. Show breadth - three different shapes of task.
+  Bad:  "When you want to play music"
+  Good: "Play a specific song: spotify_search(query=) ->
+         spotify_play(uris=[...], device_id=)"
+  Bad:  "Manage playlists"
+  Good: "Create a playlist + add tracks: spotify_get_current_user
+         -> spotify_create_playlist(user_id=, name=) ->
+         spotify_add_to_playlist(playlist_id=, uris=[...])"
 
-KEY_TOOLS - 3 to 5 EXACT tool names from the SKILL.md. The
-highest-leverage / most-used. NOT every tool the skill exposes.
+KEY_TOOLS - 3 to 5 EXACT tool names from SKILL.md, the most
+high-leverage handful. NOT every tool the skill exposes. Prefer
+tools that the agent will reach for first when planning.
 
-ANTI_PATTERNS - 1 or 2 bullets. The most common misuses or
-boundaries. Use "don't X, use Y instead" when a sibling skill is
-better.
+ANTI_PATTERNS - 1 or 2 bullets. The most common misuses,
+boundaries, OR PARAM-NAME PITFALLS the agent has tripped on. When
+a tool requires an unusual kwarg name (e.g. ``artist_id`` not
+``id``, ``user_id`` for create_playlist), name it here. Use the
+form "don't X, use Y instead" when a sibling skill is the better
+fit.
+  Bad:  "Don't misuse this skill"
+  Good: "Don't pass ``id=`` to spotify_get_artist; use ``artist_id=``"
+  Good: "Don't use for local-file playback - use system audio tools"
 
 LENGTH CAPS (strict - output is rejected if any cap is violated):
   - purpose                   <= 140 chars

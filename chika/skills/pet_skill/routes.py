@@ -87,6 +87,10 @@ async def set_profile_pet(name: str, body: PetUpdate) -> dict:
     profile = pm.get(name)
     memory_changed: dict | None = None
     if profile and new_id and body.memory_action in ("carry", "clear"):
+        # Sibling import — these helpers live next to us in the pet
+        # skill's __init__.py. Used to be the cross-import the
+        # api/routes/pets.py file had to allowlist; now invisible
+        # because we ARE inside the skill folder.
         from chika.skills.pet_skill import (
             clear_pet_memory,
             copy_pet_memory,

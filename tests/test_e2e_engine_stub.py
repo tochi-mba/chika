@@ -38,7 +38,10 @@ from chika.core.prompt_builder import PromptBuilder
 from chika.core.skill_registry import SkillRegistry
 from chika.core.tool_registry import ToolDefinition, ToolRegistry
 from chika.core.variable_store import VariableStore
-from chika.skills.plan_skill import build_plan_skill
+from chika.skills import (
+    SkillBuildContext,
+    get_skill_module,
+)
 from tests._helpers.stub_llm import StubLLM, install, step, wf_sequential
 
 
@@ -80,9 +83,21 @@ def engine(tmp_path: Path) -> ChikaEngine:
         handler=_file_write,
     ))
 
-    # Plan skill — real implementation, real var store.
-    plan_skill = build_plan_skill(vars_)
-    skills.register(plan_skill)
+    # Plan skill — built via the public discovery API rather than
+    # importing the skill's internals directly. Production code goes
+    # through this same path, so a refactor inside the skill folder
+    # never breaks this test.
+    plan_mod = get_skill_module("plan")
+    assert plan_mod is not None, "plan skill must be shipped"
+    ctx = SkillBuildContext(
+        variable_store=vars_,
+        engine_getter=lambda: None,
+        memory_getter=lambda: None,
+        workflow_engine_getter=lambda: None,
+        profile_getter=lambda: None,
+        workspace_getter=lambda: "",
+    )
+    skills.register(plan_mod.build_skill(ctx))
 
     eng = ChikaEngine(tools, vars_, mem, prompt, skills)
     eng._workflow_engine.set_skill_registry(skills)

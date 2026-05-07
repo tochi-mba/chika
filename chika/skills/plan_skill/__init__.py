@@ -23,9 +23,86 @@ from typing import Any
 
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
+
+# Canonical name used by the engine's skill registry.
+SKILL_NAME = "plan"
 from chika.core.variable_store import VarType
 
 _VALID_STATUS = {"pending", "in_progress", "done"}
+# ``interrupted`` is a derived status applied when a plan is archived
+# while a task was in_progress. Distinct from ``done`` (work shipped)
+# and ``pending`` (never started) so retrospectives can tell which
+# work was paused vs which was skipped.
+_DERIVED_STATUS = {"interrupted"}
+
+
+def _plan_content_signature(plan: dict) -> str:
+    """A stable hash-like signature of a plan's user-visible content.
+
+    Used by ``plan_set`` to skip auto-archive when the agent re-issues
+    the same plan. We compare goal + requirements + (id, text, status)
+    triples — internal fields like timestamps and child positions don't
+    count as "different content."
+    """
+    goal = (plan.get("goal") or "").strip().lower()
+    reqs = sorted((r or "").strip().lower() for r in plan.get("requirements") or [])
+
+    def _normalise(t: dict) -> tuple:
+        if not isinstance(t, dict):
+            return ("", "", "")
+        children = tuple(_normalise(c) for c in t.get("subtasks") or [])
+        return (
+            (t.get("text") or "").strip().lower(),
+            (t.get("status") or "").strip(),
+            children,
+        )
+
+    task_sig = tuple(_normalise(t) for t in plan.get("tasks") or [])
+    return json.dumps([goal, reqs, list(task_sig)], default=str)
+
+
+def _emit_plan_archived(archive: dict, source: str = "plan_set") -> None:
+    """Best-effort broadcast of a ``plan_archived`` event.
+
+    Wired through the same broadcast helper the rest of the system
+    uses (`api.broadcast.push_to_all_frontend_sessions`). When that
+    module isn't importable (e.g., a test harness builds the skill
+    without booting the API), we silently no-op — emit is purely
+    additive UI sugar, never load-bearing for the archive itself.
+    """
+    plan = archive.get("plan") or {}
+    payload = {
+        "type":             "plan_archived",
+        "auto":             bool(plan.get("auto_archived")),
+        "goal":             (plan.get("goal") or "")[:160],
+        "reason":           (plan.get("archive_reason") or "")[:200],
+        "tasks_total":      len(plan.get("tasks") or []),
+        "tasks_done":       sum(
+            1 for t in plan.get("tasks") or []
+            if isinstance(t, dict) and t.get("status") == "done"
+        ),
+        "archived_at":      plan.get("archived_at"),
+        "superseded_by":    plan.get("superseded_by_goal", "")[:160],
+        "history_count":    archive.get("count", 0),
+        "source":           source,
+    }
+    try:
+        import asyncio
+
+        from api.broadcast import push_to_all_frontend_sessions
+        # Schedule the coroutine on the running loop without awaiting —
+        # plan_set is sync from the agent's POV; we mustn't block it on
+        # the broadcast.
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(push_to_all_frontend_sessions(payload))
+        except RuntimeError:
+            # No running loop — caller is in a fully sync context
+            # (e.g., bare unit test). Skip; the test can pull from
+            # the variable store directly.
+            pass
+    except Exception:
+        pass
 
 
 def _clean_task(t: Any, idx: int, parent_id: str | None = None) -> dict:
@@ -500,12 +577,130 @@ def _make_plan_tools(variable_store, memory_getter=None):
     system prompts.
     """
 
+    # ── Auto-archive helper ──────────────────────────────────────────
+    #
+    # Both plan_set (when replacing a plan) and plan_archive (explicit
+    # retire) run through this single code path so the on-disk state
+    # of a saved plan is identical regardless of which tool triggered
+    # the archive. Edge cases handled here once, not in two places:
+    #
+    #   - Empty plan (no tasks) → skip archive; nothing of value to
+    #     retain. Returns ``{"archived": False}``.
+    #   - In-progress task at archive time → status stamped as
+    #     ``"interrupted"`` so retrospectives know it didn't finish.
+    #   - Per-session history cap (25) → oldest archive evicted; the
+    #     newest entry is always retained.
+    #   - Memory persistence → optional, fails open (a memory write
+    #     error never fails the archive itself).
+    #   - WS event emission → fire-and-forget; UI consumers see a
+    #     ``plan_archived`` event with the archived plan's goal +
+    #     stats so they can render a brief "archived" chip.
+    def _archive_current_plan(reason: str = "",
+                              auto: bool = False,
+                              superseded_by_goal: str = "") -> dict:
+        """Move the current $plan into the $plan_archive history list.
+
+        Returns ``{"archived": bool, "plan": dict | None, ...}``.
+        """
+        var = variable_store.get("plan")
+        if var is None or not isinstance(var.value, dict):
+            return {"archived": False, "reason": "no_active_plan"}
+
+        plan = dict(var.value)
+
+        # Empty / unstarted plans aren't worth archiving — they
+        # would clutter ``plan_history`` with shells that never
+        # got worked on.
+        tasks = plan.get("tasks") or []
+        if not tasks:
+            return {"archived": False, "reason": "empty_plan"}
+
+        plan["archived_at"] = time.time()
+        plan["auto_archived"] = bool(auto)
+        if reason and reason.strip():
+            plan["archive_reason"] = reason.strip()[:200]
+        if superseded_by_goal and superseded_by_goal.strip():
+            plan["superseded_by_goal"] = superseded_by_goal.strip()[:200]
+
+        # Mark any in-progress leaf as ``interrupted`` so the archive
+        # accurately reflects where work was paused. We walk the tree
+        # because in-progress can live nested inside subtasks.
+        # ``_walk_tasks`` yields ``(task, depth)`` — we don't need the
+        # depth here.
+        for task, _depth in _walk_tasks(tasks):
+            if isinstance(task, dict) and task.get("status") == "in_progress":
+                task["status"] = "interrupted"
+
+        existing = variable_store.get("plan_archive")
+        history = list(existing.value) if existing and isinstance(
+            existing.value, list,
+        ) else []
+        history.append(plan)
+        # Cap at 25 so a long session doesn't leak unbounded memory.
+        history = history[-25:]
+        variable_store.set(
+            "plan_archive", history, VarType.JSON,
+            description="Past plans archived from this session",
+            source="plan:archive_auto" if auto else "plan:archive",
+        )
+        # Only delete the active plan when this archive is the
+        # explicit retire-and-clear path. plan_set's auto-archive
+        # writes the new plan straight after — no intermediate
+        # delete-then-set, which would create a flicker in any UI
+        # subscribing to $plan changes.
+        if not auto:
+            variable_store.delete("plan")
+
+        # Auto-memory: persist a one-line summary of the archived plan
+        # to the profile's memory.md so future sessions recall what
+        # was attempted. Same logic both paths used to duplicate.
+        memory_line = ""
+        if callable(memory_getter):
+            try:
+                mm = memory_getter()
+            except Exception:
+                mm = None
+            if mm is not None:
+                goal = (plan.get("goal") or "").strip()[:160]
+                done = sum(
+                    1 for t in tasks
+                    if isinstance(t, dict) and t.get("status") == "done"
+                )
+                stamp = time.strftime("%Y-%m-%d")
+                bits = [f"[{stamp}] plan archived"]
+                if goal:
+                    bits.append(f"goal: {goal}")
+                bits.append(f"tasks done: {done}/{len(tasks)}")
+                if reason and reason.strip():
+                    bits.append(f"reason: {reason.strip()[:120]}")
+                memory_line = " — ".join(bits)
+                # Key by float timestamp so back-to-back archives in
+                # the same wall-clock second don't overwrite each other.
+                # Format: ``plan_<unix-seconds>_<microseconds>`` to give
+                # a unique-per-microsecond stable key the agent can
+                # reference if it ever wants to read a specific entry.
+                ts = plan.get("archived_at", 0.0)
+                key = f"plan_{int(ts)}_{int((ts - int(ts)) * 1_000_000):06d}"
+                try:
+                    mm.persist(key, memory_line)
+                except Exception:
+                    memory_line = ""
+        return {
+            "archived":    True,
+            "plan":        plan,
+            "count":       len(history),
+            "memory_line": memory_line or None,
+        }
+
     async def plan_set(tasks: list | None = None,
                        goal: str | None = None,
                        requirements: list[str] | None = None,
                        **_extra) -> dict:
         """
-        Set the plan for this session. Replaces any existing plan.
+        Set the plan for this session. **Auto-archives the existing
+        plan** (if any) before installing the new one — so plan history
+        survives every replacement without the agent needing to
+        explicitly call ``plan_archive`` first.
 
         Verbose-plan fields:
         - ``goal`` (str): one-sentence aim of the whole job. Helps the
@@ -521,6 +716,11 @@ def _make_plan_tools(variable_store, memory_getter=None):
         ``steps`` / ``items`` / ``list`` / ``plan`` / ``todos`` all
         resolve. ``aim`` / ``objective`` resolve for ``goal``;
         ``constraints`` / ``musts`` for ``requirements``.
+
+        The auto-archive is silent on first plan (nothing to archive)
+        and on identical-content replacement. ``plan_clear`` exists
+        for the rare case where the user wants to drop a plan
+        without keeping it in history.
         """
         if tasks is None:
             for alias in ("steps", "items", "list", "plan", "todos"):
@@ -544,6 +744,39 @@ def _make_plan_tools(variable_store, memory_getter=None):
             requirements = []
 
         cleaned = [_clean_task(t, i) for i, t in enumerate(tasks, start=1)]
+
+        # Validate every task has a non-empty ``text`` description.
+        # The LLM occasionally emits ``{"id": "...", "status": "..."}``
+        # without a text field — the plan then renders as a wall of
+        # ``- [pending]`` markers in the approval modal with no
+        # context for the user to evaluate. Refuse here so the model
+        # retries with proper text, instead of silently accepting a
+        # malformed plan.
+        empty_text_paths: list[str] = []
+        def _check_text(items: list, prefix: str = "") -> None:
+            for t in items:
+                if not isinstance(t, dict):
+                    continue
+                tid = t.get("id") or "?"
+                path = f"{prefix}{tid}"
+                if not (t.get("text") or "").strip():
+                    empty_text_paths.append(path)
+                subs = t.get("subtasks") or []
+                if subs:
+                    _check_text(subs, prefix=f"{path}.")
+        _check_text(cleaned)
+        if empty_text_paths:
+            return {"error": "task_missing_text", "tasks": empty_text_paths,
+                    "hint": (
+                        "Every task (and subtask) needs a non-empty ``text`` "
+                        "field describing what to do. Re-emit plan_set with "
+                        "explicit task descriptions — e.g. "
+                        "{'id': 'scaffold', 'text': 'Create the project "
+                        "directory and install dependencies.'}. "
+                        "Tasks without text would render as ``- [pending]`` "
+                        "with no context, which the user can't evaluate."
+                    )}
+
         for t in cleaned:
             _recompute_parent_status(t)
         # Default: first leaf-task is in_progress, rest pending
@@ -552,17 +785,73 @@ def _make_plan_tools(variable_store, memory_getter=None):
                 _promote_first_pending_leaf(t)
                 if _any_in_progress(t):
                     break
+        new_goal_str = (goal or "").strip()
         plan = {
-            "goal":         (goal or "").strip(),
+            "goal":         new_goal_str,
             "requirements": [r.strip() for r in requirements if r and r.strip()],
             "tasks":        cleaned,
             "created_at":   time.time(),
             "updated_at":   time.time(),
         }
+
+        # ── Auto-archive the existing plan (if any) ─────────────────
+        # Identical-content replace is the corner case worth catching
+        # — the agent occasionally re-issues plan_set with the same
+        # tasks (e.g., on a retry). Skipping the archive there avoids
+        # cluttering plan_history with N identical entries.
+        existing_var = variable_store.get("plan")
+        archive_summary: dict[str, Any] | None = None
+        if existing_var is not None and isinstance(existing_var.value, dict):
+            old_plan = existing_var.value
+            old_tasks = old_plan.get("tasks") or []
+            same_content = (
+                _plan_content_signature(old_plan)
+                == _plan_content_signature({
+                    "goal": new_goal_str,
+                    "requirements": plan["requirements"],
+                    "tasks": cleaned,
+                })
+            )
+            if old_tasks and not same_content:
+                # Determine the right archive reason from the old plan's
+                # completion state. This is metadata that's surfaced
+                # in plan_history + the WS event.
+                done_count = sum(
+                    1 for t in old_tasks
+                    if isinstance(t, dict) and t.get("status") == "done"
+                )
+                if done_count == len(old_tasks):
+                    reason = "shipped (all tasks done before replace)"
+                elif done_count == 0:
+                    reason = "abandoned — no tasks completed"
+                else:
+                    reason = (
+                        f"superseded by plan_set "
+                        f"({done_count}/{len(old_tasks)} tasks done)"
+                    )
+                archive_summary = _archive_current_plan(
+                    reason=reason,
+                    auto=True,
+                    superseded_by_goal=new_goal_str,
+                )
+
         variable_store.set("plan", plan, VarType.JSON,
                            description="Session task plan",
                            source="plan:set")
-        return {"_source": "plan_set", "count": len(cleaned), "plan": plan}
+
+        # Fire WS event (best-effort) so any open UI surface can
+        # animate a brief "archived" chip without polling. Falls
+        # through silently if the bus isn't wired (tests, headless).
+        if archive_summary and archive_summary.get("archived"):
+            _emit_plan_archived(archive_summary, source="plan_set")
+
+        return {
+            "_source":        "plan_set",
+            "count":          len(cleaned),
+            "plan":           plan,
+            "auto_archived":  bool(archive_summary and archive_summary.get("archived")),
+            "archive":        archive_summary or None,
+        }
 
     async def plan_update(task_id: str | None = None,
                           status: str | None = None,
@@ -852,80 +1141,54 @@ def _make_plan_tools(variable_store, memory_getter=None):
         showing it.
 
         ``reason`` is an optional one-liner the archive remembers
-        (e.g. "shipped", "abandoned — user pivoted", "superseded by
-        plan_set on 2026-05-12"). Saved alongside the plan so future
-        retrospectives see why it was archived.
+        (e.g. "shipped", "abandoned — user pivoted"). Saved alongside
+        the plan so future retrospectives see why it was archived.
+
+        Note: ``plan_set`` AUTO-ARCHIVES the existing plan before
+        installing a new one — you don't need to call ``plan_archive``
+        first. Use this tool only for explicit retire-and-leave-blank
+        flows (e.g., user said "we're done with this", no replacement
+        plan coming).
+        """
+        result = _archive_current_plan(reason=reason, auto=False)
+        if not result.get("archived"):
+            note = "no active plan to archive"
+            if result.get("reason") == "empty_plan":
+                note = "active plan has no tasks — nothing to archive"
+            return {
+                "_source":  "plan_archive",
+                "archived": False,
+                "note":     note,
+            }
+        _emit_plan_archived(result, source="plan_archive")
+        return {
+            "_source":     "plan_archive",
+            "archived":    True,
+            "count":       result.get("count", 0),
+            "plan":        result.get("plan"),
+            "memory_line": result.get("memory_line"),
+        }
+
+    async def plan_clear(**_extra) -> dict:
+        """Drop the current plan WITHOUT archiving.
+
+        Use this rarely — only when the user explicitly says "scrap
+        the plan, just start over" and the plan has no value worth
+        retaining. Default behavior (``plan_set`` / ``plan_archive``)
+        keeps history; this tool is the explicit escape hatch.
         """
         var = variable_store.get("plan")
         if var is None or not isinstance(var.value, dict):
             return {
-                "_source": "plan_archive",
-                "archived": False,
-                "note":     "no active plan to archive",
+                "_source":  "plan_clear",
+                "cleared":  False,
+                "note":     "no active plan to clear",
             }
-        plan = dict(var.value)
-        plan["archived_at"] = time.time()
-        if reason and reason.strip():
-            plan["archive_reason"] = reason.strip()[:200]
-
-        existing = variable_store.get("plan_archive")
-        history = list(existing.value) if existing and isinstance(
-            existing.value, list,
-        ) else []
-        history.append(plan)
-        # Cap the history at 25 entries so a long-running session doesn't
-        # leak unbounded memory. Newest stays, oldest gets popped.
-        history = history[-25:]
-        variable_store.set(
-            "plan_archive", history, VarType.JSON,
-            description="Past plans archived from this session",
-            source="plan:archive",
-        )
-        # Clear the current plan so prompts + UI panels go blank.
         variable_store.delete("plan")
-
-        # Auto-memory: persist a one-line summary of the archived plan
-        # to the profile's memory.md so future sessions recall what
-        # was attempted. The summary stays short (one line) so the
-        # memory file doesn't bloat over time. ``memory_getter``
-        # resolves the live MemoryManager — when None (tests / minimal
-        # engines) we just skip the persistence.
-        memory_line = ""
-        if callable(memory_getter):
-            try:
-                mm = memory_getter()
-            except Exception:
-                mm = None
-            if mm is not None:
-                goal = (plan.get("goal") or "").strip()[:160]
-                tasks = plan.get("tasks") or []
-                done = sum(
-                    1 for t in tasks
-                    if isinstance(t, dict) and t.get("status") == "done"
-                )
-                stamp = time.strftime("%Y-%m-%d")
-                bits = [f"[{stamp}] plan archived"]
-                if goal:
-                    bits.append(f"goal: {goal}")
-                bits.append(f"tasks done: {done}/{len(tasks)}")
-                if reason and reason.strip():
-                    bits.append(f"reason: {reason.strip()[:120]}")
-                memory_line = " — ".join(bits)
-                try:
-                    mm.persist(f"plan_{int(plan.get('archived_at', 0))}",
-                               memory_line)
-                except Exception:
-                    # Memory write is best-effort: never fail the
-                    # archive call because the memory file is
-                    # inaccessible.
-                    memory_line = ""
-
         return {
-            "_source":     "plan_archive",
-            "archived":    True,
-            "count":       len(history),
-            "plan":        plan,
-            "memory_line": memory_line or None,
+            "_source": "plan_clear",
+            "cleared": True,
+            "note":    "plan dropped; nothing archived. Call plan_set to start fresh.",
         }
 
     async def plan_history(limit: int = 5, **_extra) -> dict:
@@ -949,7 +1212,7 @@ def _make_plan_tools(variable_store, memory_getter=None):
         }
 
     return (plan_set, plan_update, plan_get, plan_add, plan_remove,
-            plan_edit, plan_archive, plan_history)
+            plan_edit, plan_archive, plan_history, plan_clear)
 
 
 def _make_plan_prompt_section(variable_store):
@@ -1046,7 +1309,7 @@ def build_plan_skill(variable_store, engine_getter=None,
     ``$plan``.
     """
     (plan_set, plan_update, plan_get, plan_add, plan_remove,
-     plan_edit, plan_archive, plan_history) = _make_plan_tools(
+     plan_edit, plan_archive, plan_history, plan_clear) = _make_plan_tools(
         variable_store, memory_getter=memory_getter,
     )
     plan_reconcile = _build_plan_reconcile(variable_store, engine_getter)
@@ -1286,7 +1549,72 @@ def build_plan_skill(variable_store, engine_getter=None,
                 },
                 handler=plan_history,
             ),
+            ToolDefinition(
+                name="plan_clear",
+                description=(
+                    "Drop the active plan WITHOUT archiving it. Rare — "
+                    "plan_set already auto-archives any prior plan, and "
+                    "plan_archive is the explicit retire. Use this only "
+                    "when the user says 'scrap the plan, never mind' AND "
+                    "the plan has no tasks worth keeping in history."
+                ),
+                parameters={"type": "object", "properties": {}},
+                handler=plan_clear,
+            ),
         ],
         workflow_examples="",
         prompt_section=section,
     )
+
+
+def build_skill(context):
+    """Auto-discovery entry point. plan_reconcile needs a live engine
+    to reach the LLM client; the engine doesn't exist when skills are
+    first registered, so we resolve it lazily through the context's
+    getter. Same trick for the memory manager (it follows profile
+    swaps, so caching the reference would break that)."""
+    return build_plan_skill(
+        context.variable_store,
+        engine_getter=context.engine_getter,
+        memory_getter=context.memory_getter,
+    )
+
+
+INTENT_CASES: dict = {
+    "plan": {
+        "positive": [
+            "build a three-phase plan to migrate this repo from CommonJS to ESM",
+            "create a step-by-step plan to ship a new release end-to-end",
+        ],
+        "negative": [
+            "what's in the current plan",
+            "mark task t3 done",
+            "show me the plan history",
+            "scrap the plan, never mind",
+        ],
+    },
+    "ask": {
+        "positive": [
+            "figure out what to do next",
+            "decide what to work on first",
+        ],
+        "negative": [
+            "add a task t4 'write the integration tests' to the plan",
+            "mark t2 done and move to t3",
+            "split the plan into 4 phases",
+        ],
+    },
+    # Skill_load — plan SKILL.md is dense (verbose template, edit
+    # ops, reconcile semantics). Loading it once per session pays
+    # off for any non-trivial planning work.
+    "skill_load": {
+        "positive": [
+            "build a verbose plan with goal, requirements, subtasks for the migration",
+            "I want to use plan_edit to swap a requirement — show me the right call shape",
+        ],
+        "negative": [
+            "show me the plan",
+            "mark t1 done",
+        ],
+    },
+}

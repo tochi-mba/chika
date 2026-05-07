@@ -130,6 +130,31 @@ _SPOTIFY_DEFAULTS = {
 }
 _VALID_SPOTIFY_SHARING = {"on", "off"}
 
+# Skills the user has explicitly disabled. Hot-reloaded into every
+# active engine via session_manager.reload_skills() — a flip in this
+# list immediately removes (or re-adds) the skill's tools across
+# every open session, no restart required.
+_SKILLS_DEFAULTS: dict[str, list[str]] = {
+    "skills_disabled": [],   # e.g. ["spotify", "browser"]
+}
+
+
+# Names recognised by the engine's skill registry — validated at
+# update-time so a typo doesn't silently disable nothing.
+#
+# The list is sourced from ``chika.skills.list_known_skill_names()``
+# which walks ``chika/skills/*`` and reads each subpackage's
+# ``SKILL_NAME`` constant. Adding a new skill = drop a folder, declare
+# ``SKILL_NAME``, and it's automatically allow-listed here. No
+# parallel hand-maintained list to drift.
+def _valid_skill_names() -> frozenset[str]:
+    # Defer the import to call time so a stripped-down install (no
+    # browser/spotify deps) doesn't crash settings validation at
+    # module import time. The discovery walk handles missing-deps
+    # skills gracefully (skips them, logs nothing).
+    from chika.skills import known_skill_names_set
+    return known_skill_names_set()
+
 # ── Category definitions ──────────────────────────────────────────────────────
 
 CATEGORIES: dict[str, str] = {
@@ -240,6 +265,29 @@ def init(defaults: dict) -> None:
         if k not in _settings:
             _settings[k] = v
             changed = True
+    for k, v in _SKILLS_DEFAULTS.items():
+        if k not in _settings:
+            _settings[k] = v
+            changed = True
+    # Skill-contributed settings keys (each shipped skill's
+    # ``SKILL_SETTINGS`` dict). Walked here so a skill that declares a
+    # config option (e.g. spotify_share_across_profiles) seeds its
+    # default the first time the server boots — no parallel hand-list
+    # of "core skill keys to register here." See ADR-38 for the
+    # drop-in skill contract.
+    try:
+        from chika.skills import iter_skill_settings
+        for _skill_name, spec in iter_skill_settings():
+            for skey, sval in spec.items():
+                if skey in _settings:
+                    continue
+                # Each value is either a raw default OR a ``{default, validate}`` dict.
+                default = sval.get("default") if isinstance(sval, dict) else sval
+                _settings[skey] = default
+                changed = True
+    except Exception:
+        # Best-effort — broken skill must not block server boot.
+        pass
     if changed:
         _save()
 
@@ -351,7 +399,36 @@ def update(patch: dict) -> dict:
                 f"Invalid spotify_share_across_profiles: {val!r}. Use 'on' or 'off'."
             )
         _settings["spotify_share_across_profiles"] = val
-        _invalidate_spotify_cache()
+
+    if "skills_disabled" in patch:
+        val = patch["skills_disabled"]
+        if val is None:
+            val = []
+        if not isinstance(val, list):
+            raise ValueError(
+                "skills_disabled must be a list of skill names (strings)"
+            )
+        cleaned: list[str] = []
+        valid = _valid_skill_names()
+        for name in val:
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(
+                    f"skills_disabled entries must be non-empty strings: {name!r}"
+                )
+            if name not in valid:
+                raise ValueError(
+                    f"Unknown skill {name!r}. Valid: {sorted(valid)}"
+                )
+            if name not in cleaned:
+                cleaned.append(name)
+        _settings["skills_disabled"] = cleaned
+        # Hot-reload every engine's registered skill set so tools
+        # disappear / reappear across every active session.
+        try:
+            from api.session_manager import session_manager
+            session_manager.reload_skills()
+        except Exception:
+            pass
 
     if "spotify_profile_overrides" in patch:
         # Three accepted shapes:
@@ -377,21 +454,23 @@ def update(patch: dict) -> dict:
         _settings["spotify_profile_overrides"] = {
             k: True for k, v in val.items() if v
         }
-        _invalidate_spotify_cache()
 
     _save()
-    return dict(_settings)
 
-
-def _invalidate_spotify_cache() -> None:
-    """Drop the in-memory Spotify token cache so the next read picks
-    up the right bucket (per-profile / shared / override) without a
-    process restart. The on-disk tokens in any bucket are untouched."""
+    # Fan out the change to every skill via the subscription bus so
+    # skills can invalidate caches / push events without the store
+    # knowing about them. Keys that didn't actually change are still
+    # fired (we don't snapshot the pre-patch state) but skills are
+    # expected to filter their own keys, so it's a no-op for those
+    # they don't care about.
     try:
-        from chika.skills.spotify_skill import oauth as _spotify_oauth
-        _spotify_oauth._cache.clear()
+        from chika.skills import fire_setting_changed
+        for _key in patch.keys():
+            fire_setting_changed(_key, _settings.get(_key), None)
     except Exception:
         pass
+
+    return dict(_settings)
 
 
 def _save() -> None:

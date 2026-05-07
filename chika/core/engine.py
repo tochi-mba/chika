@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from chika.core.chat_store import ChatStore
 
 from chika.core.compactor import Compactor
+from chika.core.intent import detect_planning_intent
 from chika.core.logger import LOG_PATH
 from chika.core.logger import log as _log
 from chika.core.memory_manager import MemoryManager
@@ -71,6 +72,15 @@ _CONTINUATION_TRIGGERS = (
     "continuing with", "continuing by",
     "i'll proceed", "moving on,", "moving on:",
     "after that, i'll", "after that i'll",
+    # Post-``ask_user`` slips — the agent often acknowledges the
+    # user's answer without USING it ("Let's move forward based on
+    # your choice." / "Now proceeding with your selection."). These
+    # patterns force the auto-continue gate so the next turn
+    # actually acts on the answer.
+    "let's move forward", "lets move forward", "let's proceed",
+    "lets proceed", "based on your choice", "based on your selection",
+    "based on your answer", "with your choice", "with your selection",
+    "moving forward",
 )
 
 
@@ -411,6 +421,12 @@ class ChikaEngine:
         else:
             self._client = config.make_client()
             self._stub_runner = None
+        # Track the provider/model the active client was built for, so
+        # ``reload_client`` can detect whether a rebuild is actually
+        # needed (model-only changes don't always need a new SDK
+        # object — but rebuilding is cheap, so we do it unconditionally).
+        self._client_provider: str = config.PROVIDER
+        self._client_model: str = config.get_provider_config().model if not self._stub_runner else ""
 
         llm_caller = LLMCaller(self)
         self._workflow_engine = WorkflowEngine(tool_registry, variable_store, llm_caller)
@@ -418,6 +434,10 @@ class ChikaEngine:
         # can reverse-lookup ``tool_name → skill_name`` and auto-load the
         # SKILL.md before any of that skill's tools fire.
         self._workflow_engine.set_skill_registry(skill_registry)
+        # Back-reference so the skill gate can read ``self._skill_summaries``
+        # at dispatch time and skip the refuse-and-reload step when the
+        # summary is already in the system prompt (ADR-11 + ADR-32).
+        self._workflow_engine.set_engine_ref(self)
         self._compactor = Compactor(
             llm_caller,
             max_tokens=config.MAX_HISTORY_TOKENS,
@@ -443,6 +463,86 @@ class ChikaEngine:
         # re-engages the approval gate instead of slipping through.
         self._plan_awaiting_approval: bool = False
 
+        # Per-turn flag — set by the tool_result event handler when
+        # ``ask_user`` returns a real choice. Read by the auto-continue
+        # gate below to FORCE a follow-up turn (the agent has fresh
+        # user info; it must act on it instead of stopping with a
+        # generic acknowledgment).
+        self._ask_user_answered_this_turn: bool = False
+
+        # ── Skill summaries — auto-injected into the system prompt ──
+        # Each shipped skill's SKILL.md is summarised once (cached in
+        # ``data/skill_summaries/<id>.json``, hash-keyed). The summary
+        # appears in EVERY turn's system prompt so the agent can pick
+        # the right skill without paying for the full SKILL.md upfront.
+        # Async regeneration kicks off here for stale/missing entries
+        # without blocking the constructor — the next turn picks up
+        # the fresh result. ADR-32.
+        self._skill_summaries: dict = {}
+        self._init_skill_summaries()
+
+    def _init_skill_summaries(self) -> None:
+        """Wire every shipped skill's SKILL.md summary into the engine.
+
+        Calls ``summarizer.init_summaries`` with a callback that
+        registers each summary on ``self._skill_summaries``. The
+        prompt builder reads this dict on every turn so the latest
+        summaries (including any background-generated ones) flow
+        into the next turn's system prompt automatically.
+
+        Failures are caught — a broken summarizer must NEVER block
+        engine construction (worst case: agent operates without
+        summaries, falls back to skill_load + SKILL.md as before)."""
+        try:
+            from chika.skills import iter_skill_modules
+            from chika.skills.summarizer import init_summaries
+
+            skills_map: dict = {}
+            for mod in iter_skill_modules():
+                spec = getattr(mod, "__file__", None)
+                if not spec:
+                    continue
+                from pathlib import Path as _P
+                skill_md = _P(spec).parent / "SKILL.md"
+                if skill_md.is_file():
+                    skills_map[mod.SKILL_NAME] = skill_md
+
+            if not skills_map:
+                return
+
+            # llm_complete is None when no provider is configured —
+            # init_summaries will load committed cache and skip async
+            # regen, which is the right behaviour for offline / fresh
+            # checkouts. When a client exists, we adapt the engine's
+            # single-prompt ``_llm_complete(prompt)`` to the
+            # summarizer's ``(*, system, user, max_tokens)`` shape by
+            # concatenating system + user into one prompt — the
+            # summarizer's parser is tolerant of leading prose, and
+            # this avoids duplicating the per-provider call logic
+            # already in ``_llm_complete``.
+            llm_complete = None
+            if self._client is not None:
+                async def llm_complete(*, system: str, user: str, max_tokens: int) -> str:  # noqa: ARG001
+                    prompt = f"{system}\n\n{user}"
+                    try:
+                        return await self._llm_complete(prompt)
+                    except Exception:
+                        return ""
+
+            init_summaries(
+                register_callback=self._register_skill_summary,
+                skills=skills_map,
+                llm_complete=llm_complete,
+            )
+        except Exception as exc:
+            _log.info("skill_summaries.init_failed", error=str(exc))
+
+    def _register_skill_summary(self, skill_id: str, summary) -> None:
+        """Callback fed to ``summarizer.init_summaries``. Stashes the
+        summary on ``self._skill_summaries`` keyed by skill id so the
+        prompt builder can read it back on every turn."""
+        self._skill_summaries[skill_id] = summary
+
     # ── Public ───────────────────────────────────────────────────────────────
 
     def cancel(self) -> None:
@@ -463,8 +563,24 @@ class ChikaEngine:
         # Reset auto-continue depth on every TOP-LEVEL call. Inner recursive
         # calls increment the counter without resetting.
         self._auto_continue_depth = 0
+        # Per-session event log (ADR-35). Each event yielded from this
+        # turn is appended to ``data/sessions/<session_id>.jsonl`` so
+        # ``chika replay <session_id>`` can rehydrate the conversation
+        # exactly. Built once per turn, fail-soft on FS errors.
+        event_log = None
+        try:
+            from api.event_log import EventLog
+            if self.session_id:
+                event_log = EventLog(self.session_id)
+        except Exception:
+            event_log = None
         try:
             async for event in self._chat_inner(user_input):
+                if event_log is not None:
+                    try:
+                        event_log.emit(event)
+                    except Exception:
+                        pass
                 yield event
         finally:
             self._chat_busy = False
@@ -474,6 +590,10 @@ class ChikaEngine:
         # Reset per-turn capture so stale text from an earlier turn can't
         # accidentally trigger auto-continue on the next.
         self._last_followup_text = ""
+        # Reset the ``ask_user`` answer flag — the tool_result handler
+        # sets this when a fresh choice arrives so the auto-continue
+        # gate forces a follow-up turn that actually acts on the answer.
+        self._ask_user_answered_this_turn = False
         # Circuit-breaker: count identical (error_code, target) pairs across
         # this turn's workflows. Three repeats of the same denial/error
         # pattern means the agent is stuck in a retry loop — halt and
@@ -589,6 +709,22 @@ class ChikaEngine:
             self._last_result_content = "{}"
             async for event in self._run_workflow(tool_call):
                 yield event
+                # Track ``ask_user`` answers so the auto-continue gate
+                # can force a follow-up turn — the agent has FRESH user
+                # info and must use it. Without this rule, the model
+                # often produces a non-action acknowledgment ("Let's
+                # move forward based on your choice") and stops, leaving
+                # the user staring at a stalled chat.
+                if (
+                    event.get("type") == "tool_result"
+                    and event.get("tool") == "ask_user"
+                    and not event.get("error")
+                ):
+                    result = event.get("result") or {}
+                    if isinstance(result, dict) and (
+                        result.get("choice") or result.get("choices")
+                    ):
+                        self._ask_user_answered_this_turn = True
                 # Track repeated identical errors so the agent can't burn
                 # the user's approval prompts in a loop. We pull the
                 # ``error`` and target identifier from each tool_result.
@@ -683,7 +819,14 @@ class ChikaEngine:
                 cap = int(_settings.get("auto_continue_max", 10))
             except Exception:
                 enabled, cap = True, 10
-            matched = _should_auto_continue(check_text)
+            # FORCE auto-continue when ``ask_user`` returned a real
+            # answer this turn — the agent has new info and must use
+            # it. Don't rely on the text heuristic; the model often
+            # produces a non-action acknowledgment ("Let's move
+            # forward...") that previously stalled the chat. Bypasses
+            # the heuristic but still respects the cap.
+            forced = bool(self._ask_user_answered_this_turn)
+            matched = forced or _should_auto_continue(check_text)
             if enabled and self._auto_continue_depth < cap and matched:
                 self._auto_continue_depth += 1
                 yield {
@@ -691,6 +834,7 @@ class ChikaEngine:
                     "depth":         self._auto_continue_depth,
                     "max":           cap,
                     "trigger_tail":  check_text[-200:],
+                    "reason":        "ask_user_answered" if forced else "text_match",
                 }
                 async for ev in self._chat_inner("continue"):
                     yield ev
@@ -853,7 +997,8 @@ class ChikaEngine:
                         f"write_count: {payload.get('write_count', 0)}\n\n"
                         "Generate a NEW workflow now whose first step is "
                         "`plan_set` with goal + requirements + tasks "
-                        "(use plan_skill SKILL.md for the template). "
+                        "(consult the planning skill's SKILL.md for the "
+                        "template via skill_load). "
                         "Then re-emit the original workflow."
                     )
                 else:
@@ -994,18 +1139,40 @@ class ChikaEngine:
         if tasks:
             summary_lines.append("TASKS:")
 
-            def _walk(items: list, depth: int = 0):
+            def _walk(items: list, depth: int = 0, counter=[0]):  # noqa: B006
                 for t in items[:20]:
                     if not isinstance(t, dict):
                         continue
-                    indent = "  " * (depth + 1)
-                    summary_lines.append(
-                        f"{indent}- [{t.get('status', 'pending')}] "
-                        f"{(t.get('text') or '')[:120]}"
-                    )
+                    indent = "  " * depth
+                    # Show ``text`` when present; fall back to the
+                    # task ID with a ``(missing description)`` marker
+                    # so the user at least sees WHICH task lacks
+                    # context. ``plan_set`` validates non-empty text
+                    # at intake, but this is defence-in-depth — a
+                    # mid-plan ``plan_edit`` or upstream loader could
+                    # still produce empty-text rows.
+                    text = (t.get("text") or "").strip()
+                    if not text:
+                        tid = t.get("id") or "?"
+                        text = f"<{tid}> (missing description)"
+                    # NB: deliberately NOT showing status labels in
+                    # the approval modal. ``plan_set`` auto-promotes
+                    # the first leaf to ``in_progress`` so the agent
+                    # has a starting target — but at APPROVAL time
+                    # nothing has run yet, and a ``[in_progress]``
+                    # tag on a not-yet-approved task confused users
+                    # ("why is this already running if you're asking
+                    # me to approve?"). Numbered bullets show the
+                    # plan as a clean to-do list awaiting consent.
+                    if depth == 0:
+                        counter[0] += 1
+                        marker = f"{counter[0]}."
+                    else:
+                        marker = "-"
+                    summary_lines.append(f"{indent}{marker} {text[:120]}")
                     subs = t.get("subtasks") or []
                     if subs:
-                        _walk(subs, depth + 1)
+                        _walk(subs, depth + 1, counter)
             _walk(tasks)
 
         summary = "\n".join(summary_lines) or "(empty plan)"
@@ -1195,6 +1362,68 @@ class ChikaEngine:
         except Exception:
             return first_message[:50]
 
+    def reload_client(self) -> dict[str, str]:
+        """Hot-swap the LLM client to match the current ``.env``.
+
+        Called after any path that mutates the .env file (the
+        ``/provider`` slash, ``/model`` slash, ``PATCH /api/provider``,
+        ``PATCH /api/env``). Re-reads .env via
+        :func:`config.reload_from_env`, rebuilds the SDK client, and
+        atomically replaces ``self._client``.
+
+        Safety against in-flight streams:
+            The Anthropic / OpenAI streaming methods grab ``self._client``
+            into a local variable BEFORE awaiting any I/O, so a turn
+            that's mid-stream when this swap happens finishes on the
+            old client unaffected. The next turn picks up the new one.
+
+        Returns a small status dict the slash command / HTTP route
+        can surface to the user — ``{provider, model, changed}``.
+
+        Raises :class:`RuntimeError` if the new provider's API key
+        isn't set; the previous client stays active so the engine
+        keeps working on the old provider until the user fixes the
+        env. (The slash command catches and reports.)
+        """
+        if self._stub_runner is not None:
+            # Test-stub mode — no live client to rebuild.
+            return {"provider": "stub", "model": "", "changed": "false"}
+
+        prev_provider = self._client_provider
+        prev_model    = self._client_model
+
+        config.reload_from_env()
+        try:
+            new_client = config.make_client()
+        except Exception as exc:
+            _log.warn("reload_client_failed", error=str(exc))
+            raise RuntimeError(
+                f"Couldn't switch to {config.PROVIDER}: {exc}. "
+                "Check your .env for the right API key, then try again."
+            ) from exc
+
+        self._client = new_client
+        self._client_provider = config.PROVIDER
+        self._client_model    = config.get_provider_config().model
+
+        changed = (
+            prev_provider != self._client_provider
+            or prev_model  != self._client_model
+        )
+        _log.info(
+            "llm_client_reloaded",
+            prev_provider=prev_provider,
+            prev_model=prev_model,
+            new_provider=self._client_provider,
+            new_model=self._client_model,
+            changed=changed,
+        )
+        return {
+            "provider": self._client_provider,
+            "model":    self._client_model,
+            "changed":  "true" if changed else "false",
+        }
+
     def switch_profile(self, profile: Profile) -> None:
         """Swap the active profile: new memory file, update workspace variable."""
         self._memory = MemoryManager(
@@ -1273,6 +1502,25 @@ class ChikaEngine:
             lines.append("")
         return "\n".join(lines) or "{}"
 
+    def _latest_user_text(self) -> str:
+        """Return the text of the most recent user message in history,
+        or empty string if there isn't one. Used by intent heuristics
+        and the per-turn system-prompt builder."""
+        for m in reversed(self._history):
+            if m.get("role") == "user":
+                content = m.get("content")
+                if isinstance(content, str):
+                    return content
+                # Multi-part content (image+text) — flatten the text parts
+                if isinstance(content, list):
+                    return " ".join(
+                        (p.get("text") or "")
+                        for p in content
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    )
+                return ""
+        return ""
+
     def _recent_tool_names(self) -> set[str]:
         """Extract tool names used in recent history for conditional prompting."""
         names: set[str] = set()
@@ -1342,6 +1590,28 @@ class ChikaEngine:
         except Exception:
             skill_sections = []
 
+        # ── Skill summaries (ADR-32) — one digest per shipped skill ──
+        # ``self._skill_summaries`` is populated at construction time
+        # and asynchronously updated by ``init_summaries`` as
+        # background regen finishes. Every turn picks up the latest
+        # set, so a stale-then-regenerated summary lands in the
+        # NEXT turn's prompt without any extra wiring.
+        try:
+            if self._skill_summaries:
+                summary_block_lines = ["## Available skill summaries", ""]
+                for skill_id in sorted(self._skill_summaries.keys()):
+                    summary = self._skill_summaries[skill_id]
+                    block_fn = getattr(summary, "to_prompt_block", None)
+                    if callable(block_fn):
+                        summary_block_lines.append(block_fn(skill_id))
+                        summary_block_lines.append("")
+                if len(summary_block_lines) > 2:
+                    skill_sections = list(skill_sections) + [
+                        "\n".join(summary_block_lines).rstrip()
+                    ]
+        except Exception:
+            pass
+
         system_prompt = self._prompt.build(
             tool_list=self._tools.list_for_prompt(),
             variables=self._vars.list_summary(),
@@ -1352,6 +1622,19 @@ class ChikaEngine:
         )
         if self._provider == "ollama":
             system_prompt += _OLLAMA_TOOL_INSTRUCTIONS
+
+        # Per-turn intent nudge: if the most recent user message looks
+        # like a build/create task, append a short hint suggesting the
+        # plan tool. Only fires when the heuristic matches; questions
+        # and one-shot fixes get no hint. Hint is purely additive — it
+        # doesn't override the agent's own judgment, and the user can
+        # also tell the agent to skip planning explicitly.
+        last_user = self._latest_user_text()
+        if last_user:
+            hint = detect_planning_intent(last_user)
+            if hint:
+                system_prompt += hint
+
         return [{"role": "system", "content": system_prompt}] + self._history
 
     async def _stream_llm(self, messages: list[dict]) -> AsyncGenerator[Event, None]:

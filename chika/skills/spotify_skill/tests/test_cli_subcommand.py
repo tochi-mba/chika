@@ -7,7 +7,7 @@ import time
 from contextlib import redirect_stdout
 from unittest.mock import MagicMock
 
-from chika._cli import spotify as spotify_cmd
+from chika.skills.spotify_skill import cli as spotify_cmd
 from chika.skills.spotify_skill import oauth
 
 # ── Argv parsing ────────────────────────────────────────────────────────
@@ -58,6 +58,9 @@ def test_status_when_disconnected(spotify_env):
 
 
 def test_status_when_no_client_id(spotify_env, monkeypatch):
+    # Clear the env var too — ``cli.main`` calls ``oauth.reload_from_env()``
+    # on every dispatch, which would otherwise restore the fixture value.
+    monkeypatch.delenv("CHIKA_SPOTIFY_CLIENT_ID", raising=False)
     monkeypatch.setattr(oauth, "CLIENT_ID", "")
     buf = io.StringIO()
     with redirect_stdout(buf):
@@ -129,6 +132,11 @@ def test_connect_opens_browser(spotify_env, monkeypatch):
 
 
 def test_connect_fails_cleanly_without_client_id(spotify_env, monkeypatch):
+    # ``cli.main`` calls ``oauth.reload_from_env()`` on every dispatch,
+    # so we must also clear the env var (not just the module global)
+    # to simulate a missing CLIENT_ID — the reload would otherwise
+    # restore the test fixture's value.
+    monkeypatch.delenv("CHIKA_SPOTIFY_CLIENT_ID", raising=False)
     monkeypatch.setattr(oauth, "CLIENT_ID", "")
     buf = io.StringIO()
     with redirect_stdout(buf):

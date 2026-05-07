@@ -30,10 +30,37 @@ Commands:
 """
 
 
+def argv_factory(args: list[str]) -> int:
+    """Auto-discovery entry: ``chika spotify <subcommand>``. Aliased
+    here so the skill's CLI dispatch table key (``argv``) maps cleanly
+    to the contract — but ``main(args)`` stays as an alias so any
+    test / shim that imported it keeps working."""
+    return main(args)
+
+
+def slash_handler(args: list[str], **_kwargs) -> int:
+    """``/spotify ...`` slash command inside the REPL. Same dispatch
+    as the argv subcommand — ``args`` is the remainder after
+    ``/spotify``."""
+    return main(args)
+
+
 def main(args: list[str]) -> int:
     if not args or args[0] in ("--help", "-h", "help"):
         print(USAGE)
         return 0
+
+    # Re-read CHIKA_SPOTIFY_CLIENT_ID from the env right before
+    # dispatching. ``oauth.CLIENT_ID`` was captured at module import
+    # time; if the user updated their ``.env`` since, this picks up
+    # the new value without a restart. Also defends against any
+    # subtle import-order issue where ``oauth.py`` ran before the
+    # parent CLI loaded ``.env``.
+    try:
+        from chika.skills.spotify_skill import oauth
+        oauth.reload_from_env()
+    except Exception:
+        pass
 
     cmd, rest = args[0], args[1:]
     if cmd == "connect":

@@ -93,3 +93,7 @@ ignore = [
 python_version = "3.11"
 strict = false
 ignore_missing_imports = true
+# Manual test harnesses (leading-underscore filenames) are interactive
+# scripts, not type-checked production code. Excluded from mypy so a
+# loose ``Any`` doesn't fail CI.
+exclude = ["_test_.*\\.py$"]
