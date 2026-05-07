@@ -149,6 +149,52 @@ async def _req(
 
 # ── Tool implementations ──────────────────────────────────────────────────────
 
+def _to_id_list(value: Any) -> list[str]:
+    """Normalise a multi-id arg to a list of stripped strings.
+
+    The LLM legitimately emits any of these shapes for the same tool:
+
+      - ``"abc,def"``                 — comma-separated string
+      - ``"  abc , def  "``           — whitespace forgiveness
+      - ``["abc", "def"]``            — JSON list (Python list at dispatch time)
+      - ``'["abc", "def"]'``          — JSON-encoded string (rare; some
+                                        models emit literal JSON in a
+                                        string field)
+      - ``""`` / ``None``             — empty (caller decides what to do)
+
+    Returns a list[str] in every case. Empty inputs return ``[]`` —
+    the caller is responsible for treating that as "skip this body
+    field" rather than "send an empty list to Spotify" (which would
+    400 most endpoints).
+
+    Used by every spotify tool that takes a multi-id arg —
+    ``spotify_play``, ``spotify_save_tracks``, ``spotify_follow_artist``,
+    etc. The previous implementation called ``.split(',')`` directly
+    on the arg, which crashed with ``AttributeError: 'list' object
+    has no attribute 'split'`` whenever the LLM emitted a JSON list.
+    """
+    if value is None or value == "":
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        s = value.strip()
+        # Defensive: handle ``'["a","b"]'`` — some models emit a
+        # JSON-encoded list as a string. Try to parse it; fall back
+        # to comma-split if it isn't JSON.
+        if s.startswith("[") and s.endswith("]"):
+            try:
+                import json as _json
+                parsed = _json.loads(s)
+                if isinstance(parsed, list):
+                    return [str(v).strip() for v in parsed if str(v).strip()]
+            except Exception:
+                pass
+        return [p.strip() for p in s.split(",") if p.strip()]
+    # Unknown type — coerce to string and try once.
+    return [p.strip() for p in str(value).split(",") if p.strip()]
+
+
 # SEARCH
 async def spotify_search(query: str, type: str = "track", limit: int = 10, offset: int = 0, market: str = "") -> dict:
     params = {"q": query, "type": type, "limit": min(limit, 50), "offset": offset}
@@ -221,13 +267,13 @@ async def spotify_create_playlist(user_id: str, name: str, description: str = ""
     return await _req("POST", f"/users/{user_id}/playlists", user_auth=True,
                       json_body={"name": name, "description": description, "public": public})
 
-async def spotify_add_to_playlist(playlist_id: str, uris: str, position: int | None = None) -> dict:
-    body: dict = {"uris": uris.split(",")}
+async def spotify_add_to_playlist(playlist_id: str, uris: Any, position: int | None = None) -> dict:
+    body: dict = {"uris": _to_id_list(uris)}
     if position is not None: body["position"] = position
     return await _req("POST", f"/playlists/{playlist_id}/tracks", user_auth=True, json_body=body)
 
-async def spotify_remove_from_playlist(playlist_id: str, uris: str) -> dict:
-    tracks = [{"uri": u.strip()} for u in uris.split(",")]
+async def spotify_remove_from_playlist(playlist_id: str, uris: Any) -> dict:
+    tracks = [{"uri": u} for u in _to_id_list(uris)]
     return await _req("DELETE", f"/playlists/{playlist_id}/tracks", user_auth=True, json_body={"tracks": tracks})
 
 async def spotify_featured_playlists(country: str = "", limit: int = 10) -> dict:
@@ -268,11 +314,11 @@ async def spotify_get_saved_tracks(limit: int = 20, offset: int = 0, market: str
     if market: params["market"] = market
     return await _req("GET", "/me/tracks", user_auth=True, params=params)
 
-async def spotify_save_tracks(ids: str) -> dict:
-    return await _req("PUT", "/me/tracks", user_auth=True, json_body={"ids": ids.split(",")})
+async def spotify_save_tracks(ids: Any) -> dict:
+    return await _req("PUT", "/me/tracks", user_auth=True, json_body={"ids": _to_id_list(ids)})
 
-async def spotify_remove_saved_tracks(ids: str) -> dict:
-    return await _req("DELETE", "/me/tracks", user_auth=True, json_body={"ids": ids.split(",")})
+async def spotify_remove_saved_tracks(ids: Any) -> dict:
+    return await _req("DELETE", "/me/tracks", user_auth=True, json_body={"ids": _to_id_list(ids)})
 
 async def spotify_check_saved_tracks(ids: str) -> dict:
     return await _req("GET", "/me/tracks/contains", user_auth=True, params={"ids": ids})
@@ -280,17 +326,17 @@ async def spotify_check_saved_tracks(ids: str) -> dict:
 async def spotify_get_saved_albums(limit: int = 20, offset: int = 0) -> dict:
     return await _req("GET", "/me/albums", user_auth=True, params={"limit": limit, "offset": offset})
 
-async def spotify_save_albums(ids: str) -> dict:
-    return await _req("PUT", "/me/albums", user_auth=True, json_body={"ids": ids.split(",")})
+async def spotify_save_albums(ids: Any) -> dict:
+    return await _req("PUT", "/me/albums", user_auth=True, json_body={"ids": _to_id_list(ids)})
 
 # FOLLOW
-async def spotify_follow_artist(ids: str) -> dict:
+async def spotify_follow_artist(ids: Any) -> dict:
     return await _req("PUT", "/me/following", user_auth=True, params={"type": "artist"},
-                      json_body={"ids": ids.split(",")})
+                      json_body={"ids": _to_id_list(ids)})
 
-async def spotify_unfollow_artist(ids: str) -> dict:
+async def spotify_unfollow_artist(ids: Any) -> dict:
     return await _req("DELETE", "/me/following", user_auth=True, params={"type": "artist"},
-                      json_body={"ids": ids.split(",")})
+                      json_body={"ids": _to_id_list(ids)})
 
 async def spotify_get_followed_artists(limit: int = 20) -> dict:
     return await _req("GET", "/me/following", user_auth=True, params={"type": "artist", "limit": limit})
@@ -313,9 +359,10 @@ async def spotify_get_devices() -> dict:
 async def spotify_transfer_playback(device_id: str, play: bool = True) -> dict:
     return await _req("PUT", "/me/player", user_auth=True, json_body={"device_ids": [device_id], "play": play})
 
-async def spotify_play(uris: str = "", context_uri: str = "", device_id: str = "", offset: int | None = None) -> dict:
+async def spotify_play(uris: Any = "", context_uri: str = "", device_id: str = "", offset: int | None = None) -> dict:
     body: dict = {}
-    if uris:        body["uris"] = uris.split(",")
+    uri_list = _to_id_list(uris)
+    if uri_list:    body["uris"] = uri_list
     if context_uri: body["context_uri"] = context_uri
     if offset is not None: body["offset"] = {"position": offset}
     params = {"device_id": device_id} if device_id else {}

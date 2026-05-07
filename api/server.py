@@ -166,13 +166,13 @@ async def websocket_endpoint(
             "session_id": sid,
             "title":      eng._title,
             "messages":   msgs,
-            "profile":    p.name if p else "default",
+            "profile":    p.name if p else "unknown",
             "workspace":  p.workspace if p else "",
         })
 
     async def _send_chat_list(eng) -> None:
         p = eng._active_profile
-        profile_name = p.name if p else "default"
+        profile_name = p.name if p else "unknown"
         chats = session_manager._chat_store.list_chats(profile_name)
         await send({"type": "chat_list", "chats": chats, "profile": profile_name})
 
@@ -180,7 +180,7 @@ async def websocket_endpoint(
         p = eng._active_profile
         await send({
             "type":      "profile_info",
-            "name":      p.name if p else "default",
+            "name":      p.name if p else "unknown",
             "workspace": p.workspace if p else "",
             "pet_id":    (p.pet_id if p else None),
         })
@@ -605,7 +605,10 @@ async def websocket_endpoint(
                 current_profile = engine._active_profile
                 engine, session_id = session_manager.new_chat_for_device(device_id)
                 engine._workflow_engine.approval_handler = approval_handler
-                if current_profile and current_profile.name != "default":
+                # Carry the previous chat's profile across the new
+                # chat so the user doesn't get bounced back to the
+                # bootstrap profile every time they hit "new chat".
+                if current_profile:
                     engine.switch_profile(current_profile)
                 await _send_session_info(engine, session_id)
                 await _send_chat_list(engine)
@@ -628,13 +631,13 @@ async def websocket_endpoint(
                 chat_id = msg.get("chat_id", "").strip()
                 if chat_id:
                     current_profile = engine._active_profile
-                    profile_name = current_profile.name if current_profile else "default"
+                    profile_name = current_profile.name if current_profile else "unknown"
                     session_manager._chat_store.delete(profile_name, chat_id)
                     session_manager.delete(chat_id)
                     if chat_id == session_id:
                         engine, session_id = session_manager.new_chat_for_device(device_id)
                         engine._workflow_engine.approval_handler = approval_handler
-                        if current_profile and current_profile.name != "default":
+                        if current_profile:
                             engine.switch_profile(current_profile)
                         await _send_session_info(engine, session_id)
                         await _notify_extension_session(engine, session_id)

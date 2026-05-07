@@ -503,7 +503,7 @@ def _cmd_status(ctx: CommandContext, _args: list[str]) -> None:
     rows: list[tuple[str, str]] = [
         ("provider",   cfg.provider),
         ("model",      cfg.model),
-        ("profile",    p.name if p else "default"),
+        ("profile",    p.name if p else "unknown"),
         ("workspace",  p.workspace if p else ""),
         ("session",    eng.session_id or "cli"),
         ("messages",   str(len(eng._history))),

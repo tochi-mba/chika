@@ -166,6 +166,18 @@ export function useChika(apiKey = '') {
         chat.finaliseAssistantMessage()
         break
 
+      case 'auto_continue':
+        // The agent promised more work and the engine is auto-firing
+        // a follow-up turn. Without this handler, the next turn's
+        // tokens would append to the CURRENT assistant bubble — the
+        // user sees one wall of text where they should see two
+        // distinct messages. Finalise the current bubble + start a
+        // fresh one so the auto-continued turn renders as its own
+        // message in the feed.
+        chat.finaliseAssistantMessage()
+        chat.startAssistantMessage()
+        break
+
       case 'error':
         chat.appendToken(`\n\n[Error: ${event.message}]`)
         chat.finaliseAssistantMessage()

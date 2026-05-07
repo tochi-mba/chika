@@ -959,7 +959,7 @@ async def on_session_linked(eng, session_id: str) -> None:
             "type":       "linked_session",
             "session_id": session_id,
             "title":      eng._title,
-            "profile":    p.name if p else "default",
+            "profile":    p.name if p else "unknown",
             "messages":   msgs,
         })
     except Exception:

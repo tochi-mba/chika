@@ -43,6 +43,126 @@ _FACT_PRODUCING_TOOLS = frozenset({
 })
 
 
+# Matches "$identifier" or "$identifier.field[0].whatever" — same shape
+# as the variable_store regex but anchored so we know the WHOLE string
+# is one unresolved ref (vs. interpolated mid-string text where ``$``
+# might be legit currency or a regex token).
+_UNRESOLVED_REF_RE = _re.compile(
+    r"^\$[a-zA-Z_][a-zA-Z0-9_]*(?:(?:\.[a-zA-Z_][a-zA-Z0-9_]*)|\[\d+\])*$"
+)
+
+
+def _collect_unresolved_refs(value: Any, path: str = "") -> list[str]:
+    """Walk ``value`` recursively and return every nested path whose
+    value is a literal ``$foo.bar`` string — i.e. a variable
+    reference that the resolver couldn't dereference.
+
+    Returns ``[]`` when everything resolved cleanly. Used by the
+    workflow engine to refuse a tool dispatch BEFORE the unresolved
+    literal reaches a third-party API and surfaces as an opaque
+    provider error (e.g. Spotify's
+    ``Invalid track uri: $search_result.tracks[0].uri``).
+
+    The path strings are JSON-pointer-ish for human readability:
+    ``"uris[0]"``, ``"body.tracks.0.uri"``. Empty path = the top-level
+    value itself.
+    """
+    out: list[str] = []
+    if isinstance(value, str):
+        if _UNRESOLVED_REF_RE.match(value):
+            out.append(f"{path}={value}" if path else value)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            sub = f"{path}.{k}" if path else str(k)
+            out.extend(_collect_unresolved_refs(v, sub))
+    elif isinstance(value, (list, tuple)):
+        for i, v in enumerate(value):
+            sub = f"{path}[{i}]"
+            out.extend(_collect_unresolved_refs(v, sub))
+    return out
+
+
+# Keys consistently bloat tool results without carrying agent-relevant
+# signal. Stripped recursively from every dict before the result lands
+# in ``$variable`` or the agent's context. Each entry is documented
+# with the worst-case payload size we've actually seen in the wild —
+# bias is "drop unless something downstream asks for it."
+_NOISY_KEYS: frozenset[str] = frozenset({
+    # Spotify — 180+ ISO country codes per track / album
+    "available_markets",
+    # Spotify — three identical-content image URLs per track/album
+    # (640/300/64 thumbs). The agent never uses thumbnails.
+    "images",
+    # Spotify external_urls is just the same web link the ``href``
+    # field already carries.
+    "external_urls",
+    # Spotify external_ids — ISRCs / UPCs / etc. Useful only when
+    # the agent is explicitly cross-referencing, which is rare.
+    "external_ids",
+    # Spotify track previews — 30s mp3 URLs. Massive, useless to LLM.
+    "preview_url",
+    # Pagination href links — the agent doesn't follow them; ``next``/
+    # ``previous`` paths are noise.
+    "href",
+    # Spotify resource self-links inside nested artist/album/track
+    # objects (separate from the top-level href above).
+    "uri_href",
+})
+
+# Lists past this length get truncated to the first N items + an
+# ``…+N more`` marker. Spotify search returns ``items: [50]`` by
+# default and the agent never needs all 50 rows in context.
+_MAX_LIST_LEN = 12
+
+# Strings past this length get truncated. Mostly hits long base64
+# image URLs and lyric blobs.
+_MAX_STR_LEN = 4_000
+
+
+def _trim_tool_result(value: Any, _depth: int = 0) -> Any:
+    """Recursively prune noisy / oversized fields from a tool result
+    before it lands in the variable store and the agent's context.
+
+    Rules (applied in this order):
+      1. Drop dict keys in :data:`_NOISY_KEYS` regardless of depth.
+      2. Drop dict keys whose value is ``None``, ``""``, ``[]``,
+         ``{}`` or ``False``-ish only when explicitly empty (``False``
+         the boolean is preserved — it carries signal).
+      3. Truncate lists longer than :data:`_MAX_LIST_LEN`. The marker
+         ``"…+N more"`` is appended so the agent knows truncation
+         happened (otherwise it might count items wrong).
+      4. Truncate strings longer than :data:`_MAX_STR_LEN`.
+      5. Recurse into remaining dicts / lists.
+
+    A depth limit guards against accidental cyclic structures (none
+    today, but tool authors do strange things sometimes).
+    """
+    if _depth > 12:
+        return value
+    if isinstance(value, dict):
+        out: dict = {}
+        for k, v in value.items():
+            if k in _NOISY_KEYS:
+                continue
+            v_trim = _trim_tool_result(v, _depth + 1)
+            # Drop empty leaves but PRESERVE explicit ``False``,
+            # ``0``, etc. — those carry signal.
+            if v_trim is None or v_trim == "" or v_trim == [] or v_trim == {}:
+                continue
+            out[k] = v_trim
+        return out
+    if isinstance(value, list):
+        trimmed = [_trim_tool_result(item, _depth + 1) for item in value]
+        if len(trimmed) > _MAX_LIST_LEN:
+            kept = trimmed[:_MAX_LIST_LEN]
+            kept.append(f"…+{len(trimmed) - _MAX_LIST_LEN} more (truncated)")
+            return kept
+        return trimmed
+    if isinstance(value, str) and len(value) > _MAX_STR_LEN:
+        return value[:_MAX_STR_LEN] + f"… (+{len(value) - _MAX_STR_LEN} chars truncated)"
+    return value
+
+
 def _looks_empty(value: Any) -> bool:
     """
     Heuristic: does this value look empty/missing/unresolved?
@@ -114,9 +234,22 @@ class WorkflowEngine:
         # own call sites — that would block the agent from reading the
         # very docs it needs to satisfy the gate.
         self._skill_gate_exempt: set[str] = {"skill_load", "skill_query"}
+        # Optional back-reference to the engine — set by ``set_engine_ref``.
+        # Used by the skill gate to read ``engine._skill_summaries`` so it
+        # can skip the refuse-and-reload step when the summary is already
+        # in the system prompt (ADR-11 + ADR-32).
+        self._engine_ref: Any = None
 
     def register_sub_workflow(self, workflow_id: str, steps: list[dict]) -> None:
         self._sub_workflows[workflow_id] = steps
+
+    def set_engine_ref(self, engine: Any) -> None:
+        """Stash a back-reference to the owning ``ChikaEngine`` so the
+        skill gate can read ``engine._skill_summaries`` at dispatch
+        time. The reference is intentionally weak-by-convention (we
+        don't pin the engine's lifetime here) — the engine outlives
+        the workflow engine in practice."""
+        self._engine_ref = engine
 
     def set_skill_registry(self, skill_registry: Any) -> None:
         """Wire in the skill registry so the gate can reverse-lookup
@@ -162,6 +295,23 @@ class WorkflowEngine:
         skill_name = self._tool_to_skill.get(tool_name)
         if not skill_name or skill_name in self._loaded_skills:
             return None
+
+        # ADR-11 + ADR-32 — when a skill's summary is already in the
+        # system prompt, the agent has the purpose / when-to-use /
+        # key-tools / anti-patterns context it needs for a competent
+        # first call. Skip the refuse-and-reload gate; the agent can
+        # still call ``skill_load`` explicitly for deeper context if
+        # it hits a wall.
+        try:
+            engine = getattr(self, "_engine_ref", None)
+            summaries = getattr(engine, "_skill_summaries", None) if engine else None
+            if isinstance(summaries, dict) and skill_name in summaries:
+                # Treat the skill as loaded for gating purposes — the
+                # summary serves as the agent's context.
+                self._loaded_skills.add(skill_name)
+                return None
+        except Exception:
+            pass
 
         loader = self._tools.get("skill_load")
         if loader is None:
@@ -927,6 +1077,43 @@ class WorkflowEngine:
         # Resolve $variable references in args
         resolved_args = self._vars.resolve(raw_args)
 
+        # ── Unresolved-$ref guard ───────────────────────────────────────
+        # If ``resolved_args`` still contains ``"$foo.bar"`` literals,
+        # the agent's variable path was wrong (typo, wrong shape — e.g.
+        # ``$search_result.tracks[0]`` when ``tracks`` is a dict not
+        # list). Before this guard, the literal flowed straight into
+        # the tool and the agent learned of the failure only via a
+        # downstream provider error like
+        # ``Invalid track uri: $search_result.tracks[0].uri``.
+        # Refuse the dispatch and surface a structured error pointing
+        # at the offending paths — the agent re-plans with the right
+        # path on the next turn.
+        unresolved = _collect_unresolved_refs(resolved_args)
+        if unresolved:
+            yield {"type": "tool_call", "step_id": sid,
+                   "tool": tool_name, "args": resolved_args}
+            sample_keys = list(self._vars.list_summary())[:8]
+            err_payload = {
+                "error":            "unresolved_variable",
+                "tool":             tool_name,
+                "unresolved_paths": unresolved,
+                "available_vars":   [v.get("name") for v in sample_keys],
+                "hint": (
+                    "One or more $variable references in your tool "
+                    "args didn't resolve. Check the variable's actual "
+                    "shape (Spotify search returns "
+                    "``tracks: {items: [...]}``, NOT ``tracks: [...]`` "
+                    "— so use ``$search_result.tracks.items[0].uri``). "
+                    "Re-emit this step with the correct path."
+                ),
+            }
+            yield {"type": "tool_result", "step_id": sid,
+                   "tool": tool_name, "result": err_payload,
+                   "error": "unresolved_variable"}
+            yield {"type": "step_done", "step_id": sid,
+                   "duration_ms": 0, "error": "unresolved_variable"}
+            return
+
         # ── Skill gate ───────────────────────────────────────────────────
         # Refuse-and-retry: if this tool belongs to a skill whose SKILL.md
         # hasn't been loaded yet, we DO NOT dispatch the tool. We surface
@@ -1006,6 +1193,14 @@ class WorkflowEngine:
             _log.exc("tool_exception", tool=tool_name, step_id=sid, profile=self._profile())
             result = {"error": f"Unhandled exception in {tool_name} — see chika.log for traceback"}
 
+        # Trim noisy fields out of the result before it lands in the
+        # variable store / agent context. Common offenders are arrays
+        # of country codes (Spotify ``available_markets`` is 180+
+        # items per track) and long base-64 image URLs the agent never
+        # uses. The trim is recursive and conservative — it only drops
+        # known-noisy keys + null/empty values that don't carry signal.
+        result = _trim_tool_result(result)
+
         duration = int((time.monotonic() - t0) * 1000)
         # Treat PRESENCE of an "error" key as an error (even if the string
         # is empty/falsy). Previously empty-string errors were logged as
@@ -1025,6 +1220,23 @@ class WorkflowEngine:
             _log.error("tool_warning", tool=tool_name, step_id=sid, warning=warning, exit_code=exit_code, duration_ms=duration, profile=self._profile())
         else:
             _log.info("tool_ok", tool=tool_name, step_id=sid, exit_code=exit_code, duration_ms=duration, profile=self._profile())
+
+        # Audit log (ADR-34) — append-only NDJSON record of every tool
+        # run so the user can see what the agent did, when, and on
+        # whose authority. Fail-soft: a broken audit log MUST NOT
+        # break the agent's turn.
+        try:
+            from api.audit_log import record_tool_run
+            engine_ref = getattr(self, "_engine_ref", None)
+            session_id = getattr(engine_ref, "session_id", None) if engine_ref else None
+            record_tool_run(
+                tool=tool_name,
+                category=None,
+                success=not has_error_key,
+                session_id=session_id,
+            )
+        except Exception:
+            pass
         yield {"type": "tool_result", "step_id": sid, "tool": tool_name,
                "result": result, "error": error, "duration_ms": duration}
 

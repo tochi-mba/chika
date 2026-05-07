@@ -128,9 +128,12 @@ def test_llm_transform_refuses_unresolved_variable():
     ]}
     events = run(collect(engine.execute(wf)))
     results = [e for e in events if e["type"] == "tool_result"]
-    # $never_set resolves to the literal string "$never_set" because the
-    # var doesn't exist — _looks_empty detects that and refuses.
-    assert results[0]["result"].get("error") == "refused_empty_context"
+    # ``$never_set`` doesn't resolve, so the workflow engine's
+    # unresolved-$ref guard refuses BEFORE dispatching to the
+    # llm_transform meta-tool. The error code is
+    # ``unresolved_variable`` (more accurate than the old
+    # ``refused_empty_context`` which only fired after dispatch).
+    assert results[0]["result"].get("error") == "unresolved_variable"
     assert LyingLLM.calls == 0
 
 

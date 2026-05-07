@@ -425,6 +425,10 @@ class ChikaEngine:
         # can reverse-lookup ``tool_name → skill_name`` and auto-load the
         # SKILL.md before any of that skill's tools fire.
         self._workflow_engine.set_skill_registry(skill_registry)
+        # Back-reference so the skill gate can read ``self._skill_summaries``
+        # at dispatch time and skip the refuse-and-reload step when the
+        # summary is already in the system prompt (ADR-11 + ADR-32).
+        self._workflow_engine.set_engine_ref(self)
         self._compactor = Compactor(
             llm_caller,
             max_tokens=config.MAX_HISTORY_TOKENS,
@@ -450,6 +454,79 @@ class ChikaEngine:
         # re-engages the approval gate instead of slipping through.
         self._plan_awaiting_approval: bool = False
 
+        # ── Skill summaries — auto-injected into the system prompt ──
+        # Each shipped skill's SKILL.md is summarised once (cached in
+        # ``data/skill_summaries/<id>.json``, hash-keyed). The summary
+        # appears in EVERY turn's system prompt so the agent can pick
+        # the right skill without paying for the full SKILL.md upfront.
+        # Async regeneration kicks off here for stale/missing entries
+        # without blocking the constructor — the next turn picks up
+        # the fresh result. ADR-32.
+        self._skill_summaries: dict = {}
+        self._init_skill_summaries()
+
+    def _init_skill_summaries(self) -> None:
+        """Wire every shipped skill's SKILL.md summary into the engine.
+
+        Calls ``summarizer.init_summaries`` with a callback that
+        registers each summary on ``self._skill_summaries``. The
+        prompt builder reads this dict on every turn so the latest
+        summaries (including any background-generated ones) flow
+        into the next turn's system prompt automatically.
+
+        Failures are caught — a broken summarizer must NEVER block
+        engine construction (worst case: agent operates without
+        summaries, falls back to skill_load + SKILL.md as before)."""
+        try:
+            from chika.skills import iter_skill_modules
+            from chika.skills.summarizer import init_summaries
+
+            skills_map: dict = {}
+            for mod in iter_skill_modules():
+                spec = getattr(mod, "__file__", None)
+                if not spec:
+                    continue
+                from pathlib import Path as _P
+                skill_md = _P(spec).parent / "SKILL.md"
+                if skill_md.is_file():
+                    skills_map[mod.SKILL_NAME] = skill_md
+
+            if not skills_map:
+                return
+
+            # llm_complete is None when no provider is configured —
+            # init_summaries will load committed cache and skip async
+            # regen, which is the right behaviour for offline / fresh
+            # checkouts. When a client exists, we adapt the engine's
+            # single-prompt ``_llm_complete(prompt)`` to the
+            # summarizer's ``(*, system, user, max_tokens)`` shape by
+            # concatenating system + user into one prompt — the
+            # summarizer's parser is tolerant of leading prose, and
+            # this avoids duplicating the per-provider call logic
+            # already in ``_llm_complete``.
+            llm_complete = None
+            if self._client is not None:
+                async def llm_complete(*, system: str, user: str, max_tokens: int) -> str:  # noqa: ARG001
+                    prompt = f"{system}\n\n{user}"
+                    try:
+                        return await self._llm_complete(prompt)
+                    except Exception:
+                        return ""
+
+            init_summaries(
+                register_callback=self._register_skill_summary,
+                skills=skills_map,
+                llm_complete=llm_complete,
+            )
+        except Exception as exc:
+            _log.info("skill_summaries.init_failed", error=str(exc))
+
+    def _register_skill_summary(self, skill_id: str, summary) -> None:
+        """Callback fed to ``summarizer.init_summaries``. Stashes the
+        summary on ``self._skill_summaries`` keyed by skill id so the
+        prompt builder can read it back on every turn."""
+        self._skill_summaries[skill_id] = summary
+
     # ── Public ───────────────────────────────────────────────────────────────
 
     def cancel(self) -> None:
@@ -470,8 +547,24 @@ class ChikaEngine:
         # Reset auto-continue depth on every TOP-LEVEL call. Inner recursive
         # calls increment the counter without resetting.
         self._auto_continue_depth = 0
+        # Per-session event log (ADR-35). Each event yielded from this
+        # turn is appended to ``data/sessions/<session_id>.jsonl`` so
+        # ``chika replay <session_id>`` can rehydrate the conversation
+        # exactly. Built once per turn, fail-soft on FS errors.
+        event_log = None
+        try:
+            from api.event_log import EventLog
+            if self.session_id:
+                event_log = EventLog(self.session_id)
+        except Exception:
+            event_log = None
         try:
             async for event in self._chat_inner(user_input):
+                if event_log is not None:
+                    try:
+                        event_log.emit(event)
+                    except Exception:
+                        pass
                 yield event
         finally:
             self._chat_busy = False
@@ -1430,6 +1523,28 @@ class ChikaEngine:
             skill_sections = self._skills.prompt_sections()
         except Exception:
             skill_sections = []
+
+        # ── Skill summaries (ADR-32) — one digest per shipped skill ──
+        # ``self._skill_summaries`` is populated at construction time
+        # and asynchronously updated by ``init_summaries`` as
+        # background regen finishes. Every turn picks up the latest
+        # set, so a stale-then-regenerated summary lands in the
+        # NEXT turn's prompt without any extra wiring.
+        try:
+            if self._skill_summaries:
+                summary_block_lines = ["## Available skill summaries", ""]
+                for skill_id in sorted(self._skill_summaries.keys()):
+                    summary = self._skill_summaries[skill_id]
+                    block_fn = getattr(summary, "to_prompt_block", None)
+                    if callable(block_fn):
+                        summary_block_lines.append(block_fn(skill_id))
+                        summary_block_lines.append("")
+                if len(summary_block_lines) > 2:
+                    skill_sections = list(skill_sections) + [
+                        "\n".join(summary_block_lines).rstrip()
+                    ]
+        except Exception:
+            pass
 
         system_prompt = self._prompt.build(
             tool_list=self._tools.list_for_prompt(),

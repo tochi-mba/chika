@@ -242,10 +242,16 @@ class SessionManager:
         tool_registry = ToolRegistry()
         variable_store = VariableStore()
 
-        # Start on the default profile
-        default_profile = self._profile_manager.get_or_create("default")
+        # Bootstrap the initial profile. ``bootstrap_initial`` returns
+        # the most-recently-active profile if any exist; otherwise it
+        # creates one from ``CHIKA_PROFILE`` env / OS username (never
+        # the literal string ``"default"`` — that label conveys no
+        # identity and confuses the agent's prompt-section context).
+        # See ``ProfileManager.bootstrap_name`` for the resolution
+        # order.
+        initial_profile = self._profile_manager.bootstrap_initial()
         memory_manager = MemoryManager(
-            path=default_profile.memory_path,
+            path=initial_profile.memory_path,
             max_tokens=config.MAX_MEMORY_TOKENS,
         )
 
@@ -395,9 +401,9 @@ class SessionManager:
         engine._workflow_engine.set_skill_registry(skill_registry)
 
         # Wire up active profile (profile tools need engine reference, so registered after)
-        engine._active_profile = default_profile
-        variable_store.set("profile.name", default_profile.name, description="Active profile name")
-        variable_store.set("profile.workspace", default_profile.workspace, description="Profile workspace directory")
+        engine._active_profile = initial_profile
+        variable_store.set("profile.name", initial_profile.name, description="Active profile name")
+        variable_store.set("profile.workspace", initial_profile.workspace, description="Profile workspace directory")
 
         # Chika's own repo root — used for self-modification workflows
         repo_root = str(Path(__file__).parent.parent.resolve())
@@ -431,21 +437,12 @@ class SessionManager:
         for t in make_profile_tools(engine, self._profile_manager):
             tool_registry.register(t)
 
-        # set_profile_password is only available when NOT on the default profile.
-        # A profile-switch hook handles register/unregister on every switch.
-        _pm = self._profile_manager
-
-        def _update_password_tool(profile) -> None:
-            if profile.name == "default":
-                tool_registry.unregister("set_profile_password")
-            elif not tool_registry.get("set_profile_password"):
-                tool_registry.register(make_set_password_tool(_pm))
-
-        engine._profile_switch_hooks.append(_update_password_tool)
-
-        # Default profile → tool NOT registered initially (by design).
-        # If a session is restored to a non-default profile the hook fires
-        # via switch_profile(), so no extra registration needed here.
+        # ``set_profile_password`` is now always available — every
+        # profile is the user's actual identity (env / OS username
+        # bootstrap), so locking down a "generic default" profile no
+        # longer applies. Register once + leave it; the profile-switch
+        # hook is no longer needed for this tool.
+        tool_registry.register(make_set_password_tool(self._profile_manager))
 
         return engine
 

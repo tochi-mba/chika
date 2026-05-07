@@ -269,6 +269,25 @@ def init(defaults: dict) -> None:
         if k not in _settings:
             _settings[k] = v
             changed = True
+    # Skill-contributed settings keys (each shipped skill's
+    # ``SKILL_SETTINGS`` dict). Walked here so a skill that declares a
+    # config option (e.g. spotify_share_across_profiles) seeds its
+    # default the first time the server boots — no parallel hand-list
+    # of "core skill keys to register here." See ADR-38 for the
+    # drop-in skill contract.
+    try:
+        from chika.skills import iter_skill_settings
+        for _skill_name, spec in iter_skill_settings():
+            for skey, sval in spec.items():
+                if skey in _settings:
+                    continue
+                # Each value is either a raw default OR a ``{default, validate}`` dict.
+                default = sval.get("default") if isinstance(sval, dict) else sval
+                _settings[skey] = default
+                changed = True
+    except Exception:
+        # Best-effort — broken skill must not block server boot.
+        pass
     if changed:
         _save()
 

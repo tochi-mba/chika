@@ -261,15 +261,64 @@ def redact(value: str | None) -> str:
     return "<redacted>" if value else ""
 
 
-# ── PKCE state — survives only for the duration of one auth flow ───────
+# ── PKCE state — persisted to disk so the CLI → server hand-off works ──
 #
 # State → code_verifier mapping. State is the CSRF token Spotify echoes
-# back; verifier is the secret we send when exchanging the code. We
-# keep this in process memory (it's short-lived — Spotify's auth window
-# is minutes, not hours) and prune entries older than 10 minutes so a
-# user who walks away mid-flow doesn't leak verifiers forever.
+# back; verifier is the secret we send when exchanging the code.
+#
+# This used to be in-memory only, which broke ``chika spotify connect``:
+# the CLI process generates the state, opens the browser, exits — the
+# OAuth callback hits the SERVER process, which has its own (empty)
+# in-memory dict. State lookup fails → "Auth state expired or unknown".
+#
+# Persisting to ``<data_dir>/spotify/_pending_states.json`` lets the
+# CLI process write the state and the server process read it back.
+# Entries older than ``_PKCE_TTL_SEC`` (10 min) are pruned on every
+# read so a user who walks away mid-flow doesn't leak verifiers
+# forever. The file is atomic-write + best-effort under concurrent
+# writers — the worst case is a single state being lost, which the
+# user can recover from with a fresh ``chika spotify connect``.
 _pkce_state: dict[str, tuple[str, float]] = {}
 _PKCE_TTL_SEC = 600
+
+
+def _pending_states_path() -> Path:
+    return _data_dir() / "spotify" / "_pending_states.json"
+
+
+def _load_pending_states() -> dict[str, tuple[str, float]]:
+    """Read pending PKCE states from disk. Returns ``{}`` on any error
+    so a corrupted/missing file just means "no pending auth flows."""
+    path = _pending_states_path()
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, tuple[str, float]] = {}
+    for state, payload in raw.items():
+        if not isinstance(state, str):
+            continue
+        if not isinstance(payload, list) or len(payload) != 2:
+            continue
+        verifier, ts = payload
+        if isinstance(verifier, str) and isinstance(ts, (int, float)):
+            out[state] = (verifier, float(ts))
+    return out
+
+
+def _save_pending_states(states: dict[str, tuple[str, float]]) -> None:
+    """Atomic-write the pending states. Best-effort; failures are
+    swallowed to avoid breaking auth on a transient FS hiccup."""
+    path = _pending_states_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, json.dumps({k: list(v) for k, v in states.items()}))
+    except Exception as exc:
+        log.warning("spotify: _save_pending_states failed: %s", exc)
 
 
 def _gen_code_verifier() -> str:
@@ -281,7 +330,19 @@ def _gen_code_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
+def _merge_pending_from_disk() -> None:
+    """Bring the in-memory ``_pkce_state`` up to date with the on-disk
+    file so the server process sees state written by the CLI process."""
+    for state, payload in _load_pending_states().items():
+        if state not in _pkce_state:
+            _pkce_state[state] = payload
+
+
 def _prune_pkce() -> None:
+    """Drop expired entries from BOTH the in-memory dict and the disk
+    file. Pulls fresh state from disk first so cross-process writers
+    don't lose entries on prune."""
+    _merge_pending_from_disk()
     cutoff = time.time() - _PKCE_TTL_SEC
     for state, (_, ts) in list(_pkce_state.items()):
         if ts < cutoff:
@@ -307,6 +368,10 @@ def build_auth_url() -> tuple[str, str, str]:
     challenge = _gen_code_challenge(verifier)
     state     = secrets.token_urlsafe(16)
     _pkce_state[state] = (verifier, time.time())
+    # Persist so the server process can verify the state Spotify
+    # echoes back, even when ``build_auth_url`` ran inside a
+    # short-lived CLI process that's already exited.
+    _save_pending_states(_pkce_state)
 
     params = "&".join([
         f"client_id={CLIENT_ID}",
@@ -337,10 +402,50 @@ def _lock(profile: str | None = None) -> asyncio.Lock:
 
 async def exchange_code(code: str, state: str) -> dict[str, Any]:
     """Exchange the authorization code for tokens. Called by callback."""
+    # ``_prune_pkce`` already merges from disk, so the server process
+    # picks up states written by the CLI process before pop.
     _prune_pkce()
     pair = _pkce_state.pop(state, None)
     if not pair:
-        return {"error": "unknown_state", "message": "Auth state expired or unknown — try connecting again."}
+        # Diagnostic context — helps the user/dev understand WHY the
+        # state was unknown (process boundary? expired? wrong file?).
+        path = _pending_states_path()
+        on_disk = _load_pending_states()
+        log.warning(
+            "spotify.exchange_code: unknown state %r. "
+            "in-memory keys: %s. on-disk file: %s (exists=%s, %d entries).",
+            state[:8] + "…",
+            sorted(s[:8] + "…" for s in _pkce_state.keys())[:5],
+            path, path.is_file(), len(on_disk),
+        )
+        msg = (
+            "Auth state expired or unknown — try connecting again."
+        )
+        if not path.is_file():
+            msg += (
+                " (Diagnostic: no pending-state file at "
+                f"{path} — the chika server may be running an older "
+                "version without the disk-persistence fix. Restart the "
+                "server and re-run `chika spotify connect`.)"
+            )
+        elif not on_disk:
+            msg += (
+                f" (Diagnostic: pending-state file at {path} is empty — "
+                "the CLI may be writing to a different data dir. "
+                "Check CHIKA_DATA_DIR is consistent across CLI and server.)"
+            )
+        else:
+            msg += (
+                f" (Diagnostic: pending-state file has {len(on_disk)} "
+                f"entries but state {state[:8]}… isn't one of them. "
+                "Likely the auth flow took >10 min or the state on Spotify's "
+                "redirect was mangled. Re-run `chika spotify connect`.)"
+            )
+        return {"error": "unknown_state", "message": msg}
+    # Persist the post-pop state so a re-emitted callback (e.g. user
+    # double-clicked the success page) can't re-consume the same
+    # state and so other concurrent flows aren't replayed.
+    _save_pending_states(_pkce_state)
     verifier, _ = pair
 
     if not CLIENT_ID:

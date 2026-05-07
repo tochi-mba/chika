@@ -274,7 +274,7 @@ _TYPED_MODELS: dict[str, type[BaseModel]] = {
 try:
     from chika.skills import iter_skill_events  # type: ignore[attr-defined]
     for _evt_name, _evt_model in iter_skill_events():
-        _TYPED_MODELS[_evt_name] = _evt_model
+        _TYPED_MODELS[_evt_name] = _evt_model  # type: ignore[assignment]
 except Exception:
     pass
 

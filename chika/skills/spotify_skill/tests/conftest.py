@@ -41,6 +41,13 @@ def spotify_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[di
     _oauth._pkce_state.clear()
     _oauth._refresh_locks.clear()
     _connection._profile_cache.clear()
+    # Wipe the disk-side pending-states file too — earlier tests in
+    # this process may have written entries that would leak into
+    # this one.
+    try:
+        _oauth._pending_states_path().unlink(missing_ok=True)
+    except Exception:
+        pass
 
     # Stub the LEAF resolvers (active profile + share flag + override
     # flag) — leave the top-level _profile_name resolution tree alone

@@ -234,7 +234,7 @@ def register(app: FastAPI) -> None:
                             "type":       "linked_session",
                             "session_id": ext_sid,
                             "title":      ext_eng._title,
-                            "profile":    p.name if p else "default",
+                            "profile":    p.name if p else "unknown",
                             "messages":   _ext_recent_msgs(ext_eng),
                         })
                         _log.info("ext.session_linked", sent=sent, session_id=ext_sid)
@@ -267,7 +267,7 @@ def register(app: FastAPI) -> None:
                                 "type":       "linked_session",
                                 "session_id": resolved_sid,
                                 "title":      ext_engine._title,
-                                "profile":    p.name if p else "default",
+                                "profile":    p.name if p else "unknown",
                                 "messages":   _ext_recent_msgs(ext_engine),
                             })
                     if ext_engine is None:
@@ -279,7 +279,7 @@ def register(app: FastAPI) -> None:
                                 "type":       "linked_session",
                                 "session_id": resolved_sid,
                                 "title":      ext_engine._title,
-                                "profile":    p.name if p else "default",
+                                "profile":    p.name if p else "unknown",
                                 "messages":   _ext_recent_msgs(ext_engine),
                             })
                         else:

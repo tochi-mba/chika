@@ -50,6 +50,18 @@ def main(args: list[str]) -> int:
         print(USAGE)
         return 0
 
+    # Re-read CHIKA_SPOTIFY_CLIENT_ID from the env right before
+    # dispatching. ``oauth.CLIENT_ID`` was captured at module import
+    # time; if the user updated their ``.env`` since, this picks up
+    # the new value without a restart. Also defends against any
+    # subtle import-order issue where ``oauth.py`` ran before the
+    # parent CLI loaded ``.env``.
+    try:
+        from chika.skills.spotify_skill import oauth
+        oauth.reload_from_env()
+    except Exception:
+        pass
+
     cmd, rest = args[0], args[1:]
     if cmd == "connect":
         return _connect(open_browser="--no-open" not in rest)

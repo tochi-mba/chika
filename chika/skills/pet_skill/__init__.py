@@ -76,7 +76,10 @@ def _pet_memory_path(profile_workspace: str, pet_id: str) -> Path:
     """
     workspace = Path(profile_workspace).resolve()
     profile_root = workspace.parent  # workspace lives at profile_root/workspace
-    return profile_root / "pets" / (pet_id or "default") / "memory.md"
+    # ``pet_id`` is None when no pet has been picked yet — bucket
+    # the memory under a clearly-labelled placeholder dir rather than
+    # the ambiguous ``"default"``.
+    return profile_root / "pets" / (pet_id or "no_pet") / "memory.md"
 
 
 def _read_pet_memory(workspace: str, pet_id: str) -> str:

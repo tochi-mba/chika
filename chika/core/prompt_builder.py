@@ -204,7 +204,11 @@ pipeline, sub_workflow. Each step has `tool`, `args`,
 `store_result_as: "$name"`, and optional `description` (required for
 approval-needed steps — be specific).
 
-Variable refs: `"$name"`, `"$name.field"`, `"$list[0]"`.
+Variable refs: `"$name"`, `"$name.field"`, `"$list[0]"`,
+`"$list[*].field"` (PROJECTION — pulls `field` from every list
+item, returning a list. Use this instead of hand-writing each
+index. Example: `$top_tracks.tracks[*].uri` →
+`["spotify:track:a", "spotify:track:b", ...]`).
 
 Meta-tools: `llm_summarise` (text summary), `llm_transform` (structured
 extraction — always pass `schema`; access result as `$var.field`).
@@ -414,8 +418,17 @@ class PromptBuilder:
     ) -> str:
         tool_names = {t["name"] for t in tool_list}
 
+        # Each tool line includes its compact signature when present —
+        # gives the agent the exact kwarg names + types so it doesn't
+        # have to guess (``id`` vs ``artist_id`` vs ``track_id``,
+        # missing required ``user_id`` on create_playlist, etc.).
         tool_block = "\n".join(
-            f"- `{t['name']}`: {t['description']}" for t in tool_list
+            (
+                f"- `{t['name']}{t['signature']}`: {t['description']}"
+                if t.get("signature") else
+                f"- `{t['name']}`: {t['description']}"
+            )
+            for t in tool_list
         ) or "None registered"
 
         def _var_line(v: dict) -> str:
