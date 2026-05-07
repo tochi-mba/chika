@@ -21,15 +21,34 @@ import { test as base, expect } from '@playwright/test'
 // ── Skill-contributed Playwright mocks ─────────────────────────────
 //
 // Each shipped skill that needs Playwright fetch mocks ships a
-// ``tests/playwright_mocks.js`` file exporting a ``MOCKS_SCRIPT``
-// string. We discover them dynamically so this fixture file never
-// names a specific skill — preserves the strict skill-isolation
-// contract.
+// ``tests/playwright_mocks.js`` file. We discover + extract the
+// ``MOCKS_SCRIPT`` template-literal SYNCHRONOUSLY via
+// ``fs.readFileSync`` + a small regex — NOT via dynamic ``import()``.
+//
+// Why not ``await import(...)`` at module top: Playwright's CJS
+// loader path can't ``require()`` a module that has top-level
+// ``await`` ("require() cannot be used on an ESM graph with
+// top-level await"), and several spec files transitively reach
+// this fixture through ``require``. Reading the file as text +
+// extracting the template literal keeps the discovery walk fully
+// synchronous and ESM/CJS-compatible.
+//
+// Trade-off: the skill's mock fragment must be defined as a plain
+// template literal assigned to ``MOCKS_SCRIPT`` — no JS expressions
+// inside ``${...}`` since we do not evaluate the file. That's
+// already the convention because the fragment ends up being
+// concatenated into an ``addInitScript`` content string anyway.
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
 const _SKILLS_ROOT = path.resolve(__dirname, '..', '..', 'chika', 'skills')
 const _SKILL_SUFFIX = '_skill'  // suffix added by every skill folder
 
-async function _loadSkillMockFragments() {
+// Match: ``export const MOCKS_SCRIPT = `<body>` ``
+// where <body> is everything up to the matching backtick. The ``s``
+// flag lets ``.`` cross newlines; the lazy quantifier stops at the
+// first closing backtick (skill mocks don't nest backticks).
+const _MOCKS_SCRIPT_RE = /export\s+const\s+MOCKS_SCRIPT\s*=\s*`([\s\S]*?)`/
+
+function _loadSkillMockFragments() {
   const fragments = []
   if (!fs.existsSync(_SKILLS_ROOT)) return fragments
   for (const folder of fs.readdirSync(_SKILLS_ROOT)) {
@@ -37,18 +56,17 @@ async function _loadSkillMockFragments() {
     const file = path.join(_SKILLS_ROOT, folder, 'tests', 'playwright_mocks.js')
     if (!fs.existsSync(file)) continue
     try {
-      const mod = await import(url.pathToFileURL(file).href)
-      if (typeof mod.MOCKS_SCRIPT === 'string') {
-        fragments.push(mod.MOCKS_SCRIPT)
-      }
-    } catch (e) {
+      const text = fs.readFileSync(file, 'utf-8')
+      const m = _MOCKS_SCRIPT_RE.exec(text)
+      if (m && m[1]) fragments.push(m[1])
+    } catch {
       // best-effort — a broken skill mock shouldn't fail the suite.
     }
   }
   return fragments
 }
 
-const _SKILL_MOCK_FRAGMENTS = await _loadSkillMockFragments()
+const _SKILL_MOCK_FRAGMENTS = _loadSkillMockFragments()
 
 // Function form for addInitScript — Playwright serialises this and
 // runs it in the page before any document scripts. More reliable
