@@ -1,0 +1,6 @@
+{
+  "//": "Marks every .js file shipped by a skill as ESM. Without this, Node treats `.js` under `chika/skills/*/...` as CommonJS by default — but skill UI components (`ui/section.js`) and Playwright e2e specs (`tests/*.spec.js`) all use modern `import`/`export` syntax, matching the frontend package's module type. Affects ONLY the JS files; Python tooling is unaware of this file. Don't add npm fields here — this is purely a module-type declaration.",
+  "name": "chika-skills-js",
+  "private": true,
+  "type": "module"
+}
