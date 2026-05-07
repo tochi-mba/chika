@@ -534,16 +534,19 @@ class PromptBuilder:
         # them keep working.
         legacy_blocks = [b for b in (shells_block, pet_block) if b.strip()]
 
-        # Intent calibration — each shipped skill contributes a few
-        # "make a plan vs don't" / "ask the user vs proceed" examples
-        # via its ``INTENT_CASES`` dict. Sampled here with strict
-        # per-skill thresholds + a global cap so the prompt stays
+        # Intent calibration — each shipped skill contributes
+        # positive/negative examples per dimension via its
+        # ``INTENT_CASES`` dict. We render each dimension as its own
+        # block; per-skill thresholds + a global cap keep the prompt
         # bounded as more skills get installed.
         try:
             from chika.skills import render_intent_examples_block
             intent_blocks = [
                 render_intent_examples_block(d)
-                for d in ("plan", "ask")
+                for d in (
+                    "plan", "ask", "skill_load",
+                    "memory", "approval", "research", "refuse",
+                )
             ]
         except Exception:
             intent_blocks = []

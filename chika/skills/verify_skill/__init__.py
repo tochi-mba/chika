@@ -260,4 +260,18 @@ INTENT_CASES: dict = {
             "fetch https://news.ycombinator.com",
         ],
     },
+    # Research — verify is the canonical grounding skill, so almost
+    # every "is this true / is this still up" question is positive.
+    "research": {
+        "positive": [
+            "is openai's pricing page still showing $0.50 per 1M tokens",
+            "verify the URL we cited in the last reply",
+            "is this RSS feed still live",
+            "does this changelog still show v3.5 as the latest",
+        ],
+        "negative": [
+            "what's a good definition of latency",
+            "explain what a CDN does",
+        ],
+    },
 }

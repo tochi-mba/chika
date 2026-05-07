@@ -1550,8 +1550,8 @@ def build_skill(context):
 INTENT_CASES: dict = {
     "plan": {
         "positive": [
-            "draft a three-phase plan to migrate this repo from CommonJS to ESM",
-            "lay out the steps to ship a new release end-to-end",
+            "build a three-phase plan to migrate this repo from CommonJS to ESM",
+            "create a step-by-step plan to ship a new release end-to-end",
         ],
         "negative": [
             "what's in the current plan",
@@ -1569,6 +1569,19 @@ INTENT_CASES: dict = {
             "add a task t4 'write the integration tests' to the plan",
             "mark t2 done and move to t3",
             "split the plan into 4 phases",
+        ],
+    },
+    # Skill_load — plan SKILL.md is dense (verbose template, edit
+    # ops, reconcile semantics). Loading it once per session pays
+    # off for any non-trivial planning work.
+    "skill_load": {
+        "positive": [
+            "build a verbose plan with goal, requirements, subtasks for the migration",
+            "I want to use plan_edit to swap a requirement — show me the right call shape",
+        ],
+        "negative": [
+            "show me the plan",
+            "mark t1 done",
         ],
     },
 }

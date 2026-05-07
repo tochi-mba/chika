@@ -1278,3 +1278,62 @@ A complementary contribution this round: `chika/_cli/extension_detect.py` identi
 - Brand-mark geometry drift (the ADR-27 enforcement nightmare) becomes a 30 ms CI step instead of a code-review checklist item.
 - *Cost*: ~700 lines of generator code to maintain. Mitigated by each generator being narrowly scoped and having `--check` mode (changes to a generator are caught by their own contract tests).
 - *Future*: a `chika dev gauntlet` command that runs every generator's `--check` plus ruff + mypy + bandit + pytest in one shot, so contributors can verify CI-equivalent state before pushing.
+
+---
+
+## ADR-38: Drop-in skill contract — full per-folder isolation
+
+**Date**: 2026-05-07
+
+**Status**: accepted
+
+**Context**
+
+Skills used to be wired in piecemeal: one import in `api/session_manager.py`, another in `api/server.py`, a routes file under `api/routes/`, a CLI subcommand under `chika/_cli/`, hardcoded settings keys in `api/settings_store.py`, hardcoded UI panels in `frontend/src/components/SettingsModal.vue`. Adding a skill required touching every layer; removing one left dangling references everywhere.
+
+The skill-isolation contract test (`tests/test_skill_isolation.py`) had a 12-entry allowlist of "necessary" cross-imports — every entry a leak in the contract.
+
+**Decision**
+
+A skill is exactly **one folder** under `chika/skills/<name>_skill/`. The folder owns its full surface — engine tools, REST routes, WebSocket endpoints, CLI subcommands, settings keys, settings-tab UI, extension popup section, hot-reload subscribers, planning-intent test fixtures, system-prompt calibration cases. Discovery walks the folder at boot/build time so the rest of the codebase doesn't know which skills exist.
+
+The contract (every export optional except the first two):
+
+| Export | Purpose |
+|---|---|
+| `SKILL_NAME: str` | Canonical name (matches `Skill(name=...)`). |
+| `build_skill(context) -> Skill` | Engine entry point — returns the `Skill` with tools + prompt section + memory seeds. |
+| `register_routes() -> APIRouter \| None` | FastAPI router the server walks via `iter_skill_routers`. |
+| `register_websocket(app) -> None` | Skills with non-trivial WS protocols attach their own endpoints. |
+| `register_cli() -> dict` | `{"slash": {<name>: handler}, "argv": {<name>: factory}}` — CLI dispatcher walks. |
+| `SKILL_SETTINGS: dict` | Settings keys the skill owns + (optional) per-key validators. |
+| `on_setting_changed`, `on_env_changed`, `on_session_linked` | Subscriber hooks fired by `chika.skills.fire_*`. Replace direct cross-imports for cache invalidation, hot-reload, and cross-surface session linking. |
+| `SKILL_UI: dict` | Settings tab manifest — `frontend.component` (Vue) + `extension.html`/`js`. Frontend renders dynamic tabs via `import.meta.glob` over `chika/skills/*_skill/ui/*.vue` + `/api/skills/ui` REST endpoint. |
+| `INTENT_CASES: dict` | Per-dimension positive/negative cases (`plan`, `ask`, `skill_load`, `memory`, `approval`, `research`, `refuse`). Double duty: `tests/test_intent_heuristic.py` parametrises over the union, and `PromptBuilder` samples examples per dimension into the system prompt with per-skill + global thresholds. |
+
+**Migration**
+
+Spotify, browser, pet had non-trivial cross-cutting code (HTTP routes, CLI subcommands, WebSocket protocol, frontend Vue components). All migrated:
+
+- `api/routes/spotify.py` → `chika/skills/spotify_skill/routes.py`
+- `chika/_cli/spotify.py` → `chika/skills/spotify_skill/cli.py`
+- `frontend/src/components/SpotifyConnectCard.vue` → `chika/skills/spotify_skill/ui/SettingsCard.vue`
+- `api/routes/extension.py` → `chika/skills/browser_skill/routes.py`
+- `api/server.py` extension WS handler (220 lines) → `chika/skills/browser_skill/websocket.py`
+- `api/routes/pets.py` → `chika/skills/pet_skill/routes.py`
+- Settings cache invalidation + env hot-reload — replaced with `on_setting_changed` / `on_env_changed` subscribers in each skill.
+
+**Tests**
+
+- `tests/test_skill_isolation.py` — Python imports test, allowlist now empty. Two integration tests that legitimately cross the boundary use the `get_skill_module()` discovery API instead of importing internals.
+- `tests/test_skill_isolation_full_repo.py` — full-repo text scan across `.py / .vue / .js / .ts / .html / .css / .json / .md / .yml / .toml / .ini`. Fails if a skill's package path appears outside that skill's folder. Documentation files (README/ARCHITECTURE/CONTRIBUTING/DECISIONS) + the four contract-enforcing test files are exempt.
+- `tests/test_skill_discovery.py` — every shipped skill exports the required contract; `build_skill(ctx)` returns a `Skill` whose `.name` matches `SKILL_NAME` (no rename drift); pre-engine registration succeeds with all-None getters (skills must defer engine access to call time).
+- `tests/test_intent_heuristic.py` — pulls per-skill `INTENT_CASES["plan"]["positive"|"negative"]` via `iter_skill_intent_cases()` and parametrises on top of the platform-level cases.
+
+**Consequences**
+
+- Adding a skill = `mkdir chika/skills/<name>_skill/` + drop a few files. No other edits.
+- Removing a skill = `rm -rf chika/skills/<name>_skill/`. The route, CLI, settings tab, UI, intent cases, summary cache entry — everything goes with it.
+- The cross-import allowlist is empty by design — any new entry is a signal to use one of the discovery APIs instead.
+- The system prompt now carries domain-specific positive/negative calibration for `plan`, `ask`, `skill_load`, `memory`, `approval`, `research`, `refuse` — sourced from each shipped skill, threshold-bounded, automatically extending as new skills land.
+- *Cost*: ~600 lines of discovery layer (`chika/skills/__init__.py`, `_context.py`, `api/routes/skill_ui.py`). Worth it: dropped a 12-entry allowlist + the maintenance burden of 5+ hardcoded skill imports across `api/`.

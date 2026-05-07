@@ -113,6 +113,17 @@ export function useChika(apiKey = '') {
   function handleEvent(event) {
     system.pushEvent(event)
 
+    // Re-dispatch every event as a window CustomEvent so any
+    // skill UI component can listen for its own event types
+    // (e.g. an integration card refreshing on auth-state change)
+    // without useChika needing skill-specific cases. Pattern:
+    // ``window.addEventListener('chika:<event_type>', e => …)``.
+    if (event.type) {
+      try {
+        window.dispatchEvent(new CustomEvent('chika:' + event.type, { detail: event }))
+      } catch { /* SSR / very old browsers — safe to ignore */ }
+    }
+
     switch (event.type) {
       case 'session_info':
         // Server tells us who we are — store the opaque device token
@@ -178,17 +189,6 @@ export function useChika(apiKey = '') {
 
       case 'extension_status':
         system.setExtensionConnected(!!event.connected)
-        break
-
-      case 'spotify_auth_changed':
-        // Re-dispatched as a window CustomEvent so SettingsModal /
-        // SpotifyConnectCard / any other listener can refresh
-        // without each subscribing through the Pinia store. The
-        // SpotifyConnectCard listens for this and re-fetches
-        // /api/spotify/status to pull the latest display name.
-        try {
-          window.dispatchEvent(new CustomEvent('chika:spotify_auth_changed', { detail: event }))
-        } catch { /* old browsers — safe to ignore */ }
         break
 
       case 'ext_chat_turn':

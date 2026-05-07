@@ -70,13 +70,113 @@ YOUR_TOOL = ToolDefinition(
 
 All tool handlers must return `{"error": "<message>"}` on failure — never raise.
 
-## Adding a new skill
+## Adding a new skill — drop-in contract
 
-Skills are collections of pre-built tool handlers that the LLM can call by name.
+Skills are **fully self-contained** — drop a folder under
+`chika/skills/<name>_skill/` and the engine, settings UI, CLI, and
+extension popup all pick it up automatically. Nothing outside the
+folder needs editing.
 
-1. Create `chika/skills/your_skill/__init__.py`.
-2. Export a `SkillDefinition` with `name`, `description`, `tools` (list of `ToolDefinition`), and an optional `system_prompt_fragment`.
-3. Register in `api/session_manager.py` via `skill_registry.register(YOUR_SKILL)`.
+### The folder layout
+
+```
+chika/skills/<name>_skill/
+├── __init__.py       # required: SKILL_NAME + build_skill(ctx) + (optional) the rest
+├── SKILL.md          # the agent loads this on demand via skill_load
+├── routes.py         # optional: REST routes the skill owns
+├── cli.py            # optional: /<name> slash + chika <name> argv
+├── websocket.py      # optional: WS endpoints (browser_skill is the canonical example)
+├── ui/
+│   ├── SettingsCard.vue   # optional: settings tab Vue component
+│   ├── section.html       # optional: extension popup section
+│   └── section.js         # optional: extension popup wiring
+└── tests/
+    └── test_*.py     # skill-specific tests live next to the code they test
+```
+
+### The required exports (`__init__.py`)
+
+```python
+SKILL_NAME = "myskill"
+
+def build_skill(context):
+    """Return a Skill object — engine-side tool list + prompt section."""
+    return MY_SKILL_CONSTANT          # or: build_my_skill(context.variable_store)
+```
+
+### The optional contract (any subset)
+
+```python
+def register_routes():
+    from chika.skills.myskill_skill.routes import router
+    return router
+
+def register_cli():
+    return {
+        "slash": {"myskill": slash_handler},
+        "argv":  {"myskill": argv_factory},
+    }
+
+def register_websocket(app):
+    from chika.skills.myskill_skill.websocket import register
+    register(app)
+
+SKILL_SETTINGS = {
+    "myskill_some_flag": {"default": "off", "validate": lambda v: v in ("on", "off")},
+}
+
+def on_setting_changed(key, new_value, old_value):
+    """Subscribe to settings_store changes — invalidate caches, push events."""
+    ...
+
+def on_env_changed(name, new_value, old_value):
+    """Subscribe to /api/env changes — hot-reload credentials."""
+    ...
+
+SKILL_UI = {
+    "settings_tab": {
+        "label": "MySkill",
+        "order": 50,
+        "frontend": {"component": "ui/SettingsCard.vue"},
+        "extension": {"html": "ui/section.html", "js": "ui/section.js"},
+    },
+}
+
+INTENT_CASES = {
+    "plan": {
+        "positive": ["build me a <thing>"],
+        "negative": ["show me the <thing>"],
+    },
+    "ask":  {"positive": [...], "negative": [...]},
+    # Other dimensions: "skill_load", "memory", "approval", "research", "refuse"
+    # — opt in to whichever applies. See chika/skills/_context.py for the full doc.
+}
+```
+
+`INTENT_CASES` does double duty: the central
+`tests/test_intent_heuristic.py` parametrises over the union, and
+`PromptBuilder` samples a few examples per dimension into the system
+prompt so the agent has concrete calibration for "make a plan vs
+don't", "ask vs proceed", etc.
+
+### What you should NEVER need to edit
+
+- `api/session_manager.py` — skills are walked via
+  `chika.skills.iter_skill_modules` at session-build time.
+- `api/server.py` — REST routes + WebSocket endpoints mount via the
+  `register_routes` / `register_websocket` walks.
+- `api/settings_store.py` — settings keys validate via `SKILL_SETTINGS`,
+  side-effects fan out via `fire_setting_changed`.
+- `chika/_cli/commands.py` / `app.py` — slash + argv commands mount via
+  `register_cli`.
+- `frontend/src/components/SettingsModal.vue` — dynamic tabs render via
+  `/api/skills/ui` + `import.meta.glob` over `chika/skills/*/ui/*.vue`.
+- `extension/options/options.js` — dynamic sections render via the
+  same manifest endpoint.
+
+The strict isolation contract is enforced by
+`tests/test_skill_isolation.py` (Python imports) and
+`tests/test_skill_isolation_full_repo.py` (every file in the repo).
 
 ## Commit format
 

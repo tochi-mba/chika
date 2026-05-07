@@ -266,4 +266,21 @@ INTENT_CASES: dict = {
             "show git status",
         ],
     },
+    # Approval dimension — git is the canonical "destructive push"
+    # surface. Force-push to main needs confirmation; reading state
+    # never does.
+    "approval": {
+        "positive": [
+            "git push --force origin main",
+            "git reset --hard HEAD~3",
+            "git branch -D main",
+            "git push --force-with-lease",
+        ],
+        "negative": [
+            "git status",
+            "git diff",
+            "git log --oneline -10",
+            "git fetch",
+        ],
+    },
 }

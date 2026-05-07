@@ -113,4 +113,20 @@ INTENT_CASES: dict = {
             "echo $PATH",
         ],
     },
+    # Refuse — destructive system-wide commands or anything aimed at
+    # the user's $HOME outside the workspace.
+    "refuse": {
+        "positive": [
+            "rm -rf ~ ",
+            "rm -rf /",
+            "dd if=/dev/zero of=/dev/sda",
+            "shutdown -h now",
+            "format C:",
+        ],
+        "negative": [
+            "rm -rf ./build",
+            "rm dist/*.tmp",
+            "rm node_modules",
+        ],
+    },
 }

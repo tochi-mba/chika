@@ -12,7 +12,43 @@
  * we already test the real WS pipeline in tests/test_ws_e2e.py. These
  * Playwright tests are about the *frontend rendering correctness*.
  */
+import fs from 'fs'
+import path from 'path'
+import url from 'url'
+
 import { test as base, expect } from '@playwright/test'
+
+// ── Skill-contributed Playwright mocks ─────────────────────────────
+//
+// Each shipped skill that needs Playwright fetch mocks ships a
+// ``tests/playwright_mocks.js`` file exporting a ``MOCKS_SCRIPT``
+// string. We discover them dynamically so this fixture file never
+// names a specific skill — preserves the strict skill-isolation
+// contract.
+const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
+const _SKILLS_ROOT = path.resolve(__dirname, '..', '..', 'chika', 'skills')
+const _SKILL_SUFFIX = '_skill'  // suffix added by every skill folder
+
+async function _loadSkillMockFragments() {
+  const fragments = []
+  if (!fs.existsSync(_SKILLS_ROOT)) return fragments
+  for (const folder of fs.readdirSync(_SKILLS_ROOT)) {
+    if (!folder.endsWith(_SKILL_SUFFIX)) continue
+    const file = path.join(_SKILLS_ROOT, folder, 'tests', 'playwright_mocks.js')
+    if (!fs.existsSync(file)) continue
+    try {
+      const mod = await import(url.pathToFileURL(file).href)
+      if (typeof mod.MOCKS_SCRIPT === 'string') {
+        fragments.push(mod.MOCKS_SCRIPT)
+      }
+    } catch (e) {
+      // best-effort — a broken skill mock shouldn't fail the suite.
+    }
+  }
+  return fragments
+}
+
+const _SKILL_MOCK_FRAGMENTS = await _loadSkillMockFragments()
 
 // Function form for addInitScript — Playwright serialises this and
 // runs it in the page before any document scripts. More reliable
@@ -121,43 +157,11 @@ function _installMockEnv() {
                emoji: '🐱', accent: '#e0b35c' },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
-    // Spotify integration mocks. Tests can inject custom payloads via
-    // window.__chikaSpotifyStatus / __chikaSpotifyConnect /
-    // __chikaSpotifyProfile (set via page.addInitScript) to drive each
-    // scenario; we fall back to a baseline configured-but-not-connected
-    // response so unrelated tests don't see the disabled-button state.
-    if (url.includes('/api/spotify/status')) {
-      const stub = window.__chikaSpotifyStatus || {
-        authorized: false, client_id_set: true,
-        profile: 'default', active_profile: 'default',
-        shared: false, shared_setting: false,
-        overrides_share: false, profile_overrides: {},
-      }
-      return new Response(JSON.stringify(stub), {
-        status: 200, headers: { 'Content-Type': 'application/json' },
-      })
-    }
-    if (url.includes('/api/spotify/connect')) {
-      const stub = window.__chikaSpotifyConnect || {
-        auth_url: 'https://accounts.spotify.com/authorize?client_id=test&state=zzz',
-        opened: true, client_id_set: true,
-      }
-      return new Response(JSON.stringify(stub), {
-        status: 200, headers: { 'Content-Type': 'application/json' },
-      })
-    }
-    if (url.includes('/api/spotify/disconnect')) {
-      return new Response(JSON.stringify({ ok: true, tokens_clear: true }), {
-        status: 200, headers: { 'Content-Type': 'application/json' },
-      })
-    }
-    if (url.includes('/api/spotify/profile')) {
-      const stub = window.__chikaSpotifyProfile || null
-      return new Response(JSON.stringify(stub), {
-        status: stub ? 200 : 401,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    }
+    // Skill-contributed mock handlers (spotify, etc.) inject their
+    // own ``if (url.includes(...))`` blocks here via the
+    // __SKILL_MOCK_FRAGMENTS__ template marker — see _fixtures.js'
+    // ``_loadSkillMockFragments``.
+    /* __SKILL_MOCK_FRAGMENTS__ */
     if (url.includes('/api/')) {
       return new Response('null', {
         status: 200, headers: { 'Content-Type': 'application/json' },
@@ -296,42 +300,9 @@ const wsMockInit = `
                  emoji: '🐱', accent: '#e0b35c' },
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
-      // Spotify integration mocks. Tests can inject a custom
-      // window.__chikaSpotifyStatus (and friends) via
-      // page.addInitScript to drive each scenario; we fall
-      // back to a baseline configured-but-not-connected response
-      // so unrelated tests don't see the disabled-button state.
-      if (url.includes('/api/spotify/status')) {
-        const stub = window.__chikaSpotifyStatus || {
-          authorized: false, client_id_set: true,
-          profile: 'default', shared: false, shared_setting: false,
-          overrides_share: false, profile_overrides: {},
-        }
-        return new Response(JSON.stringify(stub), {
-          status: 200, headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      if (url.includes('/api/spotify/connect')) {
-        const stub = window.__chikaSpotifyConnect || {
-          auth_url: 'https://accounts.spotify.com/authorize?client_id=test&state=zzz',
-          opened: true, client_id_set: true,
-        }
-        return new Response(JSON.stringify(stub), {
-          status: 200, headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      if (url.includes('/api/spotify/disconnect')) {
-        return new Response(JSON.stringify({ ok: true, tokens_clear: true }), {
-          status: 200, headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      if (url.includes('/api/spotify/profile')) {
-        const stub = window.__chikaSpotifyProfile || null
-        return new Response(JSON.stringify(stub), {
-          status: stub ? 200 : 401,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
+      // Skill-contributed mock handlers fan in here via the
+      // __SKILL_MOCK_FRAGMENTS__ template marker.
+      /* __SKILL_MOCK_FRAGMENTS__ */
       if (url.includes('/api/')) {
         // Catch-all: return an empty 200 so unstubbed /api/* fetches
         // (chat history, devices, etc.) don't pollute the console
@@ -368,7 +339,14 @@ export const test = base.extend({
     // parse on Chromium 130+ (mock WS undefined when test evaluated).
     // Function form bypasses the string-parse path that was silently
     // dropping the script on some Playwright + Chromium pairings.
-    await page.context().addInitScript(_installMockEnv)
+    // Build the addInitScript content by stringifying _installMockEnv
+    // and substituting the __SKILL_MOCK_FRAGMENTS__ markers with the
+    // actual mock fragments contributed by every shipped skill.
+    const fragmentBlock = _SKILL_MOCK_FRAGMENTS.join('\n')
+    const installSource = _installMockEnv
+      .toString()
+      .replace(/\/\*\s*__SKILL_MOCK_FRAGMENTS__\s*\*\//g, fragmentBlock)
+    await page.context().addInitScript(`(${installSource})()`)
     // Override goto to append ?skip_gate=1 by default. Gate-specific
     // tests opt out with ``goto('/', { bypassGate: false })``.
     const originalGoto = page.goto.bind(page)

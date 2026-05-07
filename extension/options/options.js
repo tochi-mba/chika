@@ -339,216 +339,90 @@ async function toggleSkill(name) {
   }
 }
 
-// ── Spotify integration ──────────────────────────────────────────────────────
+// ── Dynamic skill UI sections ────────────────────────────────────────────────
 //
-// Parity with the Vue SettingsModal Integrations tab:
-//   - Status with display name + tier
-//   - Connect / Disconnect / Reconnect
-//   - Headless URL fallback (paste-and-open) when popup-tab isn't available
-//   - Share-across-profiles toggle
-//
-// Lives in this options page (not popup.js) because the OAuth dance
-// opens a real browser tab — the popup window closes the moment focus
-// leaves it, so popup-driven OAuth is unreliable. Options page is a
-// proper full tab and stays open through the redirect.
+// Each shipped skill can ship a ``SKILL_UI.settings_tab.extension``
+// manifest pointing to ``ui/section.html`` + ``ui/section.js`` inside
+// the skill folder. Walked from the central ``/api/skills/ui``
+// endpoint. Drop a skill folder, its section disappears here too.
 
-const spotifyStatusLabel  = document.getElementById('spotifyStatusLabel')
-const spotifyDot          = document.getElementById('spotifyDot')
-const spotifyScope        = document.getElementById('spotifyScope')
-const spotifyConnectBtn   = document.getElementById('spotifyConnect')
-const spotifyDisconnectBtn= document.getElementById('spotifyDisconnect')
-const spotifyReconnectBtn = document.getElementById('spotifyReconnect')
-const spotifyFallback     = document.getElementById('spotifyFallback')
-const spotifyAuthUrl      = document.getElementById('spotifyAuthUrl')
-const spotifyCopyUrlBtn   = document.getElementById('spotifyCopyUrl')
-const spotifyError        = document.getElementById('spotifyError')
-const spotifyShareToggle  = document.getElementById('spotifyShare')
-
-
-function spotifyHeaders() {
+function skillUiHeaders() {
   const h = { 'Content-Type': 'application/json' }
   const k = apiKeyInput.value || ''
   if (k) h['Authorization'] = `Bearer ${k}`
   return h
 }
 
-
-function spotifyServer() {
+function skillUiServer() {
   return (serverUrlInput.value || 'http://127.0.0.1:8000').replace(/\/$/, '')
 }
 
+const _skillSectionCleanups = []
 
-async function loadSpotifyStatus() {
-  spotifyError.hidden = true
+async function loadSkillSections() {
+  const list = document.getElementById('skillSectionList')
+  if (!list) return
+  // Clean up previously-mounted sections first.
+  for (const cleanup of _skillSectionCleanups.splice(0)) {
+    try { cleanup() } catch { /* best-effort */ }
+  }
+  list.innerHTML = ''
+
+  let manifest
   try {
-    const res = await fetch(`${spotifyServer()}/api/spotify/status`, {
-      headers: spotifyHeaders(),
+    const res = await fetch(`${skillUiServer()}/api/skills/ui`, {
+      headers: skillUiHeaders(),
       signal: AbortSignal.timeout(4000),
     })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const s = await res.json()
-    renderSpotifyStatus(s)
-  } catch (e) {
-    spotifyDot.className = 'dot off'
-    spotifyStatusLabel.textContent = 'Server unreachable'
-    spotifyConnectBtn.hidden     = false
-    spotifyDisconnectBtn.hidden  = true
-    spotifyReconnectBtn.hidden   = true
+    if (!res.ok) return
+    manifest = await res.json()
+  } catch {
+    return // server unreachable — leave the section empty
   }
-}
 
+  for (const tab of (manifest.tabs || [])) {
+    const ext = tab.extension
+    if (!ext || !ext.html_url) continue
 
-function renderSpotifyStatus(s) {
-  spotifyShareToggle.checked = !!s.shared
+    let html = ''
+    try {
+      const r = await fetch(`${skillUiServer()}${ext.html_url}`, {
+        headers: skillUiHeaders(),
+      })
+      if (!r.ok) continue
+      html = await r.text()
+    } catch { continue }
 
-  if (!s.client_id_set) {
-    spotifyDot.className = 'dot err'
-    spotifyStatusLabel.textContent = 'Not configured'
-    spotifyScope.hidden = false
-    spotifyScope.textContent =
-      'Set CHIKA_SPOTIFY_CLIENT_ID on the server (the easiest way), ' +
-      'or follow the connection instructions printed by ' +
-      '`chika spotify connect`.'
-    spotifyConnectBtn.disabled    = true
-    spotifyDisconnectBtn.hidden   = true
-    spotifyReconnectBtn.hidden    = true
-    return
-  }
-  spotifyConnectBtn.disabled = false
+    const wrap = document.createElement('div')
+    wrap.dataset.skill = tab.skill
+    wrap.innerHTML = html
+    list.appendChild(wrap)
 
-  if (s.authorized) {
-    spotifyDot.className = 'dot ok'
-    const name = s.display_name || 'unknown'
-    const tier = s.product || ''
-    spotifyStatusLabel.textContent = `Connected as ${name}${tier ? ' · ' + tier : ''}`
-    spotifyScope.hidden = false
-    spotifyScope.textContent = s.shared
-      ? 'Connection is shared across all profiles.'
-      : `Connection is for the "${s.profile}" profile only.`
-    spotifyConnectBtn.hidden    = true
-    spotifyDisconnectBtn.hidden = false
-    spotifyReconnectBtn.hidden  = false
-  } else {
-    spotifyDot.className = 'dot off'
-    spotifyStatusLabel.textContent = 'Not connected'
-    spotifyScope.hidden = false
-    spotifyScope.textContent = s.shared
-      ? 'Sharing is on — connecting will apply to every profile.'
-      : `Connecting will save to the "${s.profile || 'default'}" profile.`
-    spotifyConnectBtn.hidden    = false
-    spotifyDisconnectBtn.hidden = true
-    spotifyReconnectBtn.hidden  = true
-  }
-}
-
-
-async function spotifyDoConnect() {
-  spotifyError.hidden = true
-  spotifyConnectBtn.disabled    = true
-  spotifyReconnectBtn.disabled  = true
-  spotifyConnectBtn.textContent = 'Opening Spotify…'
-  try {
-    const res = await fetch(`${spotifyServer()}/api/spotify/connect`, {
-      method: 'POST',
-      headers: spotifyHeaders(),
-      body: JSON.stringify({ open_browser: true }),
-    })
-    const data = await res.json()
-    if (data.error) {
-      spotifyError.hidden = false
-      spotifyError.textContent = data.message || data.error
-      return
-    }
-    if (data.auth_url) {
-      // Open in a NEW tab from the options page. webbrowser.open on
-      // the server may have already done this, but doing it here too
-      // is the user's fastest path — clicking the button → tab opens.
+    if (ext.js_url) {
       try {
-        chrome.tabs.create({ url: data.auth_url })
-      } catch {
-        window.open(data.auth_url, '_blank')
-      }
-      if (!data.opened) {
-        spotifyFallback.hidden = false
-        spotifyAuthUrl.value   = data.auth_url
+        const mod = await import(`${skillUiServer()}${ext.js_url}`)
+        if (typeof mod.init === 'function') {
+          const cleanup = mod.init({
+            root:    wrap,
+            server:  skillUiServer,
+            headers: skillUiHeaders,
+          })
+          if (typeof cleanup === 'function') _skillSectionCleanups.push(cleanup)
+        }
+      } catch (e) {
+        console.warn(`[skill-ui:${tab.skill}] init failed`, e)
       }
     }
-  } catch (e) {
-    spotifyError.hidden = false
-    spotifyError.textContent = String(e?.message || e)
-  } finally {
-    spotifyConnectBtn.disabled    = false
-    spotifyReconnectBtn.disabled  = false
-    spotifyConnectBtn.textContent = 'Connect Spotify'
-    // Status will refresh when the OAuth callback completes; also
-    // poll once after a few seconds in case the WS event was missed.
-    setTimeout(loadSpotifyStatus, 4000)
   }
 }
 
-
-async function spotifyDoDisconnect() {
-  spotifyDisconnectBtn.disabled = true
-  try {
-    await fetch(`${spotifyServer()}/api/spotify/disconnect`, {
-      method: 'POST',
-      headers: spotifyHeaders(),
-    })
-    await loadSpotifyStatus()
-  } finally {
-    spotifyDisconnectBtn.disabled = false
-  }
-}
-
-
-async function spotifySetShare(checked) {
-  spotifyShareToggle.disabled = true
-  try {
-    await fetch(`${spotifyServer()}/api/settings`, {
-      method: 'PATCH',
-      headers: spotifyHeaders(),
-      body: JSON.stringify({
-        spotify_share_across_profiles: checked ? 'on' : 'off',
-      }),
-    })
-    await loadSpotifyStatus()
-  } finally {
-    spotifyShareToggle.disabled = false
-  }
-}
-
-
-async function spotifyCopyUrl() {
-  try {
-    await navigator.clipboard.writeText(spotifyAuthUrl.value || '')
-    const old = spotifyCopyUrlBtn.textContent
-    spotifyCopyUrlBtn.textContent = 'Copied'
-    setTimeout(() => { spotifyCopyUrlBtn.textContent = old }, 1800)
-  } catch { /* clipboard unavailable in some contexts */ }
-}
-
-
-spotifyConnectBtn.addEventListener('click',    spotifyDoConnect)
-spotifyReconnectBtn.addEventListener('click',  spotifyDoConnect)
-spotifyDisconnectBtn.addEventListener('click', spotifyDoDisconnect)
-spotifyCopyUrlBtn.addEventListener('click',    spotifyCopyUrl)
-spotifyShareToggle.addEventListener('change', e => spotifySetShare(e.target.checked))
-
-// Live status: poll every 5s while the options tab is open. The
-// websocket isn't available from the options page (extension MV3
-// service workers can't easily proxy a frontend WS), so polling is
-// the simplest correct path.
-let _spotifyPollTimer = null
-function startSpotifyPolling() {
-  loadSpotifyStatus()
-  if (_spotifyPollTimer) clearInterval(_spotifyPollTimer)
-  _spotifyPollTimer = setInterval(loadSpotifyStatus, 5000)
-}
 window.addEventListener('beforeunload', () => {
-  if (_spotifyPollTimer) clearInterval(_spotifyPollTimer)
+  for (const cleanup of _skillSectionCleanups.splice(0)) {
+    try { cleanup() } catch { /* best-effort */ }
+  }
 })
 
 loadSettings().then(() => {
-  startSpotifyPolling()
   loadSkills()
+  loadSkillSections()
 })

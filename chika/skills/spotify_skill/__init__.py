@@ -19,6 +19,7 @@ import time
 from typing import Any, cast
 
 import httpx
+from pydantic import BaseModel
 
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
@@ -26,6 +27,36 @@ from chika.skills.spotify_skill import oauth as _oauth
 
 # Canonical name used by the engine's skill registry.
 SKILL_NAME = "spotify"
+
+
+# ── Skill-contributed event model ─────────────────────────────────────
+#
+# Lives here (not in ``api/models.py``) so the spotify skill stays
+# fully self-contained. ``api/models.py`` picks it up via the skill
+# discovery walk (``iter_skill_events``).
+
+
+class SpotifyAuthChangedEvent(BaseModel):
+    """Broadcast whenever a profile's Spotify connection state flips
+    (auth completes, user disconnects, refresh fails). Surfaces use
+    it to swap their UI without polling the status endpoint. Never
+    carries raw tokens — only display-name + product tier."""
+    type: str = "spotify_auth_changed"
+    authorized: bool
+    display_name: str | None = None
+    product: str | None = None
+    error: str | None = None
+
+
+SKILL_EVENTS: dict = {
+    "spotify_auth_changed": SpotifyAuthChangedEvent,
+}
+
+
+# Which surfaces should receive this event. Walked by event_routing.
+SKILL_EVENT_ROUTING: dict = {
+    "spotify_auth_changed": {"cli", "frontend", "extension"},
+}
 
 # ── Env ───────────────────────────────────────────────────────────────────────
 CLIENT_ID     = os.getenv("CHIKA_SPOTIFY_CLIENT_ID", "")
@@ -610,6 +641,35 @@ INTENT_CASES: dict = {
             "queue Frank Ocean Pink + White next",
         ],
     },
+    # Memory dimension — Spotify is one of the few skills with durable
+    # user preferences worth persisting (favourite genres, mood
+    # presets, friends' devices).
+    "memory": {
+        "positive": [
+            "remember that I like SZA + Frank Ocean for late-night listens",
+            "my workout playlist should always be high-tempo electronic",
+            "remember my AirPods are called 'Tochi's Pods'",
+        ],
+        "negative": [
+            "play something",
+            "what's playing now",
+            "skip this track",
+        ],
+    },
+    # Research dimension — Spotify deals with external catalogue data;
+    # specific lookups belong in the grounding flow.
+    "research": {
+        "positive": [
+            "tell me about the album cover for SZA's SOS",
+            "summarise the latest Pitchfork review of Frank Ocean's Endless",
+            "how many monthly listeners does Bad Bunny have",
+        ],
+        "negative": [
+            "skip to the next track",
+            "show me my saved tracks",
+            "what's playing right now",
+        ],
+    },
 }
 
 
@@ -625,6 +685,9 @@ SKILL_UI: dict = {
             "component": "ui/SettingsCard.vue",
         },
         "extension": {
+            # Loaded dynamically by extension/options/options.js — fetched
+            # via /api/skills/spotify/asset/ui/<file>. Drop the skill,
+            # the section disappears.
             "html": "ui/section.html",
             "js":   "ui/section.js",
         },

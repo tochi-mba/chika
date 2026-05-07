@@ -81,6 +81,8 @@ __all__ = [
     "fire_session_linked",
     "iter_skill_intent_cases",
     "render_intent_examples_block",
+    "iter_skill_events",
+    "iter_skill_routed_events",
 ]
 
 
@@ -288,6 +290,31 @@ _INTENT_HEADERS: dict[str, tuple[str, str, str]] = {
         "**Ask the user a multiple-choice question** when the prompt is vague, like:",
         "**Don't ask — just proceed** when the prompt is specific enough, like:",
     ),
+    "skill_load": (
+        "Skill-load calibration (when to read the full SKILL.md)",
+        "**Load the full SKILL.md** for non-trivial work, like:",
+        "**Skip the full doc** — the summary in this prompt covers it:",
+    ),
+    "memory": (
+        "Memory-persist calibration",
+        "**Write to memory** when the user states a durable preference:",
+        "**Don't pollute memory** — these are conversational:",
+    ),
+    "approval": (
+        "Approval calibration (require user confirmation?)",
+        "**Require approval** before running these:",
+        "**Auto-approve** these read-only / no-side-effect calls:",
+    ),
+    "research": (
+        "Research calibration (ground in a real fetch first?)",
+        "**Run web_fetch / verify_url first** for these claim-shaped prompts:",
+        "**Answer from training-data knowledge** for these:",
+    ),
+    "refuse": (
+        "Refusal calibration (decline when out-of-scope/unsafe)",
+        "**Decline** these requests:",
+        "**Proceed** with these:",
+    ),
 }
 
 
@@ -400,6 +427,57 @@ def iter_skill_intent_cases(dimension: str = "plan") -> Iterator[tuple[str, dict
         block = cases.get(dimension)
         if isinstance(block, dict) and block:
             yield mod.SKILL_NAME, block
+
+
+def iter_skill_events() -> Iterator[tuple[str, object]]:
+    """Yield ``(event_name, pydantic_model)`` for every event a skill
+    contributes via its ``SKILL_EVENTS`` dict.
+
+    Shape::
+
+        # chika/skills/<name>_skill/__init__.py
+        SKILL_EVENTS = {
+            "spotify_auth_changed": SpotifyAuthChangedEvent,
+        }
+
+    ``api/models.py`` walks this at module import time to populate
+    ``_TYPED_MODELS`` so ``validate_event`` accepts skill events
+    without naming them in core. ``api/event_routing.py`` walks it
+    via :func:`iter_skill_routed_events` to extend the FRONTEND /
+    EXTENSION sets.
+    """
+    for mod in _discover():
+        events = getattr(mod, "SKILL_EVENTS", None)
+        if not isinstance(events, dict):
+            continue
+        for name, model in events.items():
+            if isinstance(name, str) and name.strip():
+                yield name, model
+
+
+def iter_skill_routed_events() -> Iterator[tuple[str, str, frozenset[str]]]:
+    """Yield ``(skill_name, event_name, surfaces)`` for every event
+    a skill contributes via ``SKILL_EVENT_ROUTING``. ``surfaces`` is a
+    frozenset of strings drawn from {"cli", "frontend", "extension"}.
+
+    Shape::
+
+        SKILL_EVENT_ROUTING = {
+            "spotify_auth_changed": {"cli", "frontend", "extension"},
+        }
+
+    ``api/event_routing.py`` walks this at import time to extend its
+    static sets so ``EXTENSION_EVENTS`` no longer hardcodes a
+    spotify-specific entry.
+    """
+    for mod in _discover():
+        routing = getattr(mod, "SKILL_EVENT_ROUTING", None)
+        if not isinstance(routing, dict):
+            continue
+        for event_name, surfaces in routing.items():
+            if isinstance(event_name, str) and event_name.strip():
+                if isinstance(surfaces, (set, frozenset, list, tuple)):
+                    yield mod.SKILL_NAME, event_name, frozenset(surfaces)
 
 
 async def fire_session_linked(engine, session_id: str) -> None:

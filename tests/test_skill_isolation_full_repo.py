@@ -2,19 +2,21 @@
 
 Stronger than ``test_skill_isolation.py`` (which only checks Python
 imports). This test scans **every** text file in the repo — Vue, JS,
-TS, HTML, CSS, Python, Markdown — and fails if a skill's package path
-appears outside that skill's own folder.
+TS, HTML, CSS, Python, Markdown — and fails if a skill's name appears
+outside that skill's own folder in any of the patterns below.
 
 What counts as a violation
 --------------------------
 
-We flag occurrences of:
+We flag, for each shipped skill name (e.g. ``spotify``):
 
-  1. ``chika.skills.<name>_skill`` — Python module path
-  2. ``chika/skills/<name>_skill`` — filesystem path used in JS/Vue
-     glob imports, asset URLs, doc links, etc.
-  3. ``<name>_skill`` as a bare token (matches Python imports + JS
-     references where the full ``chika.`` prefix is implicit)
+  1. ``chika.skills.spotify_skill`` — Python module path
+  2. ``chika/skills/spotify_skill`` — filesystem path
+  3. ``spotify_skill`` as a bare token
+  4. ``SPOTIFY_<X>`` — UPPERCASE constants (event types, env vars)
+  5. ``Spotify<X>`` — PascalCase identifiers (Pydantic models, Vue components)
+  6. ``"spotify_<x>"`` / ``"spotify"`` — string literals in dispatch tables
+  7. ``/api/spotify/`` / ``/auth/spotify`` — URL path components
 
 Each occurrence is checked: if the file lives outside the corresponding
 skill folder AND outside the documented exceptions list, the test
@@ -87,6 +89,18 @@ EXEMPT_PATHS: set[str] = {
     "tests/test_skill_isolation_full_repo.py",
     "tests/test_skill_discovery.py",
     "tests/test_dynamic_skills.py",
+
+    # Auto-generated files. Each derives its content from the skill
+    # registry via a generator script — the generator script itself
+    # is a per-skill walker (already exempt via EXEMPT_DIR_PREFIXES).
+    # The generated output is a checked-in artefact, not source.
+    "frontend/src/lib/api-client.js",       # gen_api_client.py walks routes
+    "frontend/src/lib/toolSummaries.js",    # gen_tool_summaries.py walks tools
+    "frontend/src/types/api.d.ts",          # gen_api_types.py walks Pydantic
+    "frontend/src/types/events.d.ts",       # gen_event_types.py walks events
+    "extension/lib/event-types.js",         # ditto for the extension
+    "api/readme_html.py",                   # auto-rendered REST docs page
+
 }
 
 # Whole-directory exemptions — for files that legitimately walk EVERY
@@ -158,17 +172,42 @@ def violations(skill_names: list[str]) -> list[tuple[str, str, int, str]]:
     found: list[tuple[str, str, int, str]] = []
     skill_folders = {n: SKILLS_DIR / f"{n}_skill" for n in skill_names}
 
-    # One regex per skill — the patterns are precise (full module
-    # path or filesystem path with the ``_skill`` suffix). This avoids
-    # false positives on common words like "web" or "git".
+    # Patterns per skill. Multiple alternations cover every PRECISE
+    # shape a skill name leaks into source/text files. We deliberately
+    # do NOT match the bare lowercase token (``git``, ``web``) or
+    # generic PascalCase — both create massive false positives on
+    # common English words (Git/GitHub/GitRunner, WebSocket, PlanType,
+    # PetCompanion). The patterns below are all distinctive enough to
+    # be unambiguous signals of skill drift.
     patterns: dict[str, re.Pattern] = {}
+    # Skills with names that overlap common English words. We can't
+    # use the UPPERCASE pattern for them either — ``GIT_RUNNER``,
+    # ``WEB_FETCH``, ``PLAN_TYPE``, ``PET_BUBBLES`` all appear in
+    # legitimate non-skill code (env vars, top-level constants). For
+    # these skills we only flag the precise module-path pattern.
+    AMBIGUOUS = {"git", "web", "plan", "pet", "shell"}
     for name in skill_names:
+        # Skill names with non-alphanum chars (``web_app`` has an
+        # underscore) need careful escaping.
+        n = re.escape(name)
+        nu = re.escape(name.upper())
+        alts: list[str] = [
+            # Python module + filesystem paths — always precise.
+            r"chika\.skills\." + n + r"_skill",
+            r"chika/skills/" + n + r"_skill",
+            n + r"_skill",
+        ]
+        # UPPERCASE constants and URL paths only for skills whose
+        # name doesn't collide with common English words.
+        if name not in AMBIGUOUS:
+            alts.extend([
+                # ``SPOTIFY_AUTH_CHANGED`` / ``CHIKA_SPOTIFY_CLIENT_ID``.
+                nu + r"_[A-Z][A-Z0-9_]*",
+                # ``/api/spotify/``, ``/auth/spotify``.
+                r"/(?:api|auth|ws|skill)/" + n,
+            ])
         patterns[name] = re.compile(
-            r"(?<![A-Za-z0-9_])"
-            r"(chika\.skills\." + re.escape(name) + r"_skill"
-            r"|chika/skills/" + re.escape(name) + r"_skill"
-            r"|" + re.escape(name) + r"_skill)"
-            r"(?![A-Za-z0-9_])"
+            r"(?<![A-Za-z0-9_])(?:" + r"|".join(alts) + r")(?![A-Za-z0-9_])"
         )
 
     for path in _candidate_files():

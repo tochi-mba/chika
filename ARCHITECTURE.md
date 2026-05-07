@@ -111,17 +111,37 @@ Each is registered with `@register_tool` and exposed to the LLM via JSON schema.
 
 Tool **permissions** sit on top: each tool resolves to a category, and each category has an `ask`/`skip` policy that the user controls via `/permissions` or the Settings modal.
 
-### `chika/skills/` — skill packages
+### `chika/skills/` — skill packages (drop-in contract)
 
-Each skill ships a `SKILL.md` (system prompt fragment), one or more tools, and tests. Loaded on demand via `skill_load` / `skill_query` (BM25 retrieval). Examples: `web_app_skill`, `pet_skill`, `git_skill`, `spotify_skill`, `verify_skill`, `web_skill`.
+Each skill is a folder under `chika/skills/<name>_skill/` whose
+`__init__.py` exports a fixed contract. Discovery walks the folder
+at session-build time so dropping a skill folder is enough — no
+edits required to the engine, server, CLI, settings store, or
+frontend. See [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-new-skill--drop-in-contract)
+for the full contract.
 
-Plus, since [ADR-32](DECISIONS.md#adr-32):
+**Discovery layer** (`chika/skills/__init__.py`):
+
+| Function | Responsibility |
+|---|---|
+| `iter_skill_modules()` | Walk every `<name>_skill/` folder that exports `SKILL_NAME` + `build_skill`. |
+| `iter_skill_routers()` | Yield every skill's optional FastAPI router (`register_routes()`) — server.py mounts them. |
+| `iter_skill_websocket_registrars()` | Yield every skill's `register_websocket(app)` for `@app.websocket(...)` endpoints. |
+| `iter_skill_cli()` | Yield slash + argv subcommand dispatch tables for the CLI. |
+| `iter_skill_ui_manifests()` | Yield `SKILL_UI` manifests for the dynamic Settings tab + extension popup section. |
+| `iter_skill_intent_cases(dim)` | Walk per-skill `INTENT_CASES[dim]` for the planning-intent / ask-user / approval / etc. heuristics. |
+| `fire_setting_changed`, `fire_env_changed`, `fire_session_linked` | Subscriber bus — settings_store / env router / WS endpoint fan changes out to every skill that opted in. |
+| `render_intent_examples_block(dim)` | Sample positive/negative cases per dimension into the system prompt with per-skill + global thresholds. |
+
+**Per-skill modules** (also opt-in):
 
 | Module | Responsibility |
 |---|---|
 | `chika/skills/summarizer.py` | LLM-generated digests of each `SKILL.md`, hash-keyed, committed to `data/skill_summaries/`, injected into the agent's system prompt on every turn (non-blocking parallel generation at engine init) |
 | `chika/skills/browser_skill/selectors.py` | Selector cascade: CSS → ARIA → text-content. Cached per `(url, original_spec)` — markup churn doesn't break sessions |
 | `chika/skills/browser_skill/idempotency.py` | `(tab_id, action, args_sha) → result` cache with 30s TTL. Mid-flight WS reconnects don't re-fire destructive ops |
+| `chika/skills/browser_skill/websocket.py` | The `/ws/extension/` endpoint — extension command/control protocol. Migrated out of `api/server.py` into the skill folder so the skill is genuinely self-contained. |
+| `chika/skills/spotify_skill/routes.py` + `cli.py` + `ui/` | Spotify's full HTTP / CLI / Vue surface — drops in via the contract above. |
 
 ### `api/` — FastAPI server
 
