@@ -72,6 +72,15 @@ _CONTINUATION_TRIGGERS = (
     "continuing with", "continuing by",
     "i'll proceed", "moving on,", "moving on:",
     "after that, i'll", "after that i'll",
+    # Post-``ask_user`` slips — the agent often acknowledges the
+    # user's answer without USING it ("Let's move forward based on
+    # your choice." / "Now proceeding with your selection."). These
+    # patterns force the auto-continue gate so the next turn
+    # actually acts on the answer.
+    "let's move forward", "lets move forward", "let's proceed",
+    "lets proceed", "based on your choice", "based on your selection",
+    "based on your answer", "with your choice", "with your selection",
+    "moving forward",
 )
 
 
@@ -454,6 +463,13 @@ class ChikaEngine:
         # re-engages the approval gate instead of slipping through.
         self._plan_awaiting_approval: bool = False
 
+        # Per-turn flag — set by the tool_result event handler when
+        # ``ask_user`` returns a real choice. Read by the auto-continue
+        # gate below to FORCE a follow-up turn (the agent has fresh
+        # user info; it must act on it instead of stopping with a
+        # generic acknowledgment).
+        self._ask_user_answered_this_turn: bool = False
+
         # ── Skill summaries — auto-injected into the system prompt ──
         # Each shipped skill's SKILL.md is summarised once (cached in
         # ``data/skill_summaries/<id>.json``, hash-keyed). The summary
@@ -574,6 +590,10 @@ class ChikaEngine:
         # Reset per-turn capture so stale text from an earlier turn can't
         # accidentally trigger auto-continue on the next.
         self._last_followup_text = ""
+        # Reset the ``ask_user`` answer flag — the tool_result handler
+        # sets this when a fresh choice arrives so the auto-continue
+        # gate forces a follow-up turn that actually acts on the answer.
+        self._ask_user_answered_this_turn = False
         # Circuit-breaker: count identical (error_code, target) pairs across
         # this turn's workflows. Three repeats of the same denial/error
         # pattern means the agent is stuck in a retry loop — halt and
@@ -689,6 +709,22 @@ class ChikaEngine:
             self._last_result_content = "{}"
             async for event in self._run_workflow(tool_call):
                 yield event
+                # Track ``ask_user`` answers so the auto-continue gate
+                # can force a follow-up turn — the agent has FRESH user
+                # info and must use it. Without this rule, the model
+                # often produces a non-action acknowledgment ("Let's
+                # move forward based on your choice") and stops, leaving
+                # the user staring at a stalled chat.
+                if (
+                    event.get("type") == "tool_result"
+                    and event.get("tool") == "ask_user"
+                    and not event.get("error")
+                ):
+                    result = event.get("result") or {}
+                    if isinstance(result, dict) and (
+                        result.get("choice") or result.get("choices")
+                    ):
+                        self._ask_user_answered_this_turn = True
                 # Track repeated identical errors so the agent can't burn
                 # the user's approval prompts in a loop. We pull the
                 # ``error`` and target identifier from each tool_result.
@@ -783,7 +819,14 @@ class ChikaEngine:
                 cap = int(_settings.get("auto_continue_max", 10))
             except Exception:
                 enabled, cap = True, 10
-            matched = _should_auto_continue(check_text)
+            # FORCE auto-continue when ``ask_user`` returned a real
+            # answer this turn — the agent has new info and must use
+            # it. Don't rely on the text heuristic; the model often
+            # produces a non-action acknowledgment ("Let's move
+            # forward...") that previously stalled the chat. Bypasses
+            # the heuristic but still respects the cap.
+            forced = bool(self._ask_user_answered_this_turn)
+            matched = forced or _should_auto_continue(check_text)
             if enabled and self._auto_continue_depth < cap and matched:
                 self._auto_continue_depth += 1
                 yield {
@@ -791,6 +834,7 @@ class ChikaEngine:
                     "depth":         self._auto_continue_depth,
                     "max":           cap,
                     "trigger_tail":  check_text[-200:],
+                    "reason":        "ask_user_answered" if forced else "text_match",
                 }
                 async for ev in self._chat_inner("continue"):
                     yield ev
@@ -1095,18 +1139,40 @@ class ChikaEngine:
         if tasks:
             summary_lines.append("TASKS:")
 
-            def _walk(items: list, depth: int = 0):
+            def _walk(items: list, depth: int = 0, counter=[0]):  # noqa: B006
                 for t in items[:20]:
                     if not isinstance(t, dict):
                         continue
-                    indent = "  " * (depth + 1)
-                    summary_lines.append(
-                        f"{indent}- [{t.get('status', 'pending')}] "
-                        f"{(t.get('text') or '')[:120]}"
-                    )
+                    indent = "  " * depth
+                    # Show ``text`` when present; fall back to the
+                    # task ID with a ``(missing description)`` marker
+                    # so the user at least sees WHICH task lacks
+                    # context. ``plan_set`` validates non-empty text
+                    # at intake, but this is defence-in-depth — a
+                    # mid-plan ``plan_edit`` or upstream loader could
+                    # still produce empty-text rows.
+                    text = (t.get("text") or "").strip()
+                    if not text:
+                        tid = t.get("id") or "?"
+                        text = f"<{tid}> (missing description)"
+                    # NB: deliberately NOT showing status labels in
+                    # the approval modal. ``plan_set`` auto-promotes
+                    # the first leaf to ``in_progress`` so the agent
+                    # has a starting target — but at APPROVAL time
+                    # nothing has run yet, and a ``[in_progress]``
+                    # tag on a not-yet-approved task confused users
+                    # ("why is this already running if you're asking
+                    # me to approve?"). Numbered bullets show the
+                    # plan as a clean to-do list awaiting consent.
+                    if depth == 0:
+                        counter[0] += 1
+                        marker = f"{counter[0]}."
+                    else:
+                        marker = "-"
+                    summary_lines.append(f"{indent}{marker} {text[:120]}")
                     subs = t.get("subtasks") or []
                     if subs:
-                        _walk(subs, depth + 1)
+                        _walk(subs, depth + 1, counter)
             _walk(tasks)
 
         summary = "\n".join(summary_lines) or "(empty plan)"

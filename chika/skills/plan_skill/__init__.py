@@ -744,6 +744,39 @@ def _make_plan_tools(variable_store, memory_getter=None):
             requirements = []
 
         cleaned = [_clean_task(t, i) for i, t in enumerate(tasks, start=1)]
+
+        # Validate every task has a non-empty ``text`` description.
+        # The LLM occasionally emits ``{"id": "...", "status": "..."}``
+        # without a text field — the plan then renders as a wall of
+        # ``- [pending]`` markers in the approval modal with no
+        # context for the user to evaluate. Refuse here so the model
+        # retries with proper text, instead of silently accepting a
+        # malformed plan.
+        empty_text_paths: list[str] = []
+        def _check_text(items: list, prefix: str = "") -> None:
+            for t in items:
+                if not isinstance(t, dict):
+                    continue
+                tid = t.get("id") or "?"
+                path = f"{prefix}{tid}"
+                if not (t.get("text") or "").strip():
+                    empty_text_paths.append(path)
+                subs = t.get("subtasks") or []
+                if subs:
+                    _check_text(subs, prefix=f"{path}.")
+        _check_text(cleaned)
+        if empty_text_paths:
+            return {"error": "task_missing_text", "tasks": empty_text_paths,
+                    "hint": (
+                        "Every task (and subtask) needs a non-empty ``text`` "
+                        "field describing what to do. Re-emit plan_set with "
+                        "explicit task descriptions — e.g. "
+                        "{'id': 'scaffold', 'text': 'Create the project "
+                        "directory and install dependencies.'}. "
+                        "Tasks without text would render as ``- [pending]`` "
+                        "with no context, which the user can't evaluate."
+                    )}
+
         for t in cleaned:
             _recompute_parent_status(t)
         # Default: first leaf-task is in_progress, rest pending
