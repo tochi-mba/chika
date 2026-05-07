@@ -18,7 +18,14 @@
  *   - Per-profile override toggle only shown under share-on
  *   - Error message renders on connect failure
  */
-import { test, expect, waitForApp } from './_fixtures.js'
+// Spec lives inside the spotify skill folder per the drop-in skill
+// contract (ADR-38) but the shared Playwright fixtures still live at
+// ``frontend/e2e/_fixtures.js`` — they're cross-cutting test
+// infrastructure (mock WebSocket, mock fetch, ``chikaPage`` fixture)
+// shared by every skill's e2e suite. Resolved via relative path
+// rather than a path alias since Playwright doesn't read the Vite
+// ``resolve.alias`` config.
+import { test, expect, waitForApp } from '../../../../frontend/e2e/_fixtures.js'
 
 test.use({ viewport: { width: 1280, height: 800 } })
 
