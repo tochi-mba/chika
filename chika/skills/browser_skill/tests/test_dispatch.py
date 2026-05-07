@@ -7,7 +7,6 @@ import pytest
 
 from chika.skills import browser_skill as bs
 
-
 # ── helpers / fixtures ────────────────────────────────────────────────
 
 

@@ -14,6 +14,9 @@ from __future__ import annotations
 from chika.core.skill_registry import Skill
 from chika.tools.shell_tool import ALL_SHELL_TOOLS, ProcessRegistry
 
+# Canonical name used by the engine's skill registry.
+SKILL_NAME = "shell"
+
 
 def _render_active_shells_block() -> str:
     """Return a short markdown block describing every tracked process.
@@ -61,3 +64,53 @@ def build_shell_skill() -> Skill:
         prompt_section=_render_active_shells_block,
         workflow_examples="",
     )
+
+
+def build_skill(_context):
+    """Auto-discovery entry point. Shell tools are
+    process-registry-backed (``ProcessRegistry`` is module-level), so
+    we just return the built skill — no per-session state to wire."""
+    return build_shell_skill()
+
+
+INTENT_CASES: dict = {
+    "plan": {
+        "positive": [
+            "build me a CI pipeline that lints, types, tests, then deploys on merge",
+        ],
+        "negative": [
+            "run pytest",
+            "kill pid 1234",
+            "what processes are running",
+            "tail the output of pid 9999",
+        ],
+    },
+    "ask": {
+        "positive": [
+            "run something for me",
+            "kill that thing",
+        ],
+        "negative": [
+            "run pytest tests/test_engine.py",
+            "kill pid 1234",
+            "tail pid 9999",
+        ],
+    },
+    # Approval dimension: shell_exec defaults to ASK on commands that
+    # mutate the environment. The cases below calibrate when to
+    # auto-approve safe reads vs hold for confirmation on writes.
+    "approval": {
+        "positive": [
+            "rm -rf node_modules",
+            "git push --force",
+            "DROP TABLE users",
+            "curl -X DELETE https://api.example.com/users/1",
+        ],
+        "negative": [
+            "ls -la",
+            "git status",
+            "cat README.md",
+            "echo $PATH",
+        ],
+    },
+}

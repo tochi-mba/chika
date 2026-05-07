@@ -29,6 +29,25 @@ _PROVIDER_MODEL_VAR = {
     "ollama":    "OLLAMA_MODEL",
 }
 
+# Env keys whose change triggers a live ``reload_client()`` on every
+# engine — i.e. the next chat turn picks up the new value with no
+# process restart. Anything outside this set still flags
+# ``restart_required: True``.
+_HOT_RELOADABLE_ENV_KEYS = frozenset({
+    "CHIKA_PROVIDER",
+    "ANTHROPIC_MODEL", "ANTHROPIC_API_KEY",
+    "OPENAI_MODEL", "OPENAI_API_KEY",
+    "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_KEY",
+    "AZURE_OPENAI_DEPLOYMENT", "AZURE_API_VERSION",
+    "OLLAMA_BASE_URL", "OLLAMA_MODEL",
+    "CHIKA_THINKING", "CHIKA_THINKING_BUDGET",
+    "CHIKA_VALIDATE_RESPONSE", "CHIKA_GROUNDING_MIN_LENGTH",
+    "CHIKA_AUTONOMY",
+    # Spotify integration: hot-reload picks up a freshly-pasted
+    # CLIENT_ID from the inline Settings input without a restart.
+    "CHIKA_SPOTIFY_CLIENT_ID", "CHIKA_SPOTIFY_REDIRECT_URI",
+})
+
 
 class EnvUpdate(BaseModel):
     set:    dict[str, str] | None = None
@@ -81,6 +100,14 @@ async def patch_env(body: EnvUpdate) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to write .env: {exc}") from exc
 
+    # Hot-reload every engine's LLM client when any provider/model/api-key
+    # variable changed. Other runtime knobs (host/port) still require a
+    # restart — the response's ``restart_required`` flag tells the UI
+    # which case applies.
+    hot_reload = None
+    if any(k in _HOT_RELOADABLE_ENV_KEYS for k in updates):
+        hot_reload = _hot_reload_clients()
+
     rows = env_file.read_env_for_display(mask_secrets=True)
     return {
         "ok": True,
@@ -90,6 +117,7 @@ async def patch_env(body: EnvUpdate) -> dict[str, Any]:
             for k, v, secret in rows
         ],
         "restart_required": _restart_required(list(updates.keys())),
+        "hot_reload": hot_reload,
     }
 
 
@@ -138,30 +166,78 @@ async def patch_provider(body: ProviderUpdate) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    # Hot-swap every active engine's LLM client so the next turn on
+    # any open session uses the new provider/model. Surfaces any
+    # per-engine failure (e.g. missing API key for the new provider)
+    # in the response so the UI can show a sharp error instead of a
+    # silent "you must restart" footnote.
+    summary = _hot_reload_clients()
+
     return {
         "ok":               True,
         "provider":         target_provider,
         "model":            body.model or config.get_provider_config().model,
         "applied":          list(updates.keys()),
-        "restart_required": True,
+        # Restart no longer required for provider/model swaps — kept
+        # at False so the UI shows "✓ switched live" instead of
+        # "restart needed".
+        "restart_required": False,
+        "hot_reload":       summary,
     }
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
+def _hot_reload_clients() -> dict[str, Any]:
+    """Trigger every per-skill / per-engine reload hook.
+
+    Order matters: ``config.reload_from_env`` (called inside
+    ``session_manager.reload_clients``) refreshes the LLM globals
+    first, then we fan out to per-skill modules whose own globals
+    also need re-reading from the same .env (e.g. spotify CLIENT_ID).
+
+    Returns a summary safe to embed in the HTTP response. Soft-fails
+    on any error so a single failing hook doesn't lock the user out
+    of the rest of the .env editor.
+    """
+    try:
+        from api.session_manager import session_manager
+        summary = session_manager.reload_clients()
+    except Exception as exc:
+        return {"error": str(exc), "changed": False, "sessions": 0}
+
+    # Fan out to every skill via the subscription bus. Each skill's
+    # ``on_env_changed`` hook decides which env vars matter to it
+    # (the spotify integration, for example, listens for
+    # ``CHIKA_SPOTIFY_CLIENT_ID``). The router doesn't have to know
+    # which skill owns which var.
+    try:
+        import os
+
+        from chika.skills import fire_env_changed
+        for name, value in os.environ.items():
+            fire_env_changed(name, value, None)
+    except Exception:
+        pass
+
+    return summary
+
+
 def _restart_required(keys: list[str]) -> bool:
-    """Some env keys are read once at process boot — flag those for the UI."""
+    """True iff any changed env key still requires a process restart.
+
+    Kept for /api/env path where users edit arbitrary env vars (host,
+    port, max_history_tokens etc.). Provider/model are no longer in
+    this list — they hot-reload via reload_client().
+    """
     runtime_keys = {
-        "CHIKA_PROVIDER",
-        "ANTHROPIC_MODEL", "ANTHROPIC_API_KEY",
-        "OPENAI_MODEL", "OPENAI_API_KEY",
-        "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_KEY", "AZURE_OPENAI_DEPLOYMENT",
-        "AZURE_API_VERSION",
-        "OLLAMA_BASE_URL", "OLLAMA_MODEL",
+        # Provider/model intentionally absent — handled by reload_client
+        "AZURE_API_VERSION",  # part of azure auth, but reload_client picks it up
         "CHIKA_HOST", "CHIKA_PORT", "CHIKA_API_KEY",
-        "CHIKA_THINKING", "CHIKA_THINKING_BUDGET",
         "CHIKA_MAX_HISTORY_TOKENS", "CHIKA_MAX_TOOL_TURNS",
         "CHIKA_MAX_MEMORY_TOKENS",
     }
+    # AZURE_API_VERSION is reload-able too — pull it out of restart-required.
+    runtime_keys.discard("AZURE_API_VERSION")
     return any(k in runtime_keys for k in keys)

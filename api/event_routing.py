@@ -57,6 +57,7 @@ CLI_EVENTS: frozenset[str] = frozenset({
     EventType.CHAT_LIST.value,
     EventType.EXTENSION_STATUS.value,
     EventType.SPOTIFY_AUTH_CHANGED.value,
+    EventType.PLAN_ARCHIVED.value,
 })
 
 # Events the Vue frontend handles. Lives in
@@ -86,6 +87,7 @@ EXTENSION_EVENTS: frozenset[str] = frozenset({
     EventType.EXT_CHAT_DONE.value,
     EventType.EXTENSION_STATUS.value,
     EventType.SPOTIFY_AUTH_CHANGED.value,
+    EventType.PLAN_ARCHIVED.value,
     EventType.PING.value,
     EventType.PONG.value,
 })

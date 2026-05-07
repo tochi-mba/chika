@@ -9,5 +9,6 @@
   "state_verbs_tokens": 80,
   "auto_update": "on",
   "spotify_share_across_profiles": "off",
-  "spotify_profile_overrides": {}
+  "spotify_profile_overrides": {},
+  "skills_disabled": []
 }

@@ -388,9 +388,10 @@ class WorkflowEngine:
                 "project-creation tool) and there's no active plan. "
                 "Project creation always requires a plan first — "
                 "call `plan_set` with goal + requirements + tasks "
-                "(see plan_skill SKILL.md), then re-emit. Use "
-                "`plan_set` as the FIRST step of this workflow if "
-                "you want to plan + scaffold in one round-trip."
+                "(load the planning skill's SKILL.md if you need the "
+                "template), then re-emit. Use `plan_set` as the FIRST "
+                "step of this workflow if you want to plan + scaffold "
+                "in one round-trip."
             )
         else:
             reason = (
@@ -399,9 +400,10 @@ class WorkflowEngine:
                 "and there's no active plan. The runtime requires a plan "
                 "before multi-step real work — call `plan_set` FIRST with "
                 "a verbose plan (goal, requirements, tasks with subtasks) "
-                "and THEN re-emit your workflow. The plan_skill SKILL.md "
-                "has the canonical template. Single-step or read-only "
-                "workflows are exempt from this gate."
+                "and THEN re-emit your workflow. The planning skill's "
+                "SKILL.md has the canonical template (load via "
+                "skill_load). Single-step or read-only workflows are "
+                "exempt from this gate."
             )
 
         return {

@@ -2,7 +2,7 @@
 // Source of truth: api/models.py (Pydantic event models).
 // Regenerate: python scripts/gen_event_types.py
 // CI guard:   python scripts/gen_event_types.py --check
-// Generated:  2026-05-06
+// Generated:  2026-05-07
 
 /** Every engine event type the WebSocket may emit. */
 export type EventTypeName =
@@ -38,6 +38,7 @@ export type EventTypeName =
   | "extension_status"
   | "reset_done"
   | "approval_required"
+  | "plan_archived"
   | "spotify_auth_changed"
   | "shell_process_start"
   | "shell_output"
@@ -98,6 +99,20 @@ export interface MemoryUpdateEvent {
   type?: string;
   key: string;
   value: string;
+}
+
+/** Engine event: ``PlanArchivedEvent``. */
+export interface PlanArchivedEvent {
+  type?: string;
+  auto?: boolean;
+  goal?: string | null;
+  reason?: string | null;
+  tasks_total?: number;
+  tasks_done?: number;
+  archived_at?: number | null;
+  superseded_by?: string | null;
+  history_count?: number;
+  source?: string | null;
 }
 
 /** Engine event: ``RetryAttemptEvent``. */
@@ -180,5 +195,5 @@ export interface WorkflowStartEvent {
 }
 
 /** Discriminated union of every engine event. */
-export type EngineEvent = CompactionEvent | ConditionEvalEvent | DoneEvent | ErrorEvent | LoopIterationEvent | MapItemEvent | MemoryUpdateEvent | RetryAttemptEvent | SpotifyAuthChangedEvent | StepDoneEvent | StepStartEvent | TokenEvent | ToolCallEvent | ToolResultEvent | VariableSetEvent | WorkflowDoneEvent | WorkflowStartEvent;
+export type EngineEvent = CompactionEvent | ConditionEvalEvent | DoneEvent | ErrorEvent | LoopIterationEvent | MapItemEvent | MemoryUpdateEvent | PlanArchivedEvent | RetryAttemptEvent | SpotifyAuthChangedEvent | StepDoneEvent | StepStartEvent | TokenEvent | ToolCallEvent | ToolResultEvent | VariableSetEvent | WorkflowDoneEvent | WorkflowStartEvent;
 

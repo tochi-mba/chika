@@ -494,7 +494,7 @@ class PromptBuilder:
                 "popup). It's NOT decorative — it reflects the current "
                 "session state and the user can see it the same way you "
                 "can. Acknowledge it warmly when the user mentions it. "
-                "Use the pet_skill tools to interact with it (pet, feed, "
+                "Use the pet skill's tools to interact with it (pet, feed, "
                 "play, ask about mood)."
             )
             pet_lines.append("")
@@ -533,9 +533,26 @@ class PromptBuilder:
         # for callers that haven't migrated, so test harnesses that pass
         # them keep working.
         legacy_blocks = [b for b in (shells_block, pet_block) if b.strip()]
-        all_sections = legacy_blocks + [
-            s for s in (skill_sections or []) if s and s.strip()
-        ]
+
+        # Intent calibration — each shipped skill contributes a few
+        # "make a plan vs don't" / "ask the user vs proceed" examples
+        # via its ``INTENT_CASES`` dict. Sampled here with strict
+        # per-skill thresholds + a global cap so the prompt stays
+        # bounded as more skills get installed.
+        try:
+            from chika.skills import render_intent_examples_block
+            intent_blocks = [
+                render_intent_examples_block(d)
+                for d in ("plan", "ask")
+            ]
+        except Exception:
+            intent_blocks = []
+
+        all_sections = (
+            legacy_blocks
+            + [b for b in intent_blocks if b and b.strip()]
+            + [s for s in (skill_sections or []) if s and s.strip()]
+        )
         if all_sections:
             rendered = rendered.rstrip() + "\n\n" + "\n\n".join(all_sections)
 

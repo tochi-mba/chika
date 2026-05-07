@@ -6,6 +6,11 @@ from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
 from chika.tools.shell_tool import shell_exec
 
+# Canonical name used by the engine's skill registry. Surfaced via
+# chika.skills.list_known_skill_names() so settings validation +
+# /api/skills don't have to re-list this elsewhere.
+SKILL_NAME = "git"
+
 
 async def git_status(working_directory: str = ".") -> dict:
     r = await shell_exec("git status --short --branch", working_directory=working_directory)
@@ -222,3 +227,43 @@ GIT_SKILL = Skill(
         "git_conventions": "Use conventional commits: feat/fix/chore/docs/refactor/test",
     },
 )
+
+
+def build_skill(_context):
+    """Auto-discovery entry point. The git skill is stateless — it
+    returns the module-level ``GIT_SKILL`` constant unchanged."""
+    return GIT_SKILL
+
+
+# Planning-intent calibration cases — pulled by the central
+# ``test_intent_heuristic.py`` AND sampled into the agent's system
+# prompt so it has concrete examples of "make a plan vs don't" for
+# this skill's domain.
+INTENT_CASES: dict = {
+    "plan": {
+        "positive": [
+            "set up a git workflow for this repo with main + dev branches and PR templates",
+            "migrate every commit message in the last month to conventional-commits format",
+            "build me a release pipeline that tags + pushes a changelog on merge to main",
+        ],
+        "negative": [
+            "what does git rebase do",
+            "show me the last 10 commits",
+            "are there any uncommitted changes",
+            "what branch am I on",
+        ],
+    },
+    "ask": {
+        "positive": [
+            "i want to clean up my branches",
+            "deal with the merge conflict",
+            "tidy up the commit history",
+        ],
+        "negative": [
+            "delete branch dev/old-feature",
+            "rebase onto main",
+            "commit with message 'fix typo'",
+            "show git status",
+        ],
+    },
+}

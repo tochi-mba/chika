@@ -13,7 +13,6 @@ import pytest
 from chika.core.variable_store import VariableStore, VarType
 from chika.skills import plan_skill as ps
 
-
 # ── helpers ────────────────────────────────────────────────────────────
 
 
@@ -211,14 +210,14 @@ async def test_reconcile_non_list_ops_treated_as_empty(vstore, plan_with_tasks):
 @pytest.mark.asyncio
 async def test_archive_no_active_plan(vstore):
     """Calling archive with no plan → returns archived=False, no error."""
-    _, _, _, _, _, _, plan_archive, _ = ps._make_plan_tools(vstore)
+    _, _, _, _, _, _, plan_archive, _, _ = ps._make_plan_tools(vstore)
     out = await plan_archive()
     assert out["archived"] is False
 
 
 @pytest.mark.asyncio
 async def test_archive_moves_plan_to_history(vstore, plan_with_tasks):
-    _, _, _, _, _, _, plan_archive, _ = ps._make_plan_tools(vstore)
+    _, _, _, _, _, _, plan_archive, _, _ = ps._make_plan_tools(vstore)
     out = await plan_archive(reason="shipped")
     assert out["archived"] is True
     assert out["count"] == 1
@@ -237,7 +236,7 @@ async def test_archive_caps_history_at_25(vstore, plan_with_tasks):
     fake_history = [{"goal": f"old{i}"} for i in range(25)]
     vstore.set("plan_archive", fake_history, VarType.JSON,
                description="seed", source="test")
-    _, _, _, _, _, _, plan_archive, _ = ps._make_plan_tools(vstore)
+    _, _, _, _, _, _, plan_archive, _, _ = ps._make_plan_tools(vstore)
     out = await plan_archive()
     history = vstore.get("plan_archive").value
     assert len(history) == 25
@@ -250,7 +249,7 @@ async def test_archive_caps_history_at_25(vstore, plan_with_tasks):
 async def test_archive_with_memory_persistence(vstore, plan_with_tasks):
     mm = MagicMock()
     mm.persist = MagicMock()
-    _, _, _, _, _, _, plan_archive, _ = ps._make_plan_tools(
+    _, _, _, _, _, _, plan_archive, _, _ = ps._make_plan_tools(
         vstore, memory_getter=lambda: mm,
     )
     out = await plan_archive(reason="shipped 2026-05-05")
@@ -266,7 +265,7 @@ async def test_archive_memory_getter_failure_does_not_block(vstore, plan_with_ta
     def boom():
         raise RuntimeError("no profile")
 
-    _, _, _, _, _, _, plan_archive, _ = ps._make_plan_tools(
+    _, _, _, _, _, _, plan_archive, _, _ = ps._make_plan_tools(
         vstore, memory_getter=boom,
     )
     out = await plan_archive()
@@ -278,7 +277,7 @@ async def test_archive_memory_getter_failure_does_not_block(vstore, plan_with_ta
 async def test_archive_memory_persist_failure_swallowed(vstore, plan_with_tasks):
     mm = MagicMock()
     mm.persist = MagicMock(side_effect=OSError("disk full"))
-    _, _, _, _, _, _, plan_archive, _ = ps._make_plan_tools(
+    _, _, _, _, _, _, plan_archive, _, _ = ps._make_plan_tools(
         vstore, memory_getter=lambda: mm,
     )
     out = await plan_archive()
@@ -292,7 +291,7 @@ async def test_archive_memory_persist_failure_swallowed(vstore, plan_with_tasks)
 
 @pytest.mark.asyncio
 async def test_history_empty(vstore):
-    _, _, _, _, _, _, _, plan_history = ps._make_plan_tools(vstore)
+    _, _, _, _, _, _, _, plan_history, _ = ps._make_plan_tools(vstore)
     out = await plan_history()
     assert out["count"] == 0
     assert out["plans"] == []
@@ -307,7 +306,7 @@ async def test_history_returns_newest_first(vstore):
     ]
     vstore.set("plan_archive", fake_history, VarType.JSON,
                description="seed", source="test")
-    _, _, _, _, _, _, _, plan_history = ps._make_plan_tools(vstore)
+    _, _, _, _, _, _, _, plan_history, _ = ps._make_plan_tools(vstore)
     out = await plan_history()
     assert out["plans"][0]["goal"] == "plan-C"
     assert out["plans"][2]["goal"] == "plan-A"
@@ -318,7 +317,7 @@ async def test_history_respects_limit(vstore):
     fake_history = [{"goal": f"p{i}"} for i in range(10)]
     vstore.set("plan_archive", fake_history, VarType.JSON,
                description="seed", source="test")
-    _, _, _, _, _, _, _, plan_history = ps._make_plan_tools(vstore)
+    _, _, _, _, _, _, _, plan_history, _ = ps._make_plan_tools(vstore)
     out = await plan_history(limit=3)
     assert len(out["plans"]) == 3
 
@@ -329,7 +328,7 @@ async def test_history_zero_limit_returns_all(vstore):
     fake_history = [{"goal": f"p{i}"} for i in range(7)]
     vstore.set("plan_archive", fake_history, VarType.JSON,
                description="seed", source="test")
-    _, _, _, _, _, _, _, plan_history = ps._make_plan_tools(vstore)
+    _, _, _, _, _, _, _, plan_history, _ = ps._make_plan_tools(vstore)
     out = await plan_history(limit=0)
     assert len(out["plans"]) == 7
 

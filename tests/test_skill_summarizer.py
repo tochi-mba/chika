@@ -132,8 +132,8 @@ def test_skill_summary_rejects_no_anti_patterns():
 
 def test_skill_summary_to_prompt_block_renders():
     s = SkillSummary(**_good_summary())
-    block = s.to_prompt_block("web_skill")
-    assert "## web_skill" in block
+    block = s.to_prompt_block("_fake_skill")
+    assert "## _fake_skill" in block
     assert "Fetches" in block
     assert "web_fetch" in block
     assert "Don't" in block
@@ -177,8 +177,8 @@ def test_parse_summary_rejects_prompt_injection_output():
 
 
 def test_cache_path_uses_skill_id(tmp_path):
-    p = cache_path("git_skill", root=tmp_path)
-    assert p.name == "git_skill.json"
+    p = cache_path("_fake_skill", root=tmp_path)
+    assert p.name == "_fake_skill.json"
     assert p.parent.name == "skill_summaries"
 
 
@@ -189,13 +189,13 @@ def test_load_summary_missing_returns_none(tmp_path):
 def test_save_and_load_summary_roundtrip(tmp_path):
     s = SkillSummary(**_good_summary())
     cached = summarizer.CachedSummary(
-        skill_id="web_skill",
+        skill_id="_fake_skill",
         sha256="a" * 64,
         summary=s,
         generated_at="2026-05-06T12:00:00Z",
     )
     save_summary(cached, root=tmp_path)
-    loaded = load_summary("web_skill", root=tmp_path)
+    loaded = load_summary("_fake_skill", root=tmp_path)
     assert loaded is not None
     assert loaded.sha256 == "a" * 64
     assert loaded.summary.purpose == s.purpose
@@ -220,12 +220,12 @@ def test_save_summary_atomic_no_partial_files(tmp_path):
     """A successful save leaves only the final file, not the .tmp."""
     s = SkillSummary(**_good_summary())
     cached = summarizer.CachedSummary(
-        skill_id="web_skill", sha256="a" * 64, summary=s,
+        skill_id="_fake_skill", sha256="a" * 64, summary=s,
         generated_at="2026-05-06T12:00:00Z",
     )
     save_summary(cached, root=tmp_path)
     files = list((tmp_path / "data" / "skill_summaries").glob("*"))
-    assert {f.name for f in files} == {"web_skill.json"}
+    assert {f.name for f in files} == {"_fake_skill.json"}
 
 
 # ── generate_summary_async ───────────────────────────────────────────
@@ -240,7 +240,7 @@ async def _fake_llm_returning(text: str):
 @pytest.mark.asyncio
 async def test_generate_summary_returns_parsed_summary():
     llm = await _fake_llm_returning(json.dumps(_good_summary()))
-    s = await generate_summary_async("web_skill", "skill content", llm)
+    s = await generate_summary_async("_fake_skill", "skill content", llm)
     assert s is not None
     assert s.purpose.startswith("Fetches")
 

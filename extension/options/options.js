@@ -235,6 +235,110 @@ function showFeedback(type, msg) {
   }
 }
 
+// ── Skills (parity with Vue Settings → Skills tab) ───────────────────────────
+//
+// Lists every skill the engine knows about (live + disabled) with a per-row
+// toggle. Click flips the row + PATCHes /api/settings.skills_disabled, which
+// triggers reload_skills() server-side — the change is live on the next turn,
+// no restart needed.
+
+const skillList         = document.getElementById('skillList')
+const skillLoadStatus   = document.getElementById('skillLoadStatus')
+const skillError        = document.getElementById('skillError')
+
+let _skills = []                // [{ name, description, tools, disabled }]
+let _skillsDisabled = []        // mirror of settings.skills_disabled
+
+function skillHeaders() {
+  const h = { 'Content-Type': 'application/json' }
+  const k = apiKeyInput.value || ''
+  if (k) h['Authorization'] = `Bearer ${k}`
+  return h
+}
+
+function skillServer() {
+  return (serverUrlInput.value || 'http://127.0.0.1:8000').replace(/\/$/, '')
+}
+
+async function loadSkills() {
+  skillError.hidden = true
+  try {
+    const res = await fetch(`${skillServer()}/api/skills`, {
+      headers: skillHeaders(),
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    _skills = data.skills || []
+    _skillsDisabled = data.disabled || []
+    renderSkills()
+  } catch (e) {
+    skillLoadStatus.textContent = 'Server offline — skill toggles unavailable.'
+    skillLoadStatus.style.display = ''
+  }
+}
+
+function renderSkills() {
+  if (!_skills.length) {
+    skillLoadStatus.textContent = 'No skills returned by server.'
+    return
+  }
+  skillLoadStatus.style.display = 'none'
+  skillList.innerHTML = ''
+
+  for (const s of _skills) {
+    const row = document.createElement('div')
+    row.className = 'skill-row' + (s.disabled ? ' disabled' : '')
+    const toolCount = (s.tools || []).length
+    const escapedName = String(s.name).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]))
+    const escapedDesc = String(s.description || '').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]))
+    row.innerHTML = `
+      <div class="skill-meta">
+        <div class="skill-head">
+          <span class="skill-name">${escapedName}</span>
+          <span class="skill-tool-count">${toolCount} tool${toolCount === 1 ? '' : 's'}</span>
+          ${s.disabled ? '<span class="skill-chip">off</span>' : ''}
+        </div>
+        ${escapedDesc ? `<div class="skill-desc">${escapedDesc}</div>` : ''}
+      </div>
+      <label class="switch">
+        <input type="checkbox" data-skill="${escapedName}" ${s.disabled ? '' : 'checked'} />
+        <span class="track"><span class="thumb"></span></span>
+      </label>
+    `
+    skillList.appendChild(row)
+  }
+
+  skillList.querySelectorAll('input[data-skill]').forEach(input => {
+    input.addEventListener('change', (e) => toggleSkill(e.target.dataset.skill))
+  })
+}
+
+async function toggleSkill(name) {
+  const cur = new Set(_skillsDisabled)
+  if (cur.has(name)) cur.delete(name)
+  else cur.add(name)
+  const next = Array.from(cur)
+
+  try {
+    const res = await fetch(`${skillServer()}/api/settings`, {
+      method: 'PATCH',
+      headers: skillHeaders(),
+      body: JSON.stringify({ skills_disabled: next }),
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    _skillsDisabled = next
+    // Re-fetch so a re-enabled skill picks up its tool count.
+    loadSkills()
+  } catch (e) {
+    skillError.hidden = false
+    skillError.textContent = `Toggle failed: ${e.message}`
+    // Revert checkbox state
+    loadSkills()
+  }
+}
+
 // ── Spotify integration ──────────────────────────────────────────────────────
 //
 // Parity with the Vue SettingsModal Integrations tab:
@@ -302,8 +406,9 @@ function renderSpotifyStatus(s) {
     spotifyStatusLabel.textContent = 'Not configured'
     spotifyScope.hidden = false
     spotifyScope.textContent =
-      'Set CHIKA_SPOTIFY_CLIENT_ID on the server, or paste a client_id ' +
-      'into chika/skills/spotify_skill/oauth.py.'
+      'Set CHIKA_SPOTIFY_CLIENT_ID on the server (the easiest way), ' +
+      'or follow the connection instructions printed by ' +
+      '`chika spotify connect`.'
     spotifyConnectBtn.disabled    = true
     spotifyDisconnectBtn.hidden   = true
     spotifyReconnectBtn.hidden    = true
@@ -443,4 +548,7 @@ window.addEventListener('beforeunload', () => {
   if (_spotifyPollTimer) clearInterval(_spotifyPollTimer)
 })
 
-loadSettings().then(startSpotifyPolling)
+loadSettings().then(() => {
+  startSpotifyPolling()
+  loadSkills()
+})

@@ -14,6 +14,9 @@ from typing import Any
 
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
+
+# Canonical name used by the engine's skill registry.
+SKILL_NAME = "browser"
 from chika.skills.browser_skill.extension_manager import (
     MAX_DEBOUNCE_MS,
     MAX_WATCH_COUNT,
@@ -810,3 +813,99 @@ BROWSER_SKILL = Skill(
         ),
     },
 )
+
+
+def build_skill(_context):
+    """Auto-discovery entry point. The browser skill is stateless —
+    extension state lives in ``extension_manager`` (process-global),
+    so we return the module-level ``BROWSER_SKILL`` unchanged."""
+    return BROWSER_SKILL
+
+
+def register_routes():
+    """Mount ``/api/extension/status``. The skill owns its REST
+    surface — drop the skill, drop the route."""
+    from chika.skills.browser_skill.routes import router
+    return router
+
+
+def register_websocket(app):
+    """Attach the ``/ws/extension/`` endpoint to the FastAPI app.
+
+    The full WS protocol — connect, hello handshake, watch triggers,
+    request/response correlation — lives in the skill's
+    ``websocket`` submodule so the rest of the codebase doesn't see
+    any of it. Server.py just calls this hook and the skill takes
+    over."""
+    from chika.skills.browser_skill.websocket import register
+    register(app)
+
+
+# ── Public helpers for cross-surface coordination ─────────────────────
+#
+# The frontend's WebSocket handler (in api/server.py — a "core"
+# endpoint, not skill-owned) needs to push session-linkage info to the
+# extension when a frontend tab connects. Exposing this as a top-level
+# function on the skill keeps consumers from reaching into our private
+# ``extension_manager`` submodule. The skill-isolation test allows
+# top-level package imports (``chika.skills.browser_skill``) precisely
+# for cross-surface helpers like this.
+
+
+INTENT_CASES: dict = {
+    "plan": {
+        "positive": [
+            "build me a tool that scrapes the top 10 hacker news comments daily and emails me",
+            "automate filling our weekly status form across these 5 tabs",
+            "create a watch that pings me when this product page goes back in stock",
+        ],
+        "negative": [
+            "click the login button on the active tab",
+            "screenshot this page",
+            "fill the email field with my address",
+            "what tabs do I have open",
+        ],
+    },
+    "ask": {
+        "positive": [
+            "do something with this tab",
+            "fill out the form",
+            "click on it",
+        ],
+        "negative": [
+            "click the submit button",
+            "fill #email with hello@example.com",
+            "screenshot the active tab",
+            "navigate to https://example.com",
+        ],
+    },
+}
+
+
+async def on_session_linked(eng, session_id: str) -> None:
+    """Discovery hook fired by ``chika.skills.fire_session_linked``
+    when the frontend WS handler establishes a session. We push the
+    current session identity + recent history to a connected
+    extension so it reflects which chat the user is on across tabs.
+    No-op when no extension is connected; failures are swallowed
+    (the caller runs this on the WS hot path)."""
+    try:
+        from chika.skills.browser_skill.extension_manager import extension_manager
+        extension_manager.linked_session_id = session_id
+        p = eng._active_profile
+        msgs = [
+            {"role": m["role"], "text": m.get("content") or ""}
+            for m in eng._history
+            if m.get("role") in ("user", "assistant")
+            and isinstance(m.get("content"), str)
+            and m["content"].strip()
+        ][-40:]
+        await extension_manager.send_raw({
+            "type":       "linked_session",
+            "session_id": session_id,
+            "title":      eng._title,
+            "profile":    p.name if p else "default",
+            "messages":   msgs,
+        })
+    except Exception:
+        pass

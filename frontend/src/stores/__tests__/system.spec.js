@@ -58,4 +58,35 @@ describe('system store', () => {
     })
     expect(s.autonomy).toBe('autonomous')
   })
+
+  it('plan_archived event populates lastPlanArchive notice', () => {
+    const s = useSystemStore()
+    s.pushEvent({
+      type: 'plan_archived',
+      goal: 'Build a Powder Toy clone',
+      reason: 'superseded by plan_set (2/4 tasks done)',
+      tasks_total: 4,
+      tasks_done: 2,
+      auto: true,
+      source: 'plan_set',
+      history_count: 1,
+    })
+    expect(s.lastPlanArchive).toBeTruthy()
+    expect(s.lastPlanArchive.goal).toBe('Build a Powder Toy clone')
+    expect(s.lastPlanArchive.tasks_done).toBe(2)
+    expect(s.lastPlanArchive.tasks_total).toBe(4)
+    expect(s.lastPlanArchive.auto).toBe(true)
+  })
+
+  it('dismissPlanArchive clears the notice', () => {
+    const s = useSystemStore()
+    s.pushEvent({
+      type: 'plan_archived',
+      goal: 'g', reason: 'shipped',
+      tasks_total: 1, tasks_done: 1, auto: false,
+    })
+    expect(s.lastPlanArchive).toBeTruthy()
+    s.dismissPlanArchive()
+    expect(s.lastPlanArchive).toBeNull()
+  })
 })

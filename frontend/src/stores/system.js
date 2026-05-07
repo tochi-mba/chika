@@ -85,6 +85,20 @@ export const useSystemStore = defineStore('system', () => {
   // is actually consulting skill docs or working from prompt-only memory.
   const skillLoads = ref([])
 
+  // Most recent plan_archived event — PlanPanel renders a transient chip so
+  // the user knows their previous plan got saved (auto-archive on plan_set
+  // replacement). Cleared by dismissPlanArchive() or auto-fades after 12s.
+  // Shape: { goal, reason, tasks_total, tasks_done, archived_at, auto, source }
+  const lastPlanArchive = ref(null)
+  let _planArchiveTimer = null
+  function dismissPlanArchive() {
+    lastPlanArchive.value = null
+    if (_planArchiveTimer) {
+      clearTimeout(_planArchiveTimer)
+      _planArchiveTimer = null
+    }
+  }
+
   // Autonomy mode: "supervised" | "autonomous"
   const autonomy = ref('supervised')
   // Per-category permission overrides: category_id → "ask" | "skip"
@@ -289,6 +303,24 @@ export const useSystemStore = defineStore('system', () => {
         }
         break
 
+      case 'plan_archived':
+        // Engine emitted plan_archived (auto-archive on plan_set replace, or
+        // explicit plan_archive). Surface a flash chip in PlanPanel.
+        lastPlanArchive.value = {
+          goal:         event.goal || '',
+          reason:       event.reason || 'archived',
+          tasks_total:  event.tasks_total || 0,
+          tasks_done:   event.tasks_done || 0,
+          archived_at:  event.archived_at || new Date().toISOString(),
+          auto:         !!event.auto,
+          source:       event.source || '',
+          superseded_by: event.superseded_by || '',
+          history_count: event.history_count || 0,
+        }
+        if (_planArchiveTimer) clearTimeout(_planArchiveTimer)
+        _planArchiveTimer = setTimeout(() => { lastPlanArchive.value = null }, 12000)
+        break
+
       case 'shell_process_done':
         if (shellProcesses.value[event.pid]) {
           shellProcesses.value[event.pid] = {
@@ -348,6 +380,7 @@ export const useSystemStore = defineStore('system', () => {
     extensionConnected,
     pendingApprovals, pendingQuestions,
     autonomy, toolPermissions, permissionCategories,
+    lastPlanArchive, dismissPlanArchive,
     setConnected, setConnectionError, setExtensionConnected, setAutonomy, setSettings,
     pushEvent, setMemorySnapshot, setVariablesSnapshot, clearSession,
     resolveApproval, resolveQuestion,

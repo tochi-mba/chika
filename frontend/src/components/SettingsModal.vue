@@ -205,13 +205,60 @@
         </div>
       </section>
 
-      <!-- ── Integrations tab ──────────────────────────────────────── -->
-      <section v-else-if="tab === 'integrations'" class="panel integrations-panel">
+      <!-- ── Skills tab ──────────────────────────────────────────────── -->
+      <section v-else-if="tab === 'skills'" class="panel skills-panel">
         <p class="hint">
-          Connect Chika to outside services. Each connection can be
-          per-profile (private) or shared across every profile.
+          Toggle skills on or off. Disabled skills aren't loaded into the
+          agent's prompt and their tools are hidden — re-enable any time;
+          changes apply on your next message, no restart required.
         </p>
-        <SpotifyConnectCard
+
+        <div v-if="skillsLoading" class="skills-loading">Loading skills…</div>
+
+        <div v-else class="skills-list">
+          <div v-for="s in skills" :key="s.name"
+               class="skill-row"
+               :class="{ disabled: s.disabled }">
+            <div class="skill-meta">
+              <div class="skill-head">
+                <span class="skill-name">{{ s.name }}</span>
+                <span class="skill-tool-count">{{ (s.tools || []).length }} tool{{ (s.tools || []).length === 1 ? '' : 's' }}</span>
+                <span v-if="s.disabled" class="skill-chip">off</span>
+              </div>
+              <div class="skill-desc" v-if="s.description">{{ s.description }}</div>
+              <div class="skill-tools" v-if="s.tools && s.tools.length">
+                <code v-for="t in s.tools.slice(0, 6)" :key="t.name || t">{{ t.name || t }}</code>
+                <span v-if="s.tools.length > 6" class="muted small">+{{ s.tools.length - 6 }} more</span>
+              </div>
+            </div>
+            <button class="skill-toggle"
+                    :class="{ on: !s.disabled }"
+                    @click="toggleSkill(s.name)"
+                    :aria-pressed="!s.disabled"
+                    :aria-label="`Toggle ${s.name} skill`">
+              <span class="skill-toggle-knob"/>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="skillsNotice" class="notice" :class="skillsNotice.kind">
+          {{ skillsNotice.text }}
+        </div>
+      </section>
+
+      <!-- ── Skill-owned dynamic tabs ──────────────────────────────────
+           Every skill that ships a SKILL_UI manifest contributes its
+           own tab here. The manifest is fetched from /api/skills/ui;
+           the Vue component is statically discoverable via
+           import.meta.glob over chika/skills/*/ui/*.vue at build time
+           so there's no runtime evaluation. Drop a skill folder with
+           a ui/ directory + SKILL_UI manifest, and a settings tab
+           appears here on the next reload — no edits required.       -->
+      <section v-for="dyn in skillTabs" :key="dyn.skill"
+               v-show="tab === `skill:${dyn.skill}`"
+               class="panel skill-dynamic-panel">
+        <component
+          :is="resolveSkillComponent(dyn.skill)"
           :api-key="apiKey"
           @patch-settings="(p) => emit('patch-settings', p)"
         />
@@ -221,9 +268,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, shallowRef } from 'vue'
 import { useSystemStore } from '../stores/system'
-import SpotifyConnectCard from './SpotifyConnectCard.vue'
 
 const props = defineProps({
   open:        { type: Boolean, default: false },
@@ -234,14 +280,56 @@ const emit = defineEmits(['close', 'patch-settings'])
 
 const system = useSystemStore()
 
-const tabs = [
+// Static tabs (core platform — not skill-owned). Skill-contributed
+// tabs are appended dynamically below from /api/skills/ui.
+const staticTabs = [
   { id: 'provider',    label: 'Provider' },
   { id: 'env',         label: 'Environment' },
   { id: 'permissions', label: 'Permissions' },
   { id: 'behaviour',   label: 'Behaviour' },
-  { id: 'pet',         label: 'Pet' },
-  { id: 'integrations', label: 'Integrations' },
+  { id: 'skills',      label: 'Skills' },
 ]
+
+// Dynamically-contributed tabs from the skill UI manifest. Each entry
+// drives the {id: "skill:<name>", label} pair shown in the tab bar
+// AND the <component :is> render in the panel section.
+const skillTabs = ref([])  // [{ skill, label, order, frontend, extension }]
+
+// Eager static-bundled map of every Vue component shipped under
+// chika/skills/*_skill/ui/*.vue. Vite resolves the glob at build time
+// — at runtime this is just a {path: module} dict.
+const _skillComponents = import.meta.glob(
+  '../../../chika/skills/*_skill/ui/*.vue',
+  { eager: true },
+)
+
+function resolveSkillComponent(skillName) {
+  // Match the bundled component for this skill. The path shape is:
+  //   ../../../chika/skills/<name>_skill/ui/<File>.vue
+  // We pick whichever .vue lives under the right folder — most skills
+  // ship a single SettingsCard.vue but we don't hardcode the filename.
+  const prefix = `../../../chika/skills/${skillName}_skill/ui/`
+  for (const [path, mod] of Object.entries(_skillComponents)) {
+    if (path.startsWith(prefix)) {
+      return mod.default || mod
+    }
+  }
+  return null
+}
+
+const tabs = computed(() => [
+  ...staticTabs,
+  ...skillTabs.value.map(s => ({ id: `skill:${s.skill}`, label: s.label })),
+])
+
+async function loadSkillTabs() {
+  try {
+    const res = await fetch(buildApiUrl('/api/skills/ui'), { headers: authHeaders() })
+    if (!res.ok) return
+    const data = await res.json()
+    skillTabs.value = data.tabs || []
+  } catch {/* silent — the rest of settings still works without skill tabs */}
+}
 const tab = ref(props.initialTab || 'provider')
 watch(() => props.initialTab, (v) => { if (v) tab.value = v })
 
@@ -312,11 +400,24 @@ async function saveProvider() {
       }),
     })
     if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`)
+    const data = await res.json().catch(() => ({}))
     serverProvider.value = draftProvider.value
     serverModel.value    = draftModel.value
-    provNotice.value = {
-      kind: 'success',
-      text: 'Saved to .env. Restart the server for the change to apply.',
+    // Hot-reload made restart unnecessary. The backend still returns a
+    // ``hot_reload`` summary so we can surface per-session errors
+    // (e.g., missing API key for the new provider) instead of silently
+    // pretending the swap worked.
+    const errs = (data?.hot_reload?.errors) || []
+    if (errs.length) {
+      provNotice.value = {
+        kind: 'error',
+        text: `Saved to .env, but the live swap had errors: ${errs.join('; ')}`,
+      }
+    } else {
+      provNotice.value = {
+        kind: 'success',
+        text: '✓ Switched live — your next message uses the new provider.',
+      }
     }
   } catch (err) {
     provNotice.value = { kind: 'error', text: `Save failed: ${err.message}` }
@@ -521,6 +622,69 @@ watch(() => props.open, (v) => {
 })
 watch(tab, (t) => { if (t === 'pet') loadPets() })
 
+// ── Skills tab ───────────────────────────────────────────────────────────
+
+const skills = ref([])               // [{ name, description, tools, disabled }]
+const skillsDisabled = ref([])       // mirrors settings.skills_disabled
+const skillsLoading = ref(false)
+const skillsNotice = ref(null)
+
+async function loadSkills() {
+  skillsLoading.value = true
+  skillsNotice.value = null
+  try {
+    const res = await fetch(buildApiUrl('/api/skills'), { headers: authHeaders() })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    skills.value = data.skills || []
+    skillsDisabled.value = data.disabled || []
+  } catch (err) {
+    skillsNotice.value = { kind: 'error', text: `Failed to load skills: ${err.message}` }
+  } finally {
+    skillsLoading.value = false
+  }
+}
+
+async function toggleSkill(name) {
+  const cur = new Set(skillsDisabled.value)
+  if (cur.has(name)) cur.delete(name)
+  else cur.add(name)
+  const next = Array.from(cur)
+
+  // Optimistic update — flip the row immediately, revert on failure.
+  const prevSkills = skills.value
+  const prevDisabled = skillsDisabled.value
+  skillsDisabled.value = next
+  skills.value = skills.value.map(s =>
+    s.name === name ? { ...s, disabled: cur.has(name) } : s
+  )
+
+  try {
+    const res = await fetch(buildApiUrl('/api/settings'), {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ skills_disabled: next }),
+    })
+    if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`)
+    skillsNotice.value = {
+      kind: 'success',
+      text: cur.has(name)
+        ? `${name} disabled — hidden from the next turn.`
+        : `${name} re-enabled.`,
+    }
+    // Re-fetch to pick up the post-reload tool counts (a re-enabled
+    // skill's tools weren't on the engine until reload_skills() ran).
+    loadSkills()
+  } catch (err) {
+    // Revert
+    skills.value = prevSkills
+    skillsDisabled.value = prevDisabled
+    skillsNotice.value = { kind: 'error', text: `Toggle failed: ${err.message}` }
+  }
+}
+
+watch(tab, (t) => { if (t === 'skills') loadSkills() })
+
 // ── Permissions tab ──────────────────────────────────────────────────────
 
 function effectivePerm(cat) {
@@ -537,6 +701,7 @@ watch(() => props.open, (v) => {
   if (v) {
     loadProvider()
     loadEnv()
+    loadSkillTabs()
   }
 }, { immediate: true })
 </script>
@@ -899,4 +1064,113 @@ watch(() => props.open, (v) => {
 .perm-toggle button + button { border-left: 1px solid var(--border); }
 .perm-toggle button:hover { color: var(--text-2); background: var(--surface-2); }
 .perm-toggle button.active { color: var(--accent); background: var(--accent-dim); }
+
+/* Skills tab */
+.skills-loading {
+  font-size: 12px;
+  color: var(--text-3);
+  padding: 8px 0;
+}
+.skills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skill-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  transition: opacity 160ms var(--ease), border-color 160ms var(--ease);
+}
+.skill-row:hover { border-color: var(--border-strong, rgba(255, 255, 255, 0.10)); }
+.skill-row.disabled { opacity: 0.55; }
+.skill-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skill-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.skill-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.01em;
+}
+.skill-tool-count {
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.skill-chip {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-3);
+  border: 1px solid var(--border);
+}
+.skill-desc {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+.skill-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.skill-tools code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.skill-toggle {
+  flex-shrink: 0;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  transition: background 160ms var(--ease), border-color 160ms var(--ease);
+}
+.skill-toggle:hover { border-color: var(--border-strong, rgba(255, 255, 255, 0.10)); }
+.skill-toggle.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.skill-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-2);
+  transition: transform 160ms var(--ease), background 160ms var(--ease);
+}
+.skill-toggle.on .skill-toggle-knob {
+  transform: translateX(14px);
+  background: white;
+}
 </style>

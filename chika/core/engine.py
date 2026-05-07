@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from chika.core.chat_store import ChatStore
 
 from chika.core.compactor import Compactor
+from chika.core.intent import detect_planning_intent
 from chika.core.logger import LOG_PATH
 from chika.core.logger import log as _log
 from chika.core.memory_manager import MemoryManager
@@ -411,6 +412,12 @@ class ChikaEngine:
         else:
             self._client = config.make_client()
             self._stub_runner = None
+        # Track the provider/model the active client was built for, so
+        # ``reload_client`` can detect whether a rebuild is actually
+        # needed (model-only changes don't always need a new SDK
+        # object — but rebuilding is cheap, so we do it unconditionally).
+        self._client_provider: str = config.PROVIDER
+        self._client_model: str = config.get_provider_config().model if not self._stub_runner else ""
 
         llm_caller = LLMCaller(self)
         self._workflow_engine = WorkflowEngine(tool_registry, variable_store, llm_caller)
@@ -853,7 +860,8 @@ class ChikaEngine:
                         f"write_count: {payload.get('write_count', 0)}\n\n"
                         "Generate a NEW workflow now whose first step is "
                         "`plan_set` with goal + requirements + tasks "
-                        "(use plan_skill SKILL.md for the template). "
+                        "(consult the planning skill's SKILL.md for the "
+                        "template via skill_load). "
                         "Then re-emit the original workflow."
                     )
                 else:
@@ -1195,6 +1203,68 @@ class ChikaEngine:
         except Exception:
             return first_message[:50]
 
+    def reload_client(self) -> dict[str, str]:
+        """Hot-swap the LLM client to match the current ``.env``.
+
+        Called after any path that mutates the .env file (the
+        ``/provider`` slash, ``/model`` slash, ``PATCH /api/provider``,
+        ``PATCH /api/env``). Re-reads .env via
+        :func:`config.reload_from_env`, rebuilds the SDK client, and
+        atomically replaces ``self._client``.
+
+        Safety against in-flight streams:
+            The Anthropic / OpenAI streaming methods grab ``self._client``
+            into a local variable BEFORE awaiting any I/O, so a turn
+            that's mid-stream when this swap happens finishes on the
+            old client unaffected. The next turn picks up the new one.
+
+        Returns a small status dict the slash command / HTTP route
+        can surface to the user — ``{provider, model, changed}``.
+
+        Raises :class:`RuntimeError` if the new provider's API key
+        isn't set; the previous client stays active so the engine
+        keeps working on the old provider until the user fixes the
+        env. (The slash command catches and reports.)
+        """
+        if self._stub_runner is not None:
+            # Test-stub mode — no live client to rebuild.
+            return {"provider": "stub", "model": "", "changed": "false"}
+
+        prev_provider = self._client_provider
+        prev_model    = self._client_model
+
+        config.reload_from_env()
+        try:
+            new_client = config.make_client()
+        except Exception as exc:
+            _log.warn("reload_client_failed", error=str(exc))
+            raise RuntimeError(
+                f"Couldn't switch to {config.PROVIDER}: {exc}. "
+                "Check your .env for the right API key, then try again."
+            ) from exc
+
+        self._client = new_client
+        self._client_provider = config.PROVIDER
+        self._client_model    = config.get_provider_config().model
+
+        changed = (
+            prev_provider != self._client_provider
+            or prev_model  != self._client_model
+        )
+        _log.info(
+            "llm_client_reloaded",
+            prev_provider=prev_provider,
+            prev_model=prev_model,
+            new_provider=self._client_provider,
+            new_model=self._client_model,
+            changed=changed,
+        )
+        return {
+            "provider": self._client_provider,
+            "model":    self._client_model,
+            "changed":  "true" if changed else "false",
+        }
+
     def switch_profile(self, profile: Profile) -> None:
         """Swap the active profile: new memory file, update workspace variable."""
         self._memory = MemoryManager(
@@ -1272,6 +1342,25 @@ class ChikaEngine:
             lines.append(rendered)
             lines.append("")
         return "\n".join(lines) or "{}"
+
+    def _latest_user_text(self) -> str:
+        """Return the text of the most recent user message in history,
+        or empty string if there isn't one. Used by intent heuristics
+        and the per-turn system-prompt builder."""
+        for m in reversed(self._history):
+            if m.get("role") == "user":
+                content = m.get("content")
+                if isinstance(content, str):
+                    return content
+                # Multi-part content (image+text) — flatten the text parts
+                if isinstance(content, list):
+                    return " ".join(
+                        (p.get("text") or "")
+                        for p in content
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    )
+                return ""
+        return ""
 
     def _recent_tool_names(self) -> set[str]:
         """Extract tool names used in recent history for conditional prompting."""
@@ -1352,6 +1441,19 @@ class ChikaEngine:
         )
         if self._provider == "ollama":
             system_prompt += _OLLAMA_TOOL_INSTRUCTIONS
+
+        # Per-turn intent nudge: if the most recent user message looks
+        # like a build/create task, append a short hint suggesting the
+        # plan tool. Only fires when the heuristic matches; questions
+        # and one-shot fixes get no hint. Hint is purely additive — it
+        # doesn't override the agent's own judgment, and the user can
+        # also tell the agent to skip planning explicitly.
+        last_user = self._latest_user_text()
+        if last_user:
+            hint = detect_planning_intent(last_user)
+            if hint:
+                system_prompt += hint
+
         return [{"role": "system", "content": system_prompt}] + self._history
 
     async def _stream_llm(self, messages: list[dict]) -> AsyncGenerator[Event, None]:

@@ -1,6 +1,25 @@
 <template>
-  <div v-if="plan && plan.tasks?.length" class="plan-panel" :class="{ collapsed }">
-    <header class="plan-head">
+  <div v-if="(plan && plan.tasks?.length) || archiveNotice" class="plan-panel" :class="{ collapsed: collapsed && plan?.tasks?.length }">
+    <!-- Auto-archive flash chip — appears when plan_set replaced an
+         in-flight plan (or plan_archive fired explicitly). Auto-fades
+         after 12s; user can dismiss with the × button. -->
+    <div v-if="archiveNotice" class="plan-archive-notice">
+      <span class="plan-archive-icon" aria-hidden="true">⏷</span>
+      <div class="plan-archive-text">
+        <strong>Previous plan archived</strong>
+        <span class="plan-archive-detail">
+          <template v-if="archiveNotice.tasks_total">
+            {{ archiveNotice.tasks_done }}/{{ archiveNotice.tasks_total }} done — {{ archiveNotice.reason }}
+          </template>
+          <template v-else>{{ archiveNotice.reason }}</template>
+        </span>
+      </div>
+      <button class="plan-archive-close"
+              @click="system.dismissPlanArchive()"
+              aria-label="Dismiss archive notice">×</button>
+    </div>
+
+    <header v-if="plan && plan.tasks?.length" class="plan-head">
       <button class="plan-toggle" @click="collapsed = !collapsed"
               :aria-label="collapsed ? 'Expand plan' : 'Collapse plan'">
         <div class="plan-icon" aria-hidden="true">P</div>
@@ -71,11 +90,15 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import PlanTaskList from './PlanTaskList.vue'
+import { useSystemStore } from '../stores/system'
 
 const props = defineProps({
   plan: { type: Object, default: null },
 })
 const emit = defineEmits(['accept', 'reject', 'edit-feedback', 'toggle-task'])
+
+const system = useSystemStore()
+const archiveNotice = computed(() => system.lastPlanArchive)
 
 const collapsed = ref(false)
 const editing = ref(false)
@@ -348,5 +371,70 @@ function submitEdit() {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
+}
+
+/* Auto-archive flash chip — surfaces when a plan got auto-saved
+   (plan_set replacing an old plan, or explicit plan_archive). */
+.plan-archive-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-dim);
+  font-size: 12px;
+  animation: plan-archive-slide-in 280ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+@keyframes plan-archive-slide-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.plan-archive-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.plan-archive-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.plan-archive-text strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.005em;
+}
+.plan-archive-detail {
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-archive-close {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm, 5px);
+  transition: color 120ms, background 120ms;
+}
+.plan-archive-close:hover {
+  color: var(--text-1);
+  background: var(--surface-2);
 }
 </style>

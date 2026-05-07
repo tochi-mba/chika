@@ -13,6 +13,9 @@ from __future__ import annotations
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
 
+# Canonical name used by the engine's skill registry.
+SKILL_NAME = "verify"
+
 
 async def web_fetch(url: str, max_chars: int = 20000, timeout: float = 15.0, **_ignored) -> dict:
     """
@@ -227,3 +230,34 @@ def build_verify_skill(variable_store) -> Skill:
         ],
         workflow_examples="",
     )
+
+
+def build_skill(context):
+    """Auto-discovery entry point. Wires fact_check to the session's
+    variable store via the build context."""
+    return build_verify_skill(context.variable_store)
+
+
+INTENT_CASES: dict = {
+    "plan": {
+        "positive": [
+            "build me a link-checker that verifies every URL in our docs daily",
+        ],
+        "negative": [
+            "check if this URL is reachable",
+            "fact-check this claim against what we've seen this turn",
+            "fetch this page and summarise it",
+        ],
+    },
+    "ask": {
+        "positive": [
+            "check if it's working",
+            "verify the link",
+        ],
+        "negative": [
+            "verify https://example.com is reachable",
+            "fact-check the claim that openai released gpt-5",
+            "fetch https://news.ycombinator.com",
+        ],
+    },
+}

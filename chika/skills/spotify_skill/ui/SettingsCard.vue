@@ -37,20 +37,69 @@
         <span v-else>This connection is for the <strong>{{ state.profile }}</strong> profile only.</span>
       </p>
       <p v-else-if="!state.client_id_set" class="hint">
-        Set <code>CHIKA_SPOTIFY_CLIENT_ID</code> in your environment, or
-        paste the Chika app's client_id into
-        <code>chika/skills/spotify_skill/oauth.py::_DEFAULT_CLIENT_ID</code>.
+        Chika needs a free Spotify "client ID" to connect — it takes about
+        90 seconds.
       </p>
+      <ol v-if="!state.client_id_set && showClientIdGuide" class="client-id-steps">
+        <li>
+          Open the
+          <a href="https://developer.spotify.com/dashboard"
+             target="_blank" rel="noopener noreferrer">Spotify Developer Dashboard</a>
+          and sign in.
+        </li>
+        <li>Click <strong>Create app</strong>. Any name + description works.</li>
+        <li>
+          For <strong>Redirect URIs</strong>, paste BOTH of these and click Add:
+          <pre class="code">{{ redirectUris.join('\n') }}</pre>
+        </li>
+        <li>
+          Tick <strong>Web API</strong>, accept terms, click <strong>Save</strong>.
+        </li>
+        <li>
+          On the new app's page, click <strong>Settings</strong> → copy the
+          <strong>Client ID</strong> (a long hex string).
+        </li>
+        <li>Paste it below and Chika takes care of the rest.</li>
+      </ol>
       <p v-else class="hint">
         Connect Spotify so Chika can play music, queue tracks, search your
         library, and control playback.
       </p>
 
+      <!-- Inline CLIENT_ID paste field — shown until one is configured.
+           No file editing, no env-var hunting, no restart. -->
+      <div v-if="!state.client_id_set" class="client-id-form">
+        <label for="spotify-client-id" class="client-id-label">
+          Client ID
+          <button
+            class="client-id-toggle"
+            type="button"
+            @click="showClientIdGuide = !showClientIdGuide"
+          >{{ showClientIdGuide ? 'hide setup steps' : 'show setup steps' }}</button>
+        </label>
+        <div class="client-id-row">
+          <input
+            id="spotify-client-id"
+            v-model="clientIdDraft"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="32-character hex string from Spotify Dashboard"
+            @keydown.enter.prevent="saveClientId"
+          />
+          <button
+            class="btn-primary"
+            :disabled="savingClientId || !clientIdDraft.trim()"
+            @click="saveClientId"
+          >{{ savingClientId ? 'Saving…' : 'Save & connect' }}</button>
+        </div>
+      </div>
+
       <div class="actions">
         <button
-          v-if="!state.authorized"
+          v-if="!state.authorized && state.client_id_set"
           class="btn-primary"
-          :disabled="!state.client_id_set || connecting"
+          :disabled="connecting"
           @click="connect"
         >
           <span v-if="connecting">Opening Spotify…</span>
@@ -165,6 +214,17 @@ const lastOpened = ref(true)
 const copied     = ref(false)
 const error      = ref('')
 
+// Client-ID setup state
+const clientIdDraft     = ref('')
+const savingClientId    = ref(false)
+const showClientIdGuide = ref(true)
+// The two redirect URIs the user must paste into their Spotify app.
+// Listed verbatim so they can copy-paste both with one selection.
+const redirectUris = [
+  'http://127.0.0.1:8000/auth/spotify/callback',
+  'http://localhost:8000/auth/spotify/callback',
+]
+
 function authHeaders() {
   const h = { 'Content-Type': 'application/json' }
   const k = props.apiKey || localStorage.getItem('chika_api_key') || ''
@@ -204,6 +264,55 @@ async function connect() {
     error.value = String(e?.message || e)
   } finally {
     connecting.value = false
+  }
+}
+
+
+async function saveClientId() {
+  // Quick sanity check — Spotify client IDs are 32-char hex strings.
+  // We don't reject other shapes (Spotify could change the format),
+  // but we trim whitespace and warn on obviously-wrong inputs.
+  const raw = clientIdDraft.value.trim()
+  if (!raw) return
+  if (raw.length < 8) {
+    error.value = "That doesn't look like a Client ID — it should be ~32 chars."
+    return
+  }
+  savingClientId.value = true
+  error.value = ''
+  try {
+    // Write to .env via the existing PATCH endpoint. Hot-reload kicks
+    // in automatically — the server's env router calls reload_clients()
+    // for any CHIKA_SPOTIFY_CLIENT_ID / API_KEY change... actually wait,
+    // CHIKA_SPOTIFY_CLIENT_ID isn't in the hot-reloadable env-key set.
+    // It IS picked up by the spotify_oauth module on every call though,
+    // so we don't need to reload the LLM client; we just need to
+    // re-fetch /api/spotify/status which reads CLIENT_ID from env at
+    // call time.
+    const res = await fetch('/api/env', {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        set: { CHIKA_SPOTIFY_CLIENT_ID: raw },
+      }),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || `HTTP ${res.status}`)
+    }
+    clientIdDraft.value = ''
+    // Pull fresh status — the inline form should disappear and the
+    // Connect Spotify button should light up.
+    await fetchStatus()
+    // If status now reports client_id_set:true, immediately kick off
+    // the Connect flow so the user gets the full one-click experience.
+    if (state.client_id_set) {
+      await connect()
+    }
+  } catch (e) {
+    error.value = `Couldn't save Client ID: ${e?.message || e}`
+  } finally {
+    savingClientId.value = false
   }
 }
 
@@ -355,6 +464,65 @@ onUnmounted(() => {
 }
 
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Client-ID setup steps (collapsible numbered list) */
+.client-id-steps {
+  margin: 0; padding-left: 22px;
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: 12.5px; color: var(--text-2); line-height: 1.55;
+}
+.client-id-steps li::marker { color: var(--text-3); }
+.client-id-steps a {
+  color: var(--accent); text-decoration: none; font-weight: 500;
+}
+.client-id-steps a:hover { text-decoration: underline; }
+.client-id-steps strong {
+  color: var(--text-1); font-weight: 600;
+}
+.client-id-steps pre.code {
+  margin: 6px 0 0; padding: 8px 10px;
+  font-family: var(--font-mono); font-size: 11.5px;
+  background: var(--surface-2); color: var(--text-1);
+  border-radius: 6px; border: 1px solid var(--border);
+  white-space: pre; overflow-x: auto;
+  user-select: all;
+}
+
+/* Inline Client-ID paste field */
+.client-id-form {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px; border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.client-id-label {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px;
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+  letter-spacing: 0.04em; text-transform: uppercase;
+}
+.client-id-toggle {
+  background: none; border: none; padding: 0;
+  font: inherit; font-size: 11px; font-weight: 500;
+  color: var(--accent); text-transform: none; letter-spacing: 0;
+  cursor: pointer;
+}
+.client-id-toggle:hover { color: var(--accent-2, var(--accent)); text-decoration: underline; }
+
+.client-id-row { display: flex; gap: 8px; align-items: center; }
+.client-id-row input {
+  flex: 1; min-width: 0;
+  padding: 8px 10px;
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--font-mono); font-size: 12.5px;
+  color: var(--text-1); outline: none;
+  transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.client-id-row input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
 
 .btn-primary {
   display: inline-flex; align-items: center; gap: 6px;

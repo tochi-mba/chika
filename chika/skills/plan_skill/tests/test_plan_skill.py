@@ -101,4 +101,5 @@ def test_plan_skill_wires_all_tools():
     tool_names = {t.name for t in skill.tools}
     assert tool_names == {"plan_set", "plan_update", "plan_get",
                           "plan_add", "plan_remove", "plan_edit",
-                          "plan_reconcile", "plan_archive", "plan_history"}
+                          "plan_reconcile", "plan_archive", "plan_history",
+                          "plan_clear"}

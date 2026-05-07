@@ -24,6 +24,9 @@ from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
 from chika.skills.spotify_skill import oauth as _oauth
 
+# Canonical name used by the engine's skill registry.
+SKILL_NAME = "spotify"
+
 # ── Env ───────────────────────────────────────────────────────────────────────
 CLIENT_ID     = os.getenv("CHIKA_SPOTIFY_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("CHIKA_SPOTIFY_CLIENT_SECRET", "")
@@ -504,3 +507,126 @@ SPOTIFY_SKILL = Skill(
         "spotify_note": "Spotify URIs look like spotify:track:4iV5W9uYEdYUVa79Axb7Rh. Use spotify_search first to resolve names to IDs/URIs.",
     },
 )
+
+
+def build_skill(_context):
+    """Auto-discovery entry point. The spotify skill is stateless —
+    it returns the module-level ``SPOTIFY_SKILL`` constant unchanged."""
+    return SPOTIFY_SKILL
+
+
+def register_routes():
+    """Mount the spotify-specific REST + OAuth-callback routes. The
+    server's skill walker calls this at boot; the routes file lives
+    inside the skill folder so the entire HTTP surface stays
+    self-contained."""
+    from chika.skills.spotify_skill.routes import router
+    return router
+
+
+def register_cli():
+    """Expose ``/spotify`` slash + ``chika spotify`` argv subcommands
+    via the CLI dispatcher's skill walk. Implementation lives in the
+    sibling ``cli`` module."""
+    from chika.skills.spotify_skill.cli import argv_factory, slash_handler
+    return {
+        "slash": {"spotify": slash_handler},
+        "argv":  {"spotify": argv_factory},
+    }
+
+
+# Settings keys this skill owns. Settings_store seeds defaults,
+# accepts these keys without lookup, and validates via the optional
+# ``validate`` callable — no parallel validators in the core store.
+SKILL_SETTINGS: dict = {
+    "spotify_share_across_profiles": {
+        "default":  "off",
+        "validate": lambda v: v in ("on", "off"),
+    },
+    "spotify_profile_overrides": {
+        "default":  {},
+        "validate": lambda v: isinstance(v, dict) and all(
+            isinstance(k, str) and isinstance(val, bool)
+            for k, val in v.items()
+        ),
+    },
+}
+
+
+def on_setting_changed(key: str, new_value, _old_value) -> None:
+    """Settings-store fires this for every change. We invalidate
+    the skill's token cache when the share flag flips so the next
+    read picks up the right bucket without a process restart."""
+    if key in ("spotify_share_across_profiles", "spotify_profile_overrides"):
+        try:
+            from chika.skills.spotify_skill import oauth as _oauth_mod
+            _oauth_mod._cache.clear()
+        except Exception:
+            pass
+
+
+def on_env_changed(name: str, new_value, _old_value) -> None:
+    """Env-router fires this for every patched env var. We reload
+    the OAuth client config when CHIKA_SPOTIFY_CLIENT_ID changes so
+    a fresh CLIENT_ID flows through without restarting the server."""
+    if name in ("CHIKA_SPOTIFY_CLIENT_ID",):
+        try:
+            from chika.skills.spotify_skill import oauth as _oauth_mod
+            _oauth_mod.reload_from_env()
+        except Exception:
+            pass
+
+
+# Planning-intent test fixtures contributed back to the central
+# heuristic test (``tests/test_intent_heuristic.py``). The central
+# test walks every shipped skill via ``iter_skill_intent_cases`` so
+# the strings stay isolated to this folder.
+INTENT_CASES: dict = {
+    # ── Plan dimension: when to call ``plan_set`` first ────────────
+    "plan": {
+        "positive": [
+            "build me a playlist generator that mixes my top tracks with new releases",
+            "create a daily mix from sza + frank ocean + lauv with smooth transitions",
+            "make me a tool that pulls my saved albums and groups them by mood",
+        ],
+        "negative": [
+            "are there any tests for the spotify_skill",
+            "what's playing right now",
+            "skip to the next track",
+            "show me my recently played",
+        ],
+    },
+    # ── Ask dimension: when to ``ask_user`` for clarification ──────
+    "ask": {
+        "positive": [
+            "play something good",
+            "queue up something I'd like",
+            "make me a playlist",
+        ],
+        "negative": [
+            "play SZA Snooze",
+            "skip to the next track",
+            "shuffle my Liked Songs",
+            "queue Frank Ocean Pink + White next",
+        ],
+    },
+}
+
+
+# UI manifest — settings tab the frontend renders dynamically.
+SKILL_UI: dict = {
+    "settings_tab": {
+        "label": "Spotify",
+        "order": 50,
+        "frontend": {
+            # Path relative to this skill folder. The /api/skills/<name>/asset
+            # endpoint reads it; SettingsModal's import.meta.glob picks it up
+            # at build time.
+            "component": "ui/SettingsCard.vue",
+        },
+        "extension": {
+            "html": "ui/section.html",
+            "js":   "ui/section.js",
+        },
+    },
+}

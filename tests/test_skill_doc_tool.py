@@ -12,26 +12,41 @@ from chika.tools import skill_doc_tool as sdt
 # ── _resolve_skill_dir ────────────────────────────────────────────────
 
 
+def _a_real_skill() -> str:
+    """Pick the first shipped skill via the public discovery API.
+    Used as a stable test fixture so the test exercises the resolver
+    against a real folder without hardcoding any specific skill
+    name (skill-isolation contract: no skill names in tests outside
+    the skill's own folder)."""
+    from chika.skills import list_known_skill_names
+    names = list_known_skill_names()
+    assert names, "no skills shipped — discovery is broken"
+    return names[0]
+
+
 def test_resolve_skill_dir_canonical_name():
-    """Plain name resolves when the skill folder ends in `_skill`."""
-    out = sdt._resolve_skill_dir("git")
+    """Plain name resolves when the skill folder ends in ``_skill``."""
+    name = _a_real_skill()
+    out = sdt._resolve_skill_dir(name)
     assert out is not None
-    assert out.name == "git_skill"
+    assert out.name == f"{name}_skill"
 
 
 def test_resolve_skill_dir_with_suffix():
     """Passing the full ``<name>_skill`` form also resolves."""
-    out = sdt._resolve_skill_dir("git_skill")
+    name = _a_real_skill()
+    out = sdt._resolve_skill_dir(f"{name}_skill")
     assert out is not None
-    assert out.name == "git_skill"
+    assert out.name == f"{name}_skill"
 
 
 def test_resolve_skill_dir_lowercase_normalises():
     """Lowercase names work; on case-sensitive filesystems (Linux CI)
     the resolver also tries lowercased candidates."""
-    out = sdt._resolve_skill_dir("git")
+    name = _a_real_skill()
+    out = sdt._resolve_skill_dir(name.lower())
     assert out is not None
-    assert out.name == "git_skill"
+    assert out.name == f"{name}_skill"
 
 
 def test_resolve_skill_dir_unknown_returns_none():
@@ -164,9 +179,10 @@ async def test_skill_load_loads_real_skill_under_budget():
     """A small SKILL.md (under the budget) returns verbatim, condensed=False."""
     engine = type("E", (), {"_history": []})()
     tool = sdt.make_skill_doc_tool(engine)
-    # Use a real bundled skill — git's SKILL.md exists.
-    out = await tool.handler(skill="git", max_chars=100_000)
-    assert out["skill"] == "git_skill"
+    # Use a real bundled skill discovered at test time.
+    name = _a_real_skill()
+    out = await tool.handler(skill=name, max_chars=100_000)
+    assert out["skill"] == f"{name}_skill"
     assert out["condensed"] is False
     assert out["char_count"] > 0
     assert isinstance(out["doc"], str)

@@ -7,7 +7,7 @@ import time
 from contextlib import redirect_stdout
 from unittest.mock import MagicMock
 
-from chika._cli import spotify as spotify_cmd
+from chika.skills.spotify_skill import cli as spotify_cmd
 from chika.skills.spotify_skill import oauth
 
 # ── Argv parsing ────────────────────────────────────────────────────────

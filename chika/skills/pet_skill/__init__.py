@@ -60,6 +60,9 @@ from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
 from chika.core.variable_store import VarType
 
+# Canonical name used by the engine's skill registry.
+SKILL_NAME = "pet"
+
 # ── Persistent pet memory (per profile, per pet) ──────────────────────
 
 
@@ -591,3 +594,51 @@ def build_pet_skill(variable_store, profile_getter,
         prompt_section=section,
         workflow_examples="",
     )
+
+
+def build_skill(context):
+    """Auto-discovery entry point. The pet skill's prompt section
+    needs the live profile state — getters resolve it once the engine
+    + active profile are wired up."""
+    return build_pet_skill(
+        context.variable_store,
+        profile_getter=context.profile_getter,
+        workspace_getter=context.workspace_getter,
+    )
+
+
+def register_routes():
+    """Mount ``/api/pets`` (catalogue) + ``/api/profile/{name}/pet``
+    (per-profile selection). Drop the pet skill, the routes go with
+    it — the frontend pet picker will show as 'no pets shipped'."""
+    from chika.skills.pet_skill.routes import router
+    return router
+
+
+INTENT_CASES: dict = {
+    "plan": {
+        "positive": [
+            "build me a custom pet with three new ASCII frames and a memory file",
+        ],
+        "negative": [
+            "pet the pet",
+            "feed the cat",
+            "what's the pet's mood",
+            "what does the pet remember about me",
+        ],
+    },
+    # Memory dimension: when to persist a fact to the pet's memory
+    # file vs treat the message as a one-off observation.
+    "memory": {
+        "positive": [
+            "remember that my pet's name is Mochi",
+            "the cat hates the dot pointer toy — write that down",
+            "my pet's birthday is march 17th",
+        ],
+        "negative": [
+            "pet the pet",
+            "what's the pet doing",
+            "feed the cat",
+        ],
+    },
+}

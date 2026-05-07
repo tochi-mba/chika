@@ -21,16 +21,22 @@ from __future__ import annotations
 from chika.core.skill_registry import Skill
 from chika.core.tool_registry import ToolDefinition
 
+# Canonical name used by the engine's skill registry.
+SKILL_NAME = "question"
 
-def _make_ask_user(workflow_engine):
+
+def _make_ask_user(workflow_engine_getter):
     """
-    Build the ask_user tool bound to the session's WorkflowEngine. At call
-    time, the tool reads `workflow_engine.question_handler` — this lets
-    server.py swap a live-UI handler in (and out) per WebSocket connection
-    without having to re-register the tool. In CLI/test mode the handler
-    is None and the tool returns a structured error instead of hanging.
+    Build the ask_user tool bound to the session's WorkflowEngine. The
+    workflow_engine is resolved THROUGH A GETTER at call time — that
+    lets the auto-discovery loop register this skill before the engine
+    exists, and lets server.py swap a live-UI handler in (and out) per
+    WebSocket connection without having to re-register the tool. In
+    CLI/test mode the handler is None and the tool returns a structured
+    error instead of hanging.
     """
     async def ask_user(question: str, options: list, header: str = "", multi_select: bool = False) -> dict:
+        workflow_engine = workflow_engine_getter() if callable(workflow_engine_getter) else workflow_engine_getter
         handler = getattr(workflow_engine, "question_handler", None)
         if handler is None:
             return {
@@ -96,13 +102,16 @@ def _make_ask_user(workflow_engine):
     return ask_user
 
 
-def build_question_skill(workflow_engine) -> Skill:
+def build_question_skill(workflow_engine_or_getter) -> Skill:
     """
-    workflow_engine: the session's WorkflowEngine. The ask_user tool will
-    look up `workflow_engine.question_handler` at call time — server.py sets
-    this attribute when the WebSocket connects.
+    workflow_engine_or_getter: the session's WorkflowEngine, or a
+    no-arg callable returning it. The ask_user tool looks up
+    ``workflow_engine.question_handler`` at call time — server.py sets
+    this attribute when the WebSocket connects. Accepting a getter
+    lets the auto-discovery loop register the skill BEFORE the engine
+    exists; legacy callsites passing the engine directly still work.
     """
-    ask_user = _make_ask_user(workflow_engine)
+    ask_user = _make_ask_user(workflow_engine_or_getter)
     return Skill(
         name="question",
         description="Ask the user a structured multiple-choice question mid-plan",
@@ -143,3 +152,28 @@ def build_question_skill(workflow_engine) -> Skill:
         ],
         workflow_examples="",
     )
+
+
+def build_skill(context):
+    """Auto-discovery entry point. The ask_user tool reads
+    ``workflow_engine.question_handler`` at call time, so the engine
+    only needs to exist by the time the agent invokes it — not at
+    skill-registration time. The workflow-engine getter handles that
+    deferral cleanly."""
+    return build_question_skill(context.workflow_engine_getter)
+
+
+INTENT_CASES: dict = {
+    "plan": {
+        "positive": [
+            "build me an interactive setup wizard that asks 5 questions then scaffolds the project",
+        ],
+        "negative": [
+            "ask me whether I want OAuth or JWT",
+            "wait for my answer before continuing",
+        ],
+    },
+    # No "ask" dimension — this skill IS the ``ask_user`` tool. Calibrating
+    # ask-vs-not against the skill that owns ask is recursive; the other
+    # skills' ``ask`` cases are what the agent reads to decide.
+}

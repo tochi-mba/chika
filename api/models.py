@@ -105,6 +105,24 @@ class ErrorEvent(BaseModel):
     step_id: str | None = None
 
 
+class PlanArchivedEvent(BaseModel):
+    """Fired when ``plan_set`` auto-archives the previous plan, OR
+    when ``plan_archive`` is explicitly called. Lets every UI surface
+    show a brief "archived" chip + an updated history count without
+    polling. Carries summary fields only — never the full task list,
+    so the event stays small enough to broadcast cheaply."""
+    type: str = "plan_archived"
+    auto: bool = False
+    goal: str | None = None
+    reason: str | None = None
+    tasks_total: int = 0
+    tasks_done: int = 0
+    archived_at: float | None = None
+    superseded_by: str | None = None
+    history_count: int = 0
+    source: str | None = None
+
+
 class SpotifyAuthChangedEvent(BaseModel):
     """Broadcast whenever a profile's Spotify connection state flips
     (auth completes, user disconnects, refresh fails). Surfaces use it
@@ -156,6 +174,12 @@ class SettingsPatch(BaseModel):
     pet_speech_tokens: int | None = None
     auto_continue: str | None = None
     auto_continue_max: int | None = None
+    # ``skills_disabled`` is the dynamic-skill toggle list — a flip
+    # here triggers session_manager.reload_skills() server-side so
+    # tool availability changes mid-session without a restart.
+    skills_disabled: list[str] | None = None
+    spotify_share_across_profiles: str | None = None
+    spotify_profile_overrides: dict[str, bool] | None = None
 
 
 # ── Event contract — single source of truth ──────────────────────────────────
@@ -212,6 +236,8 @@ class EventType(str, Enum):  # noqa: UP042 — keep multiple-inheritance form fo
     EXTENSION_STATUS = "extension_status"
     RESET_DONE = "reset_done"
     APPROVAL_REQUIRED = "approval_required"
+    # Plan
+    PLAN_ARCHIVED = "plan_archived"
     # Integrations
     SPOTIFY_AUTH_CHANGED = "spotify_auth_changed"
     # Shell
@@ -249,6 +275,7 @@ _TYPED_MODELS: dict[str, type[BaseModel]] = {
     EventType.DONE.value:            DoneEvent,
     EventType.ERROR.value:           ErrorEvent,
     EventType.SPOTIFY_AUTH_CHANGED.value: SpotifyAuthChangedEvent,
+    EventType.PLAN_ARCHIVED.value:        PlanArchivedEvent,
 }
 
 

@@ -30,11 +30,11 @@ _SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 # Approximate tokens via 4 chars/token. Below this threshold the doc is
 # returned verbatim; above it we run a condensation pass.
 #
-# Tuned so the canonical SKILL.md docs fit verbatim — the plan SKILL.md
-# alone is ~8.6KB after the verbose-template addition, and condensing it
-# was adding ~30s of latency to the skill gate (ADR-11). Real giant docs
-# (browser_skill ≈ 28KB after migrated workflow_examples) still trigger
-# the condense pass; common skills load instantly.
+# Tuned so the canonical SKILL.md docs fit verbatim — the largest core
+# SKILL.md is ~8.6KB after the verbose-template addition, and
+# condensing it was adding ~30s of latency to the skill gate (ADR-11).
+# Real giant docs (≈28KB after migrated workflow_examples) still
+# trigger the condense pass; common skills load instantly.
 _DEFAULT_BUDGET_CHARS = 12000
 
 # Hard cap on input to the condense LLM call — we don't want to ship the
@@ -44,8 +44,9 @@ _MAX_CONTEXT_MSGS = 8
 
 
 def _resolve_skill_dir(name: str) -> Path | None:
-    """Find the folder for a skill by name. Accepts ``git``, ``git_skill``,
-    or any case combination — we normalise internally.
+    """Find the folder for a skill by name. Accepts the canonical name
+    (e.g. ``"foo"``), the package name (``"foo_skill"``), or any case
+    combination — we normalise internally.
     """
     candidates = {name, f"{name}_skill", name.lower(), f"{name.lower()}_skill"}
     for cand in candidates:

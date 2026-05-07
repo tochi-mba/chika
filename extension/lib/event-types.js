@@ -2,7 +2,7 @@
 // Source of truth: api/models.py (Pydantic event models).
 // Regenerate: python scripts/gen_event_types.py
 // CI guard:   python scripts/gen_event_types.py --check
-// Generated:  2026-05-06
+// Generated:  2026-05-07
 
 // JSDoc @typedef block consumed by the extension's
 // vanilla-JS source. Use as:  /** @type {import('./event-types').TokenEvent} */
@@ -41,6 +41,7 @@
  *   "extension_status" |
  *   "reset_done" |
  *   "approval_required" |
+ *   "plan_archived" |
  *   "spotify_auth_changed" |
  *   "shell_process_start" |
  *   "shell_output" |
@@ -103,6 +104,20 @@
  * @property {string} type [optional]
  * @property {string} key
  * @property {string} value
+ */
+
+/**
+ * @typedef {Object} PlanArchivedEvent
+ * @property {string} type [optional]
+ * @property {boolean} auto [optional]
+ * @property {string | null} goal [optional]
+ * @property {string | null} reason [optional]
+ * @property {number} tasks_total [optional]
+ * @property {number} tasks_done [optional]
+ * @property {number | null} archived_at [optional]
+ * @property {string | null} superseded_by [optional]
+ * @property {number} history_count [optional]
+ * @property {string | null} source [optional]
  */
 
 /**
@@ -185,7 +200,7 @@
  */
 
 /**
- * @typedef {(CompactionEvent | ConditionEvalEvent | DoneEvent | ErrorEvent | LoopIterationEvent | MapItemEvent | MemoryUpdateEvent | RetryAttemptEvent | SpotifyAuthChangedEvent | StepDoneEvent | StepStartEvent | TokenEvent | ToolCallEvent | ToolResultEvent | VariableSetEvent | WorkflowDoneEvent | WorkflowStartEvent)} EngineEvent
+ * @typedef {(CompactionEvent | ConditionEvalEvent | DoneEvent | ErrorEvent | LoopIterationEvent | MapItemEvent | MemoryUpdateEvent | PlanArchivedEvent | RetryAttemptEvent | SpotifyAuthChangedEvent | StepDoneEvent | StepStartEvent | TokenEvent | ToolCallEvent | ToolResultEvent | VariableSetEvent | WorkflowDoneEvent | WorkflowStartEvent)} EngineEvent
  */
 
 // Module marker so this file can be imported as a side-effect

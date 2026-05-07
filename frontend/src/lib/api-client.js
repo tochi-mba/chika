@@ -2,7 +2,7 @@
 // Source of truth: api/server.py (FastAPI route definitions).
 // Regenerate: python scripts/gen_openapi_client.py
 // CI guard:   python scripts/gen_openapi_client.py --check
-// Generated:  2026-05-06
+// Generated:  2026-05-07
 
 // Tiny fetch-based REST client.
 // Override the base URL via setApiBase('http://...').
@@ -168,6 +168,16 @@ export function kill_shell_api_shells__pid__kill_post({pid, authorization} = {})
 // GET /api/skills
 export function get_skills_api_skills_get({authorization} = {}) {
   return _request('GET', '/api/skills', { params: undefined, body: undefined });
+}
+
+// GET /api/skills/ui
+export function list_skill_ui_api_skills_ui_get({authorization} = {}) {
+  return _request('GET', '/api/skills/ui', { params: undefined, body: undefined });
+}
+
+// GET /api/skills/{skill_name}/asset/{relative_path}
+export function get_skill_asset_api_skills__skill_name__asset__relative_path__get({skill_name, relative_path, authorization} = {}) {
+  return _request('GET', '/api/skills/{skill_name}/asset/{relative_path}', { params: undefined, body: undefined });
 }
 
 // POST /api/spotify/connect

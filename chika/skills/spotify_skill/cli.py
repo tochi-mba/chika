@@ -30,6 +30,21 @@ Commands:
 """
 
 
+def argv_factory(args: list[str]) -> int:
+    """Auto-discovery entry: ``chika spotify <subcommand>``. Aliased
+    here so the skill's CLI dispatch table key (``argv``) maps cleanly
+    to the contract — but ``main(args)`` stays as an alias so any
+    test / shim that imported it keeps working."""
+    return main(args)
+
+
+def slash_handler(args: list[str], **_kwargs) -> int:
+    """``/spotify ...`` slash command inside the REPL. Same dispatch
+    as the argv subcommand — ``args`` is the remainder after
+    ``/spotify``."""
+    return main(args)
+
+
 def main(args: list[str]) -> int:
     if not args or args[0] in ("--help", "-h", "help"):
         print(USAGE)

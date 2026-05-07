@@ -87,6 +87,26 @@ REDIRECT_URI: str = os.getenv(
 )
 
 
+def reload_from_env() -> None:
+    """Re-read CHIKA_SPOTIFY_CLIENT_ID + REDIRECT_URI from the env.
+
+    Hot-reload entry point — call after a path that mutates the
+    .env file (the inline Client ID input in the Settings UI, the
+    /api/env PATCH endpoint, etc.) so the very next OAuth flow
+    sees the new credentials without a process restart.
+
+    The Settings UI calls this implicitly via the env router's
+    ``_hot_reload_clients`` hook; manual callers (tests, CLI flows)
+    invoke it directly.
+    """
+    global CLIENT_ID, REDIRECT_URI
+    CLIENT_ID = os.getenv("CHIKA_SPOTIFY_CLIENT_ID", _DEFAULT_CLIENT_ID)
+    REDIRECT_URI = os.getenv(
+        "CHIKA_SPOTIFY_REDIRECT_URI",
+        "http://127.0.0.1:8000/auth/spotify/callback",
+    )
+
+
 _SCOPES = " ".join([
     "user-read-private", "user-read-email",
     "user-read-playback-state", "user-modify-playback-state",
