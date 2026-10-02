@@ -1,0 +1,19 @@
+{
+  "$schema": "https://tochi-mba.github.io/schema/project.schema.json",
+  "slug": "chika",
+  "name": "Chika",
+  "tagline": "An agentic assistant with full browser control, installed like a real app on Windows, macOS and Linux.",
+  "description": "Chika reads your open tabs, navigates pages, extracts data, takes screenshots and answers questions about anything you can see in Chrome, powered by Claude, GPT-4o or other providers. Each platform gets a real installer and a real uninstaller, per-user with no admin rights, and the CLI auto-updates on launch when upstream CI is green. A one-command extension install gives it hands in the browser.",
+  "highlights": [
+    "Chrome extension: read tabs, navigate, click, screenshot, watch for changes",
+    "Native installers for Windows, macOS, Debian and any Linux distro",
+    "Auto-update gated on green CI; chika doctor verifies the install",
+    "Provider and key setup in-app, changeable at any time"
+  ],
+  "stack": ["Python 3.11", "Chrome Extension", "Claude", "OpenAI"],
+  "category": "product",
+  "status": "active",
+  "featured": true,
+  "order": 60,
+  "display": true
+}
